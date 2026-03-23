@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  schedule:
+    # Nightly at 03:00 UTC — runs full benchmark suite
+    - cron: '0 3 * * *'
+
+jobs:
+  # Fast tier: unit + integration tests on every push/PR
+  test:
+    name: Julia ${{ matrix.julia-version }} - Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        julia-version: ['1.10', '1.11', 'nightly']
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+
+  # Full benchmark suite: nightly only
+  benchmarks:
+    name: Julia ${{ matrix.julia-version }} - Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    strategy:
+      matrix:
+        julia-version: ['1.10', '1.11']
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+        env:
+          GENPROG_RUN_BENCHMARKS: 'true'

@@ -2,8 +2,12 @@ using Test
 using GenProg
 using Random
 
+# Benchmarks are opt-in due to long runtime (~74m for full suite).
+# Run with: GENPROG_RUN_BENCHMARKS=true julia -e 'using Pkg; Pkg.test("GenProg")'
+const RUN_BENCHMARKS = get(ENV, "GENPROG_RUN_BENCHMARKS", "false") == "true"
+
 @testset "GenProg.jl" begin
-    # Unit tests
+    # Unit tests — always run, target < 30s total
     include("unit/test_evaluators.jl")
     include("unit/test_genome.jl")
     include("unit/test_operators.jl")
@@ -11,12 +15,19 @@ using Random
     include("unit/test_bloat_penalty.jl")
     include("unit/test_island_model.jl")
 
-    # Integration tests (LLM operator — requires HTTP.jl for extension loading)
+    # Integration tests — always run, target < 60s total
     include("integration/test_llm_operator.jl")
+    include("integration/test_tree_genome.jl")
 
-    # Benchmarks
-    include("benchmarks/max_ones.jl")
-    include("benchmarks/symbolic_regression.jl")
-    include("benchmarks/boolean_parity.jl")
-    include("benchmarks/koza_regression.jl")
+    if RUN_BENCHMARKS
+        @info "Running full benchmark suite (GENPROG_RUN_BENCHMARKS=true)"
+        include("benchmarks/max_ones.jl")
+        include("benchmarks/symbolic_regression.jl")
+        include("benchmarks/koza_regression.jl")
+        include("benchmarks/boolean_parity.jl")
+        include("benchmarks/ant_trail.jl")
+        include("benchmarks/speedup_benchmark.jl")
+    else
+        @info "Skipping benchmarks (set GENPROG_RUN_BENCHMARKS=true to run)"
+    end
 end

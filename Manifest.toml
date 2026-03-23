@@ -2,7 +2,7 @@
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "55784620a26d45b6c168f45532171f1e613c1573"
+project_hash = "0a794ff60986e834a53ab0724c4bf73589108634"
 
 [[deps.Random]]
 deps = ["SHA"]

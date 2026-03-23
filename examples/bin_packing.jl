@@ -254,6 +254,98 @@ function _bp_parallel_evaluate!(fitnesses::Vector{Float64},
 end
 
 # =============================================================================
+# Behavioral fingerprinting for BehavioralSpeciation
+#
+# A behavioral fingerprint records which bin a program chooses for each item
+# in a fixed probe sequence. Two programs with identical placement decisions
+# get distance 0.0 regardless of AST structure.
+# =============================================================================
+
+struct BinPackingFingerprint
+    choices::Vector{Int32}   # bin index chosen for each probe item (-1 = fallback)
+end
+
+struct BehavioralProbe
+    probe_items::Vector{Float32}
+    n_probe_bins::Int
+    probe_seed::Int
+    n_items::Int
+end
+
+function BehavioralProbe(; n_items::Int=50, n_probe_bins::Int=20, probe_seed::Int=999)
+    rng = Random.MersenneTwister(probe_seed)
+    items = Float32.(rand(rng, n_items))
+    BehavioralProbe(items, n_probe_bins, probe_seed, n_items)
+end
+
+"""Compute behavioral fingerprint: run compiled function on each probe item
+and record which bin was chosen."""
+function _bp_fingerprint_from_fn(f, probe::BehavioralProbe)::BinPackingFingerprint
+    _ensure_bp_states()
+    reset_bp_state!(1.0f0)
+    s = _get_bp_state()
+    # Pre-open bins so the program has bins to choose from immediately
+    for _ in 1:probe.n_probe_bins
+        push!(s.bins, 1.0f0)
+        s.n_bins += Int32(1)
+    end
+
+    choices = Vector{Int32}(undef, probe.n_items)
+    for (idx, item) in enumerate(probe.probe_items)
+        s.current_item = item
+        s.placed = false
+        n_bins_before = s.n_bins
+        bins_before = copy(s.bins)
+
+        try
+            Base.invokelatest(f)
+        catch
+        end
+
+        if s.placed
+            # Determine which bin was modified by comparing bins arrays
+            choice = Int32(-1)
+            for j in 1:min(Int(n_bins_before), length(bins_before))
+                if j <= length(s.bins) && s.bins[j] != bins_before[j]
+                    choice = Int32(j)
+                    break
+                end
+            end
+            # Check newly opened bins
+            if choice == Int32(-1) && s.n_bins > n_bins_before
+                choice = s.n_bins
+            end
+            choices[idx] = choice
+        else
+            choices[idx] = Int32(-1)
+            # Apply fallback so state is consistent for next item
+            push!(s.bins, 1.0f0 - item)
+            s.n_bins += Int32(1)
+        end
+    end
+    return BinPackingFingerprint(choices)
+end
+
+"""Compute behavioral fingerprint for an ExprGenome."""
+function compute_bp_fingerprint(g::Arborist.ExprGenome, probe::BehavioralProbe)::BinPackingFingerprint
+    f = _bp_compile(g)
+    if f === nothing
+        return BinPackingFingerprint(fill(Int32(-1), probe.n_items))
+    end
+    return _bp_fingerprint_from_fn(f, probe)
+end
+
+"""Hamming distance between two fingerprints: fraction of items where
+the programs made different bin choices."""
+function behavioral_distance(a::BinPackingFingerprint, b::BinPackingFingerprint)::Float64
+    n = length(a.choices)
+    @assert n == length(b.choices)
+    n == 0 && return 0.0
+    mismatches = sum(a.choices[i] != b.choices[i] for i in 1:n)
+    return mismatches / n
+end
+
+# =============================================================================
 # Custom GenState and initial program generation
 #
 # The standard GenState only includes types from inputs/outputs in used_types.
@@ -697,8 +789,7 @@ function run_bin_packing(;
         elitism::Int = 3,
         tournament_size::Int = 5,
         bloat_penalty::Float64 = 0.001,
-        speciation::Arborist.AbstractSpeciation = Arborist.ThresholdSpeciation(
-            threshold=10.0, min_species_size=2, stagnation_limit=15),
+        speciation::Arborist.AbstractSpeciation = Arborist.NoSpeciation(),
         n_episodes::Int = 20,
         n_items::Int = 200,
         capacity::Float32 = 1.0f0,
@@ -734,8 +825,13 @@ function run_bin_packing(;
     problem = Arborist.GPProblem(evaluator, Arborist.ExprGenome;
                                   function_set=fset, num_temps=num_temps, seed=rng_seed)
 
-    spec_desc = speciation isa Arborist.NoSpeciation ? "none" :
-        "threshold=$(speciation.threshold), stagnation=$(speciation.stagnation_limit)"
+    spec_desc = if speciation isa Arborist.NoSpeciation
+        "none"
+    elseif speciation isa Arborist.BehavioralSpeciation
+        "behavioral(threshold=$(speciation.threshold), sharing=$(speciation.sharing_formula))"
+    else
+        "threshold=$(speciation.threshold), sharing=$(speciation.sharing_formula)"
+    end
 
     algorithm = Arborist.GeneticProgramming(
         pop_size = pop_size,
@@ -845,6 +941,25 @@ function run_bin_packing(;
     return result
 end
 
+"""Create a BehavioralSpeciation configured for bin packing."""
+function bp_behavioral_speciation(;
+        threshold::Float64=0.15,
+        sharing_formula::Symbol=:sqrt,
+        min_species_size::Int=2,
+        stagnation_limit::Int=15,
+        n_probe_items::Int=50,
+        n_probe_bins::Int=20)
+    probe = BehavioralProbe(n_items=n_probe_items, n_probe_bins=n_probe_bins)
+    return Arborist.BehavioralSpeciation(
+        fingerprint_fn = g -> compute_bp_fingerprint(g, probe),
+        distance_fn = behavioral_distance,
+        threshold = threshold,
+        min_species_size = min_species_size,
+        stagnation_limit = stagnation_limit,
+        sharing_formula = sharing_formula
+    )
+end
+
 function main()
     kwargs = Dict{Symbol, Any}()
     for arg in ARGS
@@ -863,6 +978,14 @@ function main()
                 kwargs[key] = Symbol(val_str)
             elseif key == :verbose
                 kwargs[key] = parse(Bool, val_str)
+            elseif key == :speciation
+                if val_str == "none"
+                    kwargs[key] = Arborist.NoSpeciation()
+                elseif val_str == "threshold"
+                    kwargs[key] = Arborist.ThresholdSpeciation()
+                elseif val_str == "behavioral"
+                    kwargs[key] = bp_behavioral_speciation()
+                end
             end
         end
     end

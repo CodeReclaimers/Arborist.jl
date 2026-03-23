@@ -7,7 +7,8 @@ Generic, extensible genetic programming framework for Julia. Problem/Algorithm/S
 **Phase 1–5: COMPLETE** (2026-03-22 to 2026-03-23)
 **Phase 6 — Public release preparation: COMPLETE** (2026-03-23)
 
-All 1154 tests pass. Fast tier: ~17s. Full benchmarks: ~83s.
+All 1172 tests pass. Fast tier: ~19s. Full benchmarks: ~83s.
+**Behavioral diversity**: `BehavioralSpeciation` added to core (2026-03-23). Genome-agnostic speciation using user-provided fingerprint/distance functions. Bin packing example demonstrates behavioral fingerprinting.
 
 ## Post-Registration Manual Steps
 
@@ -49,7 +50,7 @@ ext/
 - **Explicit RNG everywhere.** No global `rand()`.
 - **Deterministic ordering.** All Dict/Set sampling uses `_sorted_*` helpers.
 - **`parallel=true`** enables `Threads.@threads` evaluation. Set `false` for reproducibility.
-- **Fitness sharing for minimization**: `shared = raw × species_size` (not `raw / size`).
+- **Fitness sharing for minimization**: configurable via `sharing_formula` — `:log2` (default), `:sqrt`, `:linear`, `:none`. Use `apply_sharing(raw, size, formula)`.
 - **Output flushing**: `flush(stdout)` after progress output in long-running loops.
 - **Innovation counter**: `reset_innovation_counter!()` before each GraphGenome solve.
 - **AST Sanitizer**: opt-in whitelist for @eval security. See `docs/src/security.md`.

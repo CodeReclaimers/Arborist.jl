@@ -101,6 +101,8 @@ export
     # Concrete types — speciation
     NoSpeciation,
     ThresholdSpeciation,
+    BehavioralSpeciation,
+    apply_sharing,
 
     # Security
     ASTSanitizer,

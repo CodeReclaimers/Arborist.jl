@@ -13,6 +13,7 @@ via keyword arguments with sensible defaults.
 - `tournament_size::Int`: number of individuals in tournament selection (default: 3)
 - `max_depth::Int`: maximum depth of generated expression trees (default: 8)
 - `bloat_penalty::Float64`: coefficient on `complexity(g)` added to fitness (default: 0.0)
+- `parallel::Bool`: enable threaded population evaluation (default: true)
 - `speciation::AbstractSpeciation`: speciation strategy (default: `NoSpeciation()`)
 - `mutation_ops::Vector{AbstractMutationOperator}`: mutation operators
 - `crossover_ops::Vector{AbstractCrossoverOperator}`: crossover operators
@@ -27,6 +28,7 @@ struct GeneticProgramming <: AbstractEvolutionaryAlgorithm
     tournament_size::Int
     max_depth::Int
     bloat_penalty::Float64
+    parallel::Bool
     speciation::AbstractSpeciation
     mutation_ops::Vector{AbstractMutationOperator}
     crossover_ops::Vector{AbstractCrossoverOperator}
@@ -47,6 +49,7 @@ function GeneticProgramming(;
     tournament_size::Int = 3,
     max_depth::Int = 8,
     bloat_penalty::Float64 = 0.0,
+    parallel::Bool = true,
     speciation::AbstractSpeciation = NoSpeciation(),
     mutation_ops::Vector{<:AbstractMutationOperator} = AbstractMutationOperator[SubtreeMutation(), PointMutation()],
     crossover_ops::Vector{<:AbstractCrossoverOperator} = AbstractCrossoverOperator[SubtreeCrossover()],
@@ -55,7 +58,7 @@ function GeneticProgramming(;
     GeneticProgramming(
         pop_size, generations, mutation_rate, crossover_rate,
         elitism, tournament_size, max_depth, bloat_penalty,
-        speciation,
+        parallel, speciation,
         convert(Vector{AbstractMutationOperator}, mutation_ops),
         convert(Vector{AbstractCrossoverOperator}, crossover_ops),
         selection
@@ -66,8 +69,9 @@ end
     IslandModel <: AbstractEvolutionaryAlgorithm
 
 Island model that runs multiple independent populations (islands) with periodic
-migration. Islands run sequentially (no threading). Migration uses a ring
-topology: island i sends its best individuals to island i+1.
+migration. Migration uses a ring topology: island i sends its best individuals
+to island i+1. Islands can run in parallel when `island_algorithm.parallel=true`
+and multiple threads are available.
 
 # Fields
 - `n_islands::Int`: number of islands (default: 4)

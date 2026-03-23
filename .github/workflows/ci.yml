@@ -26,6 +26,8 @@ jobs:
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        env:
+          JULIA_NUM_THREADS: auto
 
   # Full benchmark suite: nightly only
   benchmarks:
@@ -46,3 +48,4 @@ jobs:
       - uses: julia-actions/julia-runtest@v1
         env:
           GENPROG_RUN_BENCHMARKS: 'true'
+          JULIA_NUM_THREADS: auto

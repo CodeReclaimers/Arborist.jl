@@ -38,6 +38,9 @@ include("genome/evolution.jl")
 # --- Default function set ---
 include("defaults.jl")
 
+# --- AST sanitizer ---
+include("sanitizer.jl")
+
 # --- Speciation strategies ---
 include("speciation.jl")
 
@@ -58,7 +61,9 @@ include("algorithm.jl")
 # --- Solve entry point ---
 include("solve.jl")
 
-# --- Placeholder for future genome types ---
+# --- Additional genome types ---
+include("genome/ant_genome.jl")
+include("genome/graph_genome.jl")
 include("genome/linear_genome.jl")
 
 # --- Public API exports ---
@@ -75,6 +80,8 @@ export
 
     # Concrete types — genome and problem
     ExprGenome,
+    AntGenome,
+    GraphGenome,
     GPProblem,
     GPResult,
     TableFitnessEvaluator,
@@ -95,15 +102,36 @@ export
     NoSpeciation,
     ThresholdSpeciation,
 
+    # Security
+    ASTSanitizer,
+    DEFAULT_SAFE_CALLS,
+    sanitize,
+
     # Code generation types (needed for custom function sets)
     FunctionDetails,
     FunctionSet,
     GenState,
     LoopLimitExceeded,
 
+    # Ant trail types
+    AntSimulator,
+    AntEvaluator,
+    gp_ant_move,
+    gp_ant_left,
+    gp_ant_right,
+    gp_ant_food_ahead,
+
+    # Graph genome types
+    NodeGene,
+    ConnectionGene,
+    GraphEvaluator,
+    ACTIVATION_FNS,
+    reset_innovation_counter!,
+
     # Interface functions
     solve,
     evaluate,
+    evaluate_genome,
     input_signature,
     output_signature,
     initialize,

@@ -188,9 +188,9 @@ end
 
 function GenProg.deserialize(::Type{TreeGenome{T}}, s::String,
                              operators::OperatorEnum, n_features::Int) where T
-    # Parsing expression trees from strings is complex.
-    # Return nothing — the LLM operator would need a custom parser per format.
-    return nothing
+    tree = _parse_prefix_expr(strip(s), operators, n_features, T)
+    tree === nothing && return nothing
+    return TreeGenome{T}(tree, operators, n_features)
 end
 
 # --- Operator dispatches for TreeGenome ---
@@ -469,5 +469,216 @@ function GenProg.solve(problem::GPProblem{TreeGenome{T}, E},
         fitnesses[1] < 1.0
     )
 end
+
+# =============================================================================
+# Prefix notation parser for LLM deserialization
+# =============================================================================
+
+"""
+    _parse_prefix_expr(s, operators, n_features, T) -> Union{Node{T}, Nothing}
+
+Parse a prefix-notation string like `+(x1, *(2.0, x2))` into a Node{T}.
+Returns nothing on any parse error.
+"""
+function _parse_prefix_expr(s::String, operators::OperatorEnum,
+                             n_features::Int, ::Type{T}) where T
+    try
+        tokens = _tokenize_prefix(s)
+        isempty(tokens) && return nothing
+        pos = Ref(1)
+        tree = _parse_prefix_token(tokens, pos, operators, n_features, T)
+        return tree
+    catch
+        return nothing
+    end
+end
+
+function _tokenize_prefix(s::String)
+    tokens = String[]
+    i = 1
+    while i <= length(s)
+        c = s[i]
+        if c in ('(', ')', ',')
+            push!(tokens, string(c))
+            i += 1
+        elseif isspace(c)
+            i += 1
+        else
+            j = i
+            while j <= length(s) && !(s[j] in ('(', ')', ',', ' ', '\t', '\n'))
+                j += 1
+            end
+            push!(tokens, s[i:j-1])
+            i = j
+        end
+    end
+    return tokens
+end
+
+function _parse_prefix_token(tokens, pos::Ref{Int}, operators::OperatorEnum,
+                              n_features::Int, ::Type{T}) where T
+    pos[] > length(tokens) && return nothing
+    tok = tokens[pos[]]
+
+    # Feature variable: x1, x2, ...
+    m = match(r"^x(\d+)$", tok)
+    if m !== nothing
+        feat = parse(Int, m.captures[1])
+        (feat < 1 || feat > n_features) && return nothing
+        pos[] += 1
+        return Node{T}(; feature=UInt16(feat))
+    end
+
+    # Numeric literal
+    num = tryparse(T, tok)
+    if num !== nothing
+        pos[] += 1
+        return Node{T}(; val=num)
+    end
+
+    # Also try Float64 then convert
+    num64 = tryparse(Float64, tok)
+    if num64 !== nothing
+        pos[] += 1
+        return Node{T}(; val=T(num64))
+    end
+
+    # Operator: check unary and binary
+    unary_ops = _get_unary_ops(operators)
+    binary_ops = _get_binary_ops(operators)
+
+    # Find operator by name
+    op_name = Symbol(tok)
+
+    # Check binary operators
+    for (bi, bop) in enumerate(binary_ops)
+        if Symbol(bop) == op_name || Symbol(nameof(bop)) == op_name
+            pos[] += 1
+            # Expect '('
+            pos[] > length(tokens) && return nothing
+            tokens[pos[]] == "(" || return nothing
+            pos[] += 1
+            # Parse first argument
+            arg1 = _parse_prefix_token(tokens, pos, operators, n_features, T)
+            arg1 === nothing && return nothing
+            # Expect ','
+            pos[] > length(tokens) && return nothing
+            tokens[pos[]] == "," || return nothing
+            pos[] += 1
+            # Parse second argument
+            arg2 = _parse_prefix_token(tokens, pos, operators, n_features, T)
+            arg2 === nothing && return nothing
+            # Expect ')'
+            pos[] > length(tokens) && return nothing
+            tokens[pos[]] == ")" || return nothing
+            pos[] += 1
+            return Node{T}(; op=UInt8(bi), l=arg1, r=arg2)
+        end
+    end
+
+    # Check unary operators
+    for (ui, uop) in enumerate(unary_ops)
+        if Symbol(uop) == op_name || Symbol(nameof(uop)) == op_name
+            pos[] += 1
+            # Expect '('
+            pos[] > length(tokens) && return nothing
+            tokens[pos[]] == "(" || return nothing
+            pos[] += 1
+            arg = _parse_prefix_token(tokens, pos, operators, n_features, T)
+            arg === nothing && return nothing
+            # Expect ')'
+            pos[] > length(tokens) && return nothing
+            tokens[pos[]] == ")" || return nothing
+            pos[] += 1
+            return Node{T}(; op=UInt8(ui), l=arg)
+        end
+    end
+
+    return nothing
+end
+
+# =============================================================================
+# SymbolicRegressionEvaluator convenience constructor
+# =============================================================================
+
+"""
+    _default_operators(::Type{T}) -> OperatorEnum
+
+Default operator set for symbolic regression.
+"""
+function _default_operators(::Type{T}) where T
+    OperatorEnum(; binary_operators=[+, -, *, /],
+                   unary_operators=[sin, cos, exp, abs])
+end
+
+"""
+    SymbolicRegressionEvaluator(f; domain, points=20, operators=_default_operators(Float32), noise=0.0)
+
+Convenience constructor for symbolic regression problems. Generates a
+`TreeFitnessEvaluator` from a Julia function and domain specification.
+
+# Arguments
+- `f`: Target function (univariate: accepts `Float32`, multivariate: accepts `Vector{Float32}`)
+- `domain`: `Tuple{T,T}` for univariate, `Vector{Tuple{T,T}}` for multivariate
+- `points`: Sample points per dimension (default: 20)
+- `operators`: `OperatorEnum` (default: +, -, *, / with sin, cos, exp, abs)
+- `noise`: Gaussian noise standard deviation to add to targets (default: 0.0)
+"""
+function SymbolicRegressionEvaluator(f;
+    domain::Union{Tuple, Vector},
+    points::Int = 20,
+    operators::OperatorEnum = _default_operators(Float32),
+    noise::Float64 = 0.0
+)
+    if domain isa Tuple
+        # Univariate
+        lo, hi = Float32.(domain)
+        xs = Float32.(range(lo, hi, length=points))
+        X = reshape(xs, 1, :)
+        y = Float32[f(x) for x in xs]
+    else
+        # Multivariate: domain is Vector of Tuples
+        n_features = length(domain)
+        grids = [Float32.(range(Float32(d[1]), Float32(d[2]), length=points)) for d in domain]
+        # Use random sampling for multivariate (grid is exponential)
+        rng = Random.MersenneTwister(42)
+        n_samples = points * n_features
+        X = zeros(Float32, n_features, n_samples)
+        for j in 1:n_samples
+            for i in 1:n_features
+                X[i, j] = Float32(domain[i][1]) + rand(rng, Float32) * Float32(domain[i][2] - domain[i][1])
+            end
+        end
+        y = Float32[f(X[:, j]) for j in 1:n_samples]
+    end
+
+    if noise > 0.0
+        rng = Random.MersenneTwister(123)
+        y .+= Float32.(noise .* randn(rng, length(y)))
+    end
+
+    return TreeFitnessEvaluator(X, y, operators)
+end
+
+"""
+Default system prompt for TreeGenome LLM mutation (prefix notation).
+"""
+const DEFAULT_TREE_GP_SYSTEM_PROMPT = """
+You are a genetic programming mutation operator for mathematical
+expression trees. You will be given a mathematical expression in
+prefix notation. Your task is to produce a meaningfully modified
+variant that might better approximate the target function.
+
+Rules:
+- Return ONLY a single expression in prefix notation
+- Use only these variable names: x1, x2, ..., xN
+- Use floating-point constants where appropriate
+- Do not include explanations, comments, or multiple expressions
+
+Example input:  +(x1, *(2.0, x1))
+Example output: +(*(x1, x1), *(3.0, x1))
+
+Respond with only the prefix expression and nothing else.
+"""
 
 end # module DynExprExt

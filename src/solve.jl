@@ -75,6 +75,26 @@ function _evaluate_with_penalty(genome, evaluator::AbstractEvaluator, bloat_pena
 end
 
 """
+    _parallel_evaluate!(fitnesses, genomes, evaluator, bp, indices, parallel)
+
+Evaluate genomes at the given indices, optionally using threads.
+Thread-safe: each evaluation is independent with no shared mutable state.
+"""
+function _parallel_evaluate!(fitnesses::Vector{Float64}, genomes::Vector,
+                             evaluator::AbstractEvaluator, bp::Float64,
+                             indices, parallel::Bool)
+    if parallel && Threads.nthreads() > 1
+        Threads.@threads for i in collect(indices)
+            fitnesses[i] = _evaluate_with_penalty(genomes[i], evaluator, bp)
+        end
+    else
+        for i in indices
+            fitnesses[i] = _evaluate_with_penalty(genomes[i], evaluator, bp)
+        end
+    end
+end
+
+"""
     _run_evolution!(pop, problem, algorithm, rng; verbose, callback) -> GPResult
 
 The internal evolution loop. Not part of the public API.
@@ -93,9 +113,7 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
     bp = algorithm.bloat_penalty
 
     # Evaluate initial population (with bloat penalty).
-    for i in 1:pop_size
-        fitnesses[i] = _evaluate_with_penalty(genomes[i], problem.evaluator, bp)
-    end
+    _parallel_evaluate!(fitnesses, genomes, problem.evaluator, bp, 1:pop_size, algorithm.parallel)
 
     # Initialize speciation state.
     species_state = _init_species_state(algorithm.speciation)
@@ -170,9 +188,8 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
         end
 
         # Evaluate new individuals (skip elites which already have fitness).
-        for i in (algorithm.elitism + 1):pop_size
-            next_fitnesses[i] = _evaluate_with_penalty(next_genomes[i], problem.evaluator, bp)
-        end
+        _parallel_evaluate!(next_fitnesses, next_genomes, problem.evaluator, bp,
+                           (algorithm.elitism + 1):pop_size, algorithm.parallel)
 
         genomes = next_genomes
         fitnesses = next_fitnesses

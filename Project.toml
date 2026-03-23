@@ -1,6 +1,8 @@
 name = "GenProg"
 uuid = "287ac869-5e3d-45ad-a51e-8d1d57e0eb98"
+authors = ["CodeReclaimers LLC <github@codereclaimers.com>"]
 version = "0.1.0"
+description = "Generic genetic programming for Julia: Problem/Algorithm/Solve API with ExprGenome, TreeGenome, GraphGenome, and LLM mutation operators."
 
 [deps]
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"

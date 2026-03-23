@@ -4,13 +4,22 @@ Generic, extensible genetic programming framework for Julia. Problem/Algorithm/S
 
 ## Project Status
 
-**Phase 1 — Core framework: COMPLETE** (2026-03-22)
-**Phase 2 — Speciation and operators: COMPLETE** (2026-03-22)
-**Phase 3 — LLM operator extension: COMPLETE** (2026-03-23)
-**Phase 4 — DynamicExpressions extension: COMPLETE** (2026-03-23)
-**Phase 5 — Parallelism, sanitizer, new genomes: COMPLETE** (2026-03-23)
+**Phase 1–5: COMPLETE** (2026-03-22 to 2026-03-23)
+**Phase 6 — Public release preparation: COMPLETE** (2026-03-23)
 
-All 1135+ tests pass. Fast tier: ~17s. Full benchmarks: ~90s.
+All 1154 tests pass. Fast tier: ~17s. Full benchmarks: ~83s.
+
+## Post-Registration Manual Steps
+
+These steps happen after this Claude Code session:
+
+1. **Registry PR**: Comment `@JuliaRegistrator register` on the latest commit at https://github.com/CodeReclaimers/GenProg.jl (requires JuliaRegistrator GitHub App). Alternatively, follow https://github.com/JuliaRegistries/General#registering-a-new-package
+2. **Wait for merge**: New package registry PRs typically take 3 days
+3. **Tag release**: `git tag v0.1.0 && git push --tags`
+4. **Mint Zenodo DOI**: Connect the GitHub repo to Zenodo and create a release
+5. **Update README.md**: Replace the placeholder citation block with the actual DOI
+6. **Post Discourse announcement**: Review `docs/discourse_announcement.md` and post to https://discourse.julialang.org/c/package-announcements
+7. **Set up Documenter deployment**: Add `DOCUMENTER_KEY` secret to GitHub repo settings, then push to trigger docs build
 
 ## Architecture
 
@@ -18,58 +27,38 @@ All 1135+ tests pass. Fast tier: ~17s. Full benchmarks: ~90s.
 src/
   GenProg.jl              # module, exports, includes
   abstractions.jl         # 8 abstract types
-  sanitizer.jl            # ASTSanitizer — function call whitelist for @eval safety
+  sanitizer.jl            # ASTSanitizer — function call whitelist
   genome/
     codegen.jl            # Expr-tree code generation
     evolution.jl          # crossover, Individual, Population, evolve!
     expr_genome.jl        # ExprGenome, GPProblem, serialize/deserialize
-    ant_genome.jl         # AntGenome — side-effectful program synthesis
+    ant_genome.jl         # AntGenome — side-effectful programs
     graph_genome.jl       # GraphGenome — NEAT-style neural topology
-  operators/
-    mutation.jl           # SubtreeMutation, PointMutation, HoistMutation, ExpansionMutation
-    crossover.jl          # SubtreeCrossover
-    selection.jl          # TournamentSelection
+  operators/              # SubtreeMutation, PointMutation, HoistMutation, ExpansionMutation
   evaluators.jl           # TableFitnessEvaluator
-  algorithm.jl            # GeneticProgramming (with parallel field), IslandModel
+  algorithm.jl            # GeneticProgramming (parallel field), IslandModel
   solve.jl                # solve(), _parallel_evaluate!
-  result.jl               # GPResult
-  defaults.jl             # default_function_set(), boolean_function_set()
-  speciation.jl           # NoSpeciation, ThresholdSpeciation
+  result.jl, defaults.jl, speciation.jl
 ext/
   LLMOperatorExt.jl       # LLMMutationOperator (weakdep: HTTP.jl)
-  DynExprExt.jl           # TreeGenome, TreeFitnessEvaluator, SymbolicRegressionEvaluator,
-                           # prefix notation parser (weakdep: DynamicExpressions.jl)
+  DynExprExt.jl           # TreeGenome, TreeFitnessEvaluator, SymbolicRegressionEvaluator
 ```
-
-## Four Genome Types
-
-| Type | Backend | Use Case | Speed |
-|---|---|---|---|
-| `TreeGenome{T}` | DynamicExpressions.jl | Symbolic regression, function approximation | Fast |
-| `ExprGenome` | @eval | General program synthesis with control flow | Slow |
-| `AntGenome` | @eval | Agent control (ant trail, robotics) | Slow |
-| `GraphGenome` | Custom | Neural topology (NEAT, XOR) | Medium |
 
 ## Key Conventions
 
 - **Explicit RNG everywhere.** No global `rand()`.
 - **Deterministic ordering.** All Dict/Set sampling uses `_sorted_*` helpers.
-- **`parallel` field** on `GeneticProgramming` enables `Threads.@threads` evaluation. Default `true`. Set `false` for exact reproducibility.
-- **AST Sanitizer.** `ASTSanitizer` whitelists function calls for @eval safety. See `docs/src/security.md`.
-- **Output flushing.** Any benchmark or long-running loop must call `flush(stdout)` after each progress report.
-- **Innovation counter.** `GraphGenome` uses a global thread-safe counter. Call `reset_innovation_counter!()` before each solve.
+- **`parallel=true`** enables `Threads.@threads` evaluation. Set `false` for reproducibility.
+- **Fitness sharing for minimization**: `shared = raw × species_size` (not `raw / size`).
+- **Output flushing**: `flush(stdout)` after progress output in long-running loops.
+- **Innovation counter**: `reset_innovation_counter!()` before each GraphGenome solve.
+- **AST Sanitizer**: opt-in whitelist for @eval security. See `docs/src/security.md`.
 
 ## Running Tests
 
 ```bash
-# Fast tier (~17s)
-julia --project=. -e 'using Pkg; Pkg.test()'
-
-# Full benchmarks (~90s)
-GENPROG_RUN_BENCHMARKS=true julia --project=. -e 'using Pkg; Pkg.test()'
-
-# With parallelism
-julia -t auto --project=. -e 'using Pkg; Pkg.test()'
+julia --project=. -e 'using Pkg; Pkg.test()'                          # fast (~17s)
+GENPROG_RUN_BENCHMARKS=true julia --project=. -e 'using Pkg; Pkg.test()'  # full (~83s)
 ```
 
 ## Dependencies

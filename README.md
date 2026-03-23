@@ -1,10 +1,12 @@
-# Arborist.jl
+<p align="center">
+  <img src="docs/src/assets/logo.jpg" alt="Arborist.jl" width="600">
+</p>
 
-**Generic genetic programming for Julia — Problem/Algorithm/Solve API with multiple genome types and LLM mutation operators.**
-
-[![CI](https://github.com/CodeReclaimers/Arborist.jl/workflows/CI/badge.svg)](https://github.com/CodeReclaimers/Arborist.jl/actions)
-[![Julia](https://img.shields.io/badge/Julia-1.10+-blue.svg)](https://julialang.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+<p align="center">
+  <a href="https://github.com/CodeReclaimers/Arborist.jl/actions"><img src="https://github.com/CodeReclaimers/Arborist.jl/workflows/CI/badge.svg" alt="CI"></a>
+  <a href="https://julialang.org"><img src="https://img.shields.io/badge/Julia-1.10+-blue.svg" alt="Julia"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
 
 ## Installation
 

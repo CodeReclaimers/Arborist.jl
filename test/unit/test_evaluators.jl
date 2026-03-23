@@ -6,7 +6,9 @@
         xs = Float32[1.0, 2.0, 3.0, 4.0]
         input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
         output_rows = [Dict{Symbol,Any}(:y => v) for v in xs]
-        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows)
+        # Use generous time limit to avoid JIT warmup failures on CI.
+        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
+                                    time_limit_ns=1_000_000_000)
 
         # A perfect function.
         perfect(x::Float32) = x
@@ -28,7 +30,8 @@
         xs = Float32[-1.0, -2.0, 1.0, 2.0]
         input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
         output_rows = [Dict{Symbol,Any}(:y => v^2) for v in xs]
-        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows)
+        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
+                                    time_limit_ns=1_000_000_000)
 
         function half_fail(x::Float32)
             x < 0 && error("negative")

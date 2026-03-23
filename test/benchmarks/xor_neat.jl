@@ -19,24 +19,19 @@
                                        stagnation_limit=15)
     )
 
-    # XOR is a hard structural problem for NEAT — the network must discover
-    # hidden nodes via add_node mutation. We test that fitness improves below
-    # the random baseline (0.25 = always predicting same output).
-    # Full NEAT convergence (fitness < 0.01) requires higher structural mutation
-    # rates and more generations than this benchmark uses.
-    best_fitness = Inf
-    for seed in 1:5
+    # Majority convergence: 4/5 seeds should reach fitness < 0.01.
+    successes = map(1:5) do seed
         reset_innovation_counter!()
         problem = GPProblem(evaluator, GraphGenome; seed=seed)
         result = solve(problem, algorithm; verbose=false)
-        println("    XOR seed=$seed: fitness=$(round(result.best_fitness, digits=6))")
+        converged = result.best_fitness < 0.01
+        println("    XOR seed=$seed: fitness=$(round(result.best_fitness, digits=6)), nodes=$(length(result.best_genome.nodes))")
         flush(stdout)
-        best_fitness = min(best_fitness, result.best_fitness)
+        converged
     end
 
-    println("  XOR NEAT: best across seeds = $(round(best_fitness, digits=6))")
+    n_success = count(successes)
+    println("  XOR NEAT: $n_success/5 seeds converged (fitness < 0.01)")
     flush(stdout)
-    # Framework correctness: solve completes and returns valid results.
-    # Convergence criterion: best fitness < 0.25 (better than random baseline).
-    @test best_fitness <= 0.25
+    @test n_success >= 4
 end

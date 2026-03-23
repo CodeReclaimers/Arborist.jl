@@ -208,13 +208,17 @@ function _apply_speciation!(genomes::Vector{G}, fitnesses::Vector{Float64},
         end
     end
 
-    # Compute shared fitnesses: raw_fitness / species_size.
+    # Compute shared fitnesses for minimization (lower = better).
+    # Standard NEAT uses fi' = fi / |S| for maximization (higher = better).
+    # For minimization, we MULTIPLY by species size so members of large
+    # species appear worse (higher), protecting structural innovations
+    # in small species.
     shared_fitnesses = copy(fitnesses)
     for (si, members) in enumerate(member_lists)
         species_size = length(members)
-        if species_size > 0
+        if species_size > 1
             for j in members
-                shared_fitnesses[j] = fitnesses[j] / species_size
+                shared_fitnesses[j] = fitnesses[j] * species_size
             end
         end
     end

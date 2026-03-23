@@ -55,7 +55,7 @@
         @test result === fitnesses
     end
 
-    @testset "Fitness sharing divides by species size" begin
+    @testset "Fitness sharing penalizes large species (minimization)" begin
         fset = FunctionSet(Set{FunctionDetails}())
         add!(fset, :+, 2, Float32, Float32)
         rng = Random.MersenneTwister(42)
@@ -71,8 +71,11 @@
 
         shared = GenProg._apply_speciation!(genomes, fitnesses, spec, species_state, rng)
 
-        # All in one species of size 10 → shared fitness = 2.0/10 = 0.2.
-        @test all(f -> f ≈ 0.2, shared)
+        # All in one species of size 10. For minimization (lower=better),
+        # shared = raw * species_size = 2.0 * 10 = 20.0.
+        # This makes large-species members appear WORSE, protecting
+        # structural innovations in small species.
+        @test all(f -> f ≈ 20.0, shared)
     end
 
     @testset "Stagnation tracking" begin

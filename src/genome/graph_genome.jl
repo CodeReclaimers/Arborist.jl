@@ -169,8 +169,16 @@ function mutate(g::GraphGenome, rng::AbstractRNG)
 end
 
 function crossover(g1::GraphGenome, g2::GraphGenome, rng::AbstractRNG)
-    child = _neat_crossover(g1, g2, rng)
-    return (child, _neat_crossover(g2, g1, rng))
+    # NEAT crossover: disjoint/excess genes come from the fitter parent.
+    # Use cached fitness to determine which parent is fitter (lower = better).
+    if g1.fitness <= g2.fitness
+        child1 = _neat_crossover(g1, g2, rng)
+        child2 = _neat_crossover(g1, g2, rng)
+    else
+        child1 = _neat_crossover(g2, g1, rng)
+        child2 = _neat_crossover(g2, g1, rng)
+    end
+    return (child1, child2)
 end
 
 function distance(g1::GraphGenome, g2::GraphGenome)
@@ -203,8 +211,10 @@ end
 # =============================================================================
 
 function _mutate_weights!(g::GraphGenome, rng::AbstractRNG)
+    # Perturb each enabled weight independently with 90% probability.
+    # Standard NEAT: each weight has an independent chance of perturbation.
     for c in values(g.connections)
-        if c.enabled
+        if c.enabled && rand(rng) < 0.9
             c.weight += randn(rng) * 0.3
         end
     end
@@ -534,6 +544,7 @@ function solve(problem::GPProblem{GraphGenome, E},
 
     for i in 1:pop_size
         fitnesses[i] = evaluate_genome(genomes[i], evaluator)
+        genomes[i].fitness = fitnesses[i]
     end
 
     species_state = _init_species_state(algorithm.speciation)
@@ -595,6 +606,7 @@ function solve(problem::GPProblem{GraphGenome, E},
 
         for i in (algorithm.elitism + 1):pop_size
             next_fitnesses[i] = evaluate_genome(next_genomes[i], evaluator)
+            next_genomes[i].fitness = next_fitnesses[i]
         end
 
         genomes = next_genomes

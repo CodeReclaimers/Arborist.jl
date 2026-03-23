@@ -1,8 +1,8 @@
-# GenProg.jl
+# Arborist.jl
 
 **Generic genetic programming for Julia — Problem/Algorithm/Solve API with multiple genome types and LLM mutation operators.**
 
-[![CI](https://github.com/CodeReclaimers/GenProg.jl/workflows/CI/badge.svg)](https://github.com/CodeReclaimers/GenProg.jl/actions)
+[![CI](https://github.com/CodeReclaimers/Arborist.jl/workflows/CI/badge.svg)](https://github.com/CodeReclaimers/Arborist.jl/actions)
 [![Julia](https://img.shields.io/badge/Julia-1.10+-blue.svg)](https://julialang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -10,7 +10,7 @@
 
 ```julia
 using Pkg
-Pkg.add("GenProg")
+Pkg.add("Arborist")
 ```
 
 For symbolic regression (recommended), also install DynamicExpressions.jl:
@@ -23,8 +23,8 @@ Pkg.add("DynamicExpressions")
 ### Symbolic Regression
 
 ```julia
-using GenProg, DynamicExpressions
-const DynExt = Base.get_extension(GenProg, :DynExprExt)
+using Arborist, DynamicExpressions
+const DynExt = Base.get_extension(Arborist, :DynExprExt)
 
 evaluator = DynExt.SymbolicRegressionEvaluator(
     x -> x^4 + x^3 + x^2 + x,
@@ -42,7 +42,7 @@ println("Best expression: ", serialize(result.best_genome))
 ### Neural Topology Evolution (XOR with NEAT)
 
 ```julia
-using GenProg
+using Arborist
 reset_innovation_counter!()
 
 X = Float64[0 0 1 1; 0 1 0 1]
@@ -63,9 +63,9 @@ println("Best fitness: ", result.best_fitness)
 ### LLM-Enhanced GP
 
 ```julia
-using GenProg, DynamicExpressions, HTTP
-const DynExt = Base.get_extension(GenProg, :DynExprExt)
-const LLMExt = Base.get_extension(GenProg, :LLMOperatorExt)
+using Arborist, DynamicExpressions, HTTP
+const DynExt = Base.get_extension(Arborist, :DynExprExt)
+const LLMExt = Base.get_extension(Arborist, :LLMOperatorExt)
 
 evaluator = DynExt.SymbolicRegressionEvaluator(
     x -> sin(x) * x, domain=(-3f0, 3f0), points=30
@@ -82,7 +82,7 @@ result = solve(
 
 ## Features
 
-GenProg.jl follows the **Problem/Algorithm/Solve** pattern from the SciML ecosystem. You define a problem (what to optimize), pick an algorithm (how to optimize), and call `solve`. The framework handles population management, selection, speciation, and fitness history tracking.
+Arborist.jl follows the **Problem/Algorithm/Solve** pattern from the SciML ecosystem. You define a problem (what to optimize), pick an algorithm (how to optimize), and call `solve`. The framework handles population management, selection, speciation, and fitness history tracking.
 
 Four genome types cover different problem classes. **TreeGenome** uses DynamicExpressions.jl for fast vectorized evaluation of mathematical expressions — 8x faster than compilation-based approaches. **ExprGenome** compiles arbitrary Julia ASTs via `@eval`, supporting loops, conditionals, and mutable state. **AntGenome** specializes in side-effectful agent control programs. **GraphGenome** implements NEAT-style neural topology evolution with innovation-number-aligned crossover and structural mutation.
 
@@ -105,7 +105,7 @@ TreeGenome evaluates 8.4x faster than ExprGenome on the Koza suite (1000-point d
 
 ## Related Work
 
-GenProg.jl fills a gap left by [Wallace.jl](https://github.com/WallaceLab/Wallace.jl), which was the most ambitious Julia evolutionary computation framework (2014–2015) but died at Julia 0.3 due to reliance on runtime type generation via compiler internals. GenProg.jl avoids this by using only stable public APIs — no `Base.Compiler.*`, no runtime struct generation.
+Arborist.jl fills a gap left by [Wallace.jl](https://github.com/WallaceLab/Wallace.jl), which was the most ambitious Julia evolutionary computation framework (2014–2015) but died at Julia 0.3 due to reliance on runtime type generation via compiler internals. Arborist.jl avoids this by using only stable public APIs — no `Base.Compiler.*`, no runtime struct generation.
 
 TreeGenome is backed by [DynamicExpressions.jl](https://github.com/MilesCranmer/DynamicExpressions.jl). The LLM mutation operator is inspired by [FunSearch](https://deepmind.google/discover/blog/funsearch-making-new-discoveries-in-mathematical-sciences-using-large-language-models/) (Romera-Paredes et al., 2024) and [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/) (DeepMind, 2025). GraphGenome follows the NEAT encoding from Stanley & Miikkulainen (2002). Benchmark problems follow [Koza (1992)](https://mitpress.mit.edu/9780262111706/genetic-programming/). The same author maintains [neat-python](https://github.com/CodeReclaimers/neat-python).
 
@@ -114,10 +114,10 @@ TreeGenome is backed by [DynamicExpressions.jl](https://github.com/MilesCranmer/
 MIT License. See [LICENSE](LICENSE) for details.
 
 ```bibtex
-@software{genprog_jl,
+@software{arborist_jl,
   author = {CodeReclaimers LLC},
-  title  = {GenProg.jl: Generic Genetic Programming for Julia},
+  title  = {Arborist.jl: Generic Genetic Programming for Julia},
   year   = {2026},
-  url    = {https://github.com/CodeReclaimers/GenProg.jl}
+  url    = {https://github.com/CodeReclaimers/Arborist.jl}
 }
 ```

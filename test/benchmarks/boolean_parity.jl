@@ -9,7 +9,7 @@
 # operates on numeric types. Fitness = MSE over all 16 input combinations.
 
 using DynamicExpressions
-const _ParityDynExt = Base.get_extension(GenProg, :DynExprExt)
+const _ParityDynExt = Base.get_extension(Arborist, :DynExprExt)
 const _ParityTreeGenome = _ParityDynExt.TreeGenome
 const _ParityTreeEval = _ParityDynExt.TreeFitnessEvaluator
 

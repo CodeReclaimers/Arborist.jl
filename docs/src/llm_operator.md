@@ -9,7 +9,7 @@ is used to propose new candidate programs based on existing high-fitness
 individuals, replacing or augmenting the blind stochastic mutations of
 classical genetic programming.
 
-GenProg.jl provides what FunSearch and AlphaEvolve bundle as bespoke
+Arborist.jl provides what FunSearch and AlphaEvolve bundle as bespoke
 infrastructure: a typed, reproducible evolutionary loop with pluggable
 genome types, explicit RNG seeding, fitness history tracking, speciation,
 island models, and bloat control. The LLM operator is one operator among
@@ -50,7 +50,7 @@ operators that use richer signal.
   to be meaningful.
 
 Both can be composed with classical operators in the same evolutionary loop.
-In GenProg.jl, this composition is explicit: the `mutation_ops` vector in
+In Arborist.jl, this composition is explicit: the `mutation_ops` vector in
 `GeneticProgramming` can contain any mix of operator types, and the
 evolutionary loop samples from them uniformly.
 
@@ -59,11 +59,11 @@ evolutionary loop samples from them uniformly.
 ### With Anthropic API
 
 ```julia
-using GenProg
+using Arborist
 using HTTP  # triggers LLMOperatorExt loading
 
 # Get the extension module
-LLMExt = Base.get_extension(GenProg, :LLMOperatorExt)
+LLMExt = Base.get_extension(Arborist, :LLMOperatorExt)
 
 # Create the LLM operator (uses ANTHROPIC_API_KEY env var)
 llm_op = LLMExt.LLMMutationOperator(
@@ -90,10 +90,10 @@ result = solve(problem, algorithm; verbose=true)
 ### With Local Ollama
 
 ```julia
-using GenProg
+using Arborist
 using HTTP
 
-LLMExt = Base.get_extension(GenProg, :LLMOperatorExt)
+LLMExt = Base.get_extension(Arborist, :LLMOperatorExt)
 
 # Ollama: no API key needed, local endpoint
 llm_op = LLMExt.LLMMutationOperator(
@@ -111,7 +111,7 @@ algorithm = GeneticProgramming(
 ### With OpenAI API
 
 ```julia
-LLMExt = Base.get_extension(GenProg, :LLMOperatorExt)
+LLMExt = Base.get_extension(Arborist, :LLMOperatorExt)
 
 llm_op = LLMExt.LLMMutationOperator(
     endpoint = "https://api.openai.com/v1/chat/completions",

@@ -5,7 +5,7 @@
 # over ExprGenome for pure function approximation problems.
 
 using DynamicExpressions
-const _KozaDynExt = Base.get_extension(GenProg, :DynExprExt)
+const _KozaDynExt = Base.get_extension(Arborist, :DynExprExt)
 const _KozaTreeGenome = _KozaDynExt.TreeGenome
 const _KozaTreeEval = _KozaDynExt.TreeFitnessEvaluator
 

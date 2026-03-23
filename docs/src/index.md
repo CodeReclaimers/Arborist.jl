@@ -1,8 +1,8 @@
-# GenProg.jl
+# Arborist.jl
 
 **Generic genetic programming for Julia.**
 
-GenProg.jl is an extensible GP framework built on the Problem/Algorithm/Solve pattern from the SciML ecosystem. It provides four genome types, composable genetic operators, LLM-as-mutation-operator support, and NEAT-style speciation — all with explicit RNG seeding for reproducible research.
+Arborist.jl is an extensible GP framework built on the Problem/Algorithm/Solve pattern from the SciML ecosystem. It provides four genome types, composable genetic operators, LLM-as-mutation-operator support, and NEAT-style speciation — all with explicit RNG seeding for reproducible research.
 
 ## Who is this for?
 
@@ -12,9 +12,9 @@ GenProg.jl is an extensible GP framework built on the Problem/Algorithm/Solve pa
 
 ## How does it differ from other Julia EC packages?
 
-- **Wallace.jl** (2014–2015) was the most ambitious Julia EC framework but died at Julia 0.3 due to runtime type generation via compiler internals. GenProg.jl uses only stable public APIs.
-- **Metaheuristics.jl** and **Evolutionary.jl** target numerical optimization with vector genomes. GenProg.jl targets genetic *programming* with tree, graph, and AST genomes.
-- **SymbolicRegression.jl** is a specialized symbolic regression package. GenProg.jl is a general GP framework that can do symbolic regression (via TreeGenome) but also program synthesis, neural topology evolution, and agent control.
+- **Wallace.jl** (2014–2015) was the most ambitious Julia EC framework but died at Julia 0.3 due to runtime type generation via compiler internals. Arborist.jl uses only stable public APIs.
+- **Metaheuristics.jl** and **Evolutionary.jl** target numerical optimization with vector genomes. Arborist.jl targets genetic *programming* with tree, graph, and AST genomes.
+- **SymbolicRegression.jl** is a specialized symbolic regression package. Arborist.jl is a general GP framework that can do symbolic regression (via TreeGenome) but also program synthesis, neural topology evolution, and agent control.
 
 ## Benchmarks
 

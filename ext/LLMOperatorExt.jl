@@ -5,11 +5,11 @@ serialize genome → prompt LLM → parse response → validate → return.
 """
 module LLMOperatorExt
 
-using GenProg
-using GenProg: AbstractMutationOperator, ExprGenome, GenState,
+using Arborist
+using Arborist: AbstractMutationOperator, ExprGenome, GenState,
               serialize, deserialize, SubtreeMutation,
               get_lvalue_type, get_rvalue_type
-import GenProg: mutate
+import Arborist: mutate
 using HTTP
 using Random
 

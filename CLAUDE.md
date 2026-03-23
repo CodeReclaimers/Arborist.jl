@@ -1,4 +1,4 @@
-# GenProg.jl
+# Arborist.jl
 
 Generic, extensible genetic programming framework for Julia. Problem/Algorithm/Solve pattern modeled on SciML/DiffEq.
 
@@ -13,7 +13,7 @@ All 1154 tests pass. Fast tier: ~17s. Full benchmarks: ~83s.
 
 These steps happen after this Claude Code session:
 
-1. **Registry PR**: Comment `@JuliaRegistrator register` on the latest commit at https://github.com/CodeReclaimers/GenProg.jl (requires JuliaRegistrator GitHub App). Alternatively, follow https://github.com/JuliaRegistries/General#registering-a-new-package
+1. **Registry PR**: Comment `@JuliaRegistrator register` on the latest commit at https://github.com/CodeReclaimers/Arborist.jl (requires JuliaRegistrator GitHub App). Alternatively, follow https://github.com/JuliaRegistries/General#registering-a-new-package
 2. **Wait for merge**: New package registry PRs typically take 3 days
 3. **Tag release**: `git tag v0.1.0 && git push --tags`
 4. **Mint Zenodo DOI**: Connect the GitHub repo to Zenodo and create a release
@@ -25,7 +25,7 @@ These steps happen after this Claude Code session:
 
 ```
 src/
-  GenProg.jl              # module, exports, includes
+  Arborist.jl              # module, exports, includes
   abstractions.jl         # 8 abstract types
   sanitizer.jl            # ASTSanitizer — function call whitelist
   genome/

@@ -2,7 +2,7 @@
 
 ## The @eval Risk
 
-GenProg.jl's `ExprGenome` and `AntGenome` use Julia's `@eval` to compile
+Arborist.jl's `ExprGenome` and `AntGenome` use Julia's `@eval` to compile
 evolved programs into callable functions. This means **any valid Julia
 expression can be executed** if it appears in a genome.
 
@@ -46,7 +46,7 @@ sanitize(san, :(run(`rm -rf /`)))     # false — blocked
 2. **For LLM-assisted GP with trusted endpoints:** Enable the sanitizer
    (it is enabled by default when LLMMutationOperator is active).
 
-3. **For LLM-assisted GP with untrusted endpoints:** Run GenProg.jl in
+3. **For LLM-assisted GP with untrusted endpoints:** Run Arborist.jl in
    a container, VM, or sandboxed environment. The AST sanitizer is
    necessary but not sufficient.
 

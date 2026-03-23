@@ -30,9 +30,9 @@
         fitnesses = [Float64(i) for i in 1:20]  # simple fitness ordering
 
         spec = ThresholdSpeciation(threshold=5.0, min_species_size=1, stagnation_limit=100)
-        species_state = GenProg._init_species_state(spec)
+        species_state = Arborist._init_species_state(spec)
 
-        shared = GenProg._apply_speciation!(genomes, fitnesses, spec, species_state, rng)
+        shared = Arborist._apply_speciation!(genomes, fitnesses, spec, species_state, rng)
 
         # Species should have been created.
         @test length(species_state) > 0
@@ -51,7 +51,7 @@
         genomes = [ExprGenome([create_random_assignment(s)], s) for _ in 1:5]
         fitnesses = [1.0, 2.0, 3.0, 4.0, 5.0]
 
-        result = GenProg._apply_speciation!(genomes, fitnesses, NoSpeciation(), nothing, rng)
+        result = Arborist._apply_speciation!(genomes, fitnesses, NoSpeciation(), nothing, rng)
         @test result === fitnesses
     end
 
@@ -67,9 +67,9 @@
         fitnesses = fill(2.0, 10)
 
         spec = ThresholdSpeciation(threshold=100.0)  # large threshold → all in one species
-        species_state = GenProg._init_species_state(spec)
+        species_state = Arborist._init_species_state(spec)
 
-        shared = GenProg._apply_speciation!(genomes, fitnesses, spec, species_state, rng)
+        shared = Arborist._apply_speciation!(genomes, fitnesses, spec, species_state, rng)
 
         # All in one species of size 10. For minimization (lower=better),
         # shared = raw * species_size = 2.0 * 10 = 20.0.
@@ -89,11 +89,11 @@
         fitnesses = fill(2.0, 5)
 
         spec = ThresholdSpeciation(threshold=100.0, stagnation_limit=3)
-        species_state = GenProg._init_species_state(spec)
+        species_state = Arborist._init_species_state(spec)
 
         # Run speciation multiple times with no improvement.
         for _ in 1:5
-            GenProg._apply_speciation!(genomes, fitnesses, spec, species_state, rng)
+            Arborist._apply_speciation!(genomes, fitnesses, spec, species_state, rng)
         end
 
         # Species should have accumulated stagnation.

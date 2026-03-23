@@ -1,6 +1,6 @@
 # TreeGenome integration tests — requires DynamicExpressions.jl for extension loading.
 using DynamicExpressions
-const DynExt = Base.get_extension(GenProg, :DynExprExt)
+const DynExt = Base.get_extension(Arborist, :DynExprExt)
 const TreeGenome = DynExt.TreeGenome
 const TreeFitnessEvaluator = DynExt.TreeFitnessEvaluator
 

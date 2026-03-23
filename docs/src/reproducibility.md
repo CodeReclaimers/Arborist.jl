@@ -2,7 +2,7 @@
 
 ## Fully Reproducible Runs
 
-GenProg.jl supports fully reproducible GP runs via explicit RNG seeding:
+Arborist.jl supports fully reproducible GP runs via explicit RNG seeding:
 
 ```julia
 problem = GPProblem(evaluator, ExprGenome; seed=42)

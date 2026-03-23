@@ -1,6 +1,6 @@
 # Load HTTP to trigger the extension, then load mock infrastructure.
 using HTTP
-const LLMExt = Base.get_extension(GenProg, :LLMOperatorExt)
+const LLMExt = Base.get_extension(Arborist, :LLMOperatorExt)
 include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
 
 @testset "LLMMutationOperator integration" begin

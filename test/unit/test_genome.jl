@@ -126,7 +126,7 @@
         problem = make_test_problem()
         Random.seed!(42)
         g = initialize(ExprGenome, problem)
-        fitness = GenProg.evaluate_genome(g, problem.evaluator)
+        fitness = Arborist.evaluate_genome(g, problem.evaluator)
         @test fitness isa Float64
         @test fitness >= 0.0
     end
@@ -138,7 +138,7 @@
                      Dict(:a => Float32, :b => Int32, :c => Bool),
                      8)
         for T in [Float32, Int32, Bool]
-            for (k, v) in GenProg.get_rvalues_of_type(s, T)
+            for (k, v) in Arborist.get_rvalues_of_type(s, T)
                 @test v == T
             end
         end
@@ -151,7 +151,7 @@
                      Dict(:a => Float32, :b => Int32, :c => Bool),
                      8)
         for T in [Float32, Int32, Bool]
-            for (k, v) in GenProg.get_lvalues_of_type(s, T)
+            for (k, v) in Arborist.get_lvalues_of_type(s, T)
                 @test v == T
             end
         end
@@ -166,7 +166,7 @@
         for _ in 1:100
             assignment = create_random_assignment(s)
             @test assignment.head == :(=)
-            @test GenProg.get_lvalue_type(s, assignment.args[1]) == GenProg.get_rvalue_type(s, assignment.args[2])
+            @test Arborist.get_lvalue_type(s, assignment.args[1]) == Arborist.get_rvalue_type(s, assignment.args[2])
         end
     end
 
@@ -177,7 +177,7 @@
                      Dict(:y => Float32),
                      4)
         for _ in 1:20
-            expr = GenProg.create_random_for_loop(s)
+            expr = Arborist.create_random_for_loop(s)
             @test expr isa Expr
             @test expr.head == :for
         end
@@ -190,7 +190,7 @@
                      Dict(:y => Float32),
                      4)
         for _ in 1:20
-            expr = GenProg.create_random_while_loop(s)
+            expr = Arborist.create_random_while_loop(s)
             @test expr isa Expr
             @test expr.head == :while
         end
@@ -203,7 +203,7 @@
                      Dict(:y => Float32),
                      4)
         for _ in 1:20
-            expr = GenProg.create_random_if_statement(s)
+            expr = Arborist.create_random_if_statement(s)
             @test expr isa Expr
             @test expr.head == :if
             @test length(expr.args) == 3
@@ -217,10 +217,10 @@
                      Dict(:y => Float32),
                      4)
         for _ in 1:20
-            @test GenProg.create_random_for_loop(s; depth=0).head == :(=)
-            @test GenProg.create_random_while_loop(s; depth=0).head == :(=)
-            @test GenProg.create_random_if_statement(s; depth=0).head == :(=)
-            @test GenProg.create_random_block(s; depth=0).head == :block
+            @test Arborist.create_random_for_loop(s; depth=0).head == :(=)
+            @test Arborist.create_random_while_loop(s; depth=0).head == :(=)
+            @test Arborist.create_random_if_statement(s; depth=0).head == :(=)
+            @test Arborist.create_random_block(s; depth=0).head == :block
             @test create_random_statement(s; depth=0).head == :(=)
         end
     end
@@ -259,7 +259,7 @@
                      4)
         a = Expr(:block, create_random_assignment(s), create_random_assignment(s))
         b = Expr(:block, create_random_assignment(s), create_random_assignment(s))
-        (oa, ob) = GenProg.crossover(s, a, b)
+        (oa, ob) = Arborist.crossover(s, a, b)
         @test oa isa Expr
         @test ob isa Expr
     end
@@ -274,7 +274,7 @@
         b = Expr(:block, create_random_assignment(s), create_random_assignment(s))
         a_str = string(a)
         b_str = string(b)
-        GenProg.crossover(s, a, b)
+        Arborist.crossover(s, a, b)
         @test string(a) == a_str
         @test string(b) == b_str
     end

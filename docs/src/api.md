@@ -3,13 +3,13 @@
 ## Core Types
 
 ```@autodocs
-Modules = [GenProg]
+Modules = [Arborist]
 Order = [:type]
 ```
 
 ## Functions
 
 ```@autodocs
-Modules = [GenProg]
+Modules = [Arborist]
 Order = [:function]
 ```

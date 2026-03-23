@@ -2,11 +2,11 @@
 
 ## Two-Line Symbolic Regression
 
-The simplest way to use GenProg.jl for symbolic regression:
+The simplest way to use Arborist.jl for symbolic regression:
 
 ```julia
-using GenProg, DynamicExpressions
-const DynExt = Base.get_extension(GenProg, :DynExprExt)
+using Arborist, DynamicExpressions
+const DynExt = Base.get_extension(Arborist, :DynExprExt)
 const TreeGenome = DynExt.TreeGenome
 
 evaluator = DynExt.SymbolicRegressionEvaluator(
@@ -26,7 +26,7 @@ println("Best expression: ", serialize(result.best_genome))
 ## XOR with NEAT (GraphGenome)
 
 ```julia
-using GenProg
+using Arborist
 
 input_data = Float64[0 0 1 1; 0 1 0 1]
 output_data = Float64[0 1 1 0]

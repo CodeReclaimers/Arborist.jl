@@ -8,13 +8,13 @@ side effects, use ExprGenome instead.
 """
 module DynExprExt
 
-using GenProg
-using GenProg: AbstractGenome, AbstractEvaluator, AbstractMutationOperator,
+using Arborist
+using Arborist: AbstractGenome, AbstractEvaluator, AbstractMutationOperator,
               AbstractCrossoverOperator, GPProblem, GeneticProgramming,
               GPResult, TournamentSelection, NoSpeciation,
               SubtreeMutation, PointMutation, SubtreeCrossover,
               _tournament_select, _apply_speciation!, _init_species_state
-import GenProg: mutate, crossover, distance, complexity, serialize, deserialize,
+import Arborist: mutate, crossover, distance, complexity, serialize, deserialize,
                solve, evaluate, evaluate_genome, input_signature, output_signature
 using DynamicExpressions
 using Random
@@ -157,7 +157,7 @@ end
 # AbstractGenome interface for TreeGenome
 # =============================================================================
 
-function GenProg.mutate(g::TreeGenome{T}, rng::AbstractRNG) where T
+function Arborist.mutate(g::TreeGenome{T}, rng::AbstractRNG) where T
     r = rand(rng, 1:3)
     if r == 1
         return _point_mutate(g, rng)
@@ -168,25 +168,25 @@ function GenProg.mutate(g::TreeGenome{T}, rng::AbstractRNG) where T
     end
 end
 
-function GenProg.crossover(g1::TreeGenome{T}, g2::TreeGenome{T}, rng::AbstractRNG) where T
+function Arborist.crossover(g1::TreeGenome{T}, g2::TreeGenome{T}, rng::AbstractRNG) where T
     _subtree_crossover(g1, g2, rng)
 end
 
-function GenProg.distance(g1::TreeGenome{T}, g2::TreeGenome{T}) where T
+function Arborist.distance(g1::TreeGenome{T}, g2::TreeGenome{T}) where T
     # Node count difference. Known limitation: less semantically meaningful
     # than ExprGenome's symmetric-difference metric.
     Float64(abs(count_nodes(g1.tree) - count_nodes(g2.tree)))
 end
 
-function GenProg.complexity(g::TreeGenome{T}) where T
+function Arborist.complexity(g::TreeGenome{T}) where T
     Float64(count_nodes(g.tree))
 end
 
-function GenProg.serialize(g::TreeGenome{T}) where T
+function Arborist.serialize(g::TreeGenome{T}) where T
     string_tree(g.tree, g.operators)
 end
 
-function GenProg.deserialize(::Type{TreeGenome{T}}, s::String,
+function Arborist.deserialize(::Type{TreeGenome{T}}, s::String,
                              operators::OperatorEnum, n_features::Int) where T
     tree = _parse_prefix_expr(strip(s), operators, n_features, T)
     tree === nothing && return nothing
@@ -195,15 +195,15 @@ end
 
 # --- Operator dispatches for TreeGenome ---
 
-function GenProg.mutate(::SubtreeMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
+function Arborist.mutate(::SubtreeMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
     mutate(g, rng)
 end
 
-function GenProg.mutate(::PointMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
+function Arborist.mutate(::PointMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
     mutate(g, rng)
 end
 
-function GenProg.crossover(::SubtreeCrossover, g1::TreeGenome{T}, g2::TreeGenome{T},
+function Arborist.crossover(::SubtreeCrossover, g1::TreeGenome{T}, g2::TreeGenome{T},
                            rng::AbstractRNG) where T
     crossover(g1, g2, rng)
 end
@@ -354,7 +354,7 @@ end
 Run genetic programming evolution with TreeGenome. Uses DynamicExpressions.jl
 for fast vectorized evaluation without `@eval`.
 """
-function GenProg.solve(problem::GPProblem{TreeGenome{T}, E},
+function Arborist.solve(problem::GPProblem{TreeGenome{T}, E},
                        algorithm::GeneticProgramming;
                        verbose::Bool = false,
                        callback = nothing) where {T, E<:TreeFitnessEvaluator}

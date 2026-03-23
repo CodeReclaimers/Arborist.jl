@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to GenProg.jl will be documented in this file.
+All notable changes to Arborist.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.1.0] — 2026-03-23

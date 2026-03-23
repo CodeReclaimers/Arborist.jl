@@ -1,12 +1,12 @@
 using Test
-using GenProg
+using Arborist
 using Random
 
 # Benchmarks are opt-in due to long runtime.
-# Run with: GENPROG_RUN_BENCHMARKS=true julia -e 'using Pkg; Pkg.test("GenProg")'
+# Run with: GENPROG_RUN_BENCHMARKS=true julia -e 'using Pkg; Pkg.test("Arborist")'
 const RUN_BENCHMARKS = get(ENV, "GENPROG_RUN_BENCHMARKS", "false") == "true"
 
-@testset "GenProg.jl" begin
+@testset "Arborist.jl" begin
     # Unit tests — always run, target < 30s total
     include("unit/test_evaluators.jl")
     include("unit/test_genome.jl")

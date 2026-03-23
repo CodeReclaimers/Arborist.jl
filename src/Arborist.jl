@@ -1,5 +1,5 @@
 """
-    GenProg
+    Arborist
 
 A generic, extensible genetic programming framework for Julia, built on the
 Problem/Algorithm/Solve pattern. Provides first-class support for expression-tree
@@ -8,14 +8,14 @@ LLM-as-operator and alternative genome representations.
 
 # Quick start
 ```julia
-using GenProg
+using Arborist
 
 problem   = GPProblem(evaluator, ExprGenome; function_set=fset, num_temps=4)
 algorithm = GeneticProgramming(pop_size=100, generations=200, mutation_rate=0.3)
 result    = solve(problem, algorithm; verbose=true)
 ```
 """
-module GenProg
+module Arborist
 
 using Random
 
@@ -162,4 +162,4 @@ export
     evaluate_individual!,
     evolve!
 
-end # module GenProg
+end # module Arborist

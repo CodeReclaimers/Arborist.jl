@@ -49,7 +49,7 @@ function boolean_function_set()
 end
 
 # --- Boolean operator definitions for use in @eval'd evolved programs ---
-# These are defined in the GenProg module so they resolve when evolved
+# These are defined in the Arborist module so they resolve when evolved
 # code is compiled via @eval.
 
 """

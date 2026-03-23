@@ -1,9 +1,9 @@
-using Documenter, GenProg
+using Documenter, Arborist
 
 makedocs(
-    sitename = "GenProg.jl",
+    sitename = "Arborist.jl",
     authors  = "CodeReclaimers LLC",
-    modules  = [GenProg],
+    modules  = [Arborist],
     format   = Documenter.HTML(
         prettyurls = get(ENV, "CI", nothing) == "true"
     ),
@@ -29,6 +29,6 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/CodeReclaimers/GenProg.jl.git",
+    repo = "github.com/CodeReclaimers/Arborist.jl.git",
     devbranch = "master"
 )

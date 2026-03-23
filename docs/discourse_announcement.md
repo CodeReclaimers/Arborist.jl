@@ -1,17 +1,17 @@
-# [ANN] GenProg.jl — Generic Genetic Programming for Julia
+# [ANN] Arborist.jl — Generic Genetic Programming for Julia
 
-I'm pleased to announce the initial release of **GenProg.jl**, a generic genetic programming framework for Julia following the Problem/Algorithm/Solve pattern.
+I'm pleased to announce the initial release of **Arborist.jl**, a generic genetic programming framework for Julia following the Problem/Algorithm/Solve pattern.
 
 ## Why now?
 
-The Julia ecosystem has lacked a general-purpose GP framework since Wallace.jl died at Julia 0.3 in 2015. Existing packages (Metaheuristics.jl, Evolutionary.jl) target numerical optimization with vector genomes. GenProg.jl targets *genetic programming* — evolving trees, programs, and neural topologies — with explicit support for the LLM-as-mutation-operator pattern that FunSearch and AlphaEvolve have brought to mainstream attention.
+The Julia ecosystem has lacked a general-purpose GP framework since Wallace.jl died at Julia 0.3 in 2015. Existing packages (Metaheuristics.jl, Evolutionary.jl) target numerical optimization with vector genomes. Arborist.jl targets *genetic programming* — evolving trees, programs, and neural topologies — with explicit support for the LLM-as-mutation-operator pattern that FunSearch and AlphaEvolve have brought to mainstream attention.
 
 ## What does it do?
 
 **Symbolic regression in two lines:**
 ```julia
-using GenProg, DynamicExpressions
-const DynExt = Base.get_extension(GenProg, :DynExprExt)
+using Arborist, DynamicExpressions
+const DynExt = Base.get_extension(Arborist, :DynExprExt)
 
 evaluator = DynExt.SymbolicRegressionEvaluator(
     x -> x^4 + x^3 + x^2 + x, domain=(-1f0, 1f0), points=20
@@ -30,7 +30,7 @@ result = solve(
 
 **NEAT-style neural topology evolution:**
 ```julia
-using GenProg
+using Arborist
 reset_innovation_counter!()
 X = Float64[0 0 1 1; 0 1 0 1]; y = Float64[0 1 1 0]
 result = solve(
@@ -40,7 +40,7 @@ result = solve(
 )
 ```
 
-**LLM mutation operator** (Anthropic, OpenAI, or local Ollama) — the FunSearch/AlphaEvolve pattern as a composable operator within a standard evolutionary loop. See the [documentation](https://github.com/CodeReclaimers/GenProg.jl/blob/master/docs/src/llm_operator.md) for details.
+**LLM mutation operator** (Anthropic, OpenAI, or local Ollama) — the FunSearch/AlphaEvolve pattern as a composable operator within a standard evolutionary loop. See the [documentation](https://github.com/CodeReclaimers/Arborist.jl/blob/master/docs/src/llm_operator.md) for details.
 
 ## Benchmarks
 
@@ -54,18 +54,18 @@ result = solve(
 
 ## Related packages
 
-GenProg.jl complements rather than replaces existing packages:
+Arborist.jl complements rather than replaces existing packages:
 - [DynamicExpressions.jl](https://github.com/MilesCranmer/DynamicExpressions.jl) provides the TreeGenome evaluation backend
 - [neat-python](https://github.com/CodeReclaimers/neat-python) is a NEAT implementation by the same author (Python)
-- [SymbolicRegression.jl](https://github.com/MilesCranmer/SymbolicRegression.jl) is a specialized SR package; GenProg.jl is a general GP framework
+- [SymbolicRegression.jl](https://github.com/MilesCranmer/SymbolicRegression.jl) is a specialized SR package; Arborist.jl is a general GP framework
 
 ## Try it
 
 ```julia
-using Pkg; Pkg.add("GenProg")
+using Pkg; Pkg.add("Arborist")
 ```
 
-- GitHub: https://github.com/CodeReclaimers/GenProg.jl
+- GitHub: https://github.com/CodeReclaimers/Arborist.jl
 - Feedback welcome — issues and PRs are open
 
-A paper describing GenProg.jl with the Koza and NEAT benchmarks is in preparation. FunSearch/AlphaEvolve comparison benchmarks are planned for the next release.
+A paper describing Arborist.jl with the Koza and NEAT benchmarks is in preparation. FunSearch/AlphaEvolve comparison benchmarks are planned for the next release.

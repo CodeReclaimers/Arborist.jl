@@ -1,7 +1,7 @@
 """
     AbstractGenome
 
-Base type for all genome representations in GenProg.
+Base type for all genome representations in Arborist.
 
 Any concrete subtype `G <: AbstractGenome` must implement:
 

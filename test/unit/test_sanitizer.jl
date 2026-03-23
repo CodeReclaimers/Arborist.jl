@@ -41,7 +41,7 @@
         @test !sanitize(san, unsafe_body)
     end
 
-    @testset "GenProg boolean operators in whitelist" begin
+    @testset "Arborist boolean operators in whitelist" begin
         san = ASTSanitizer()
         @test sanitize(san, :(y = gp_nand(x, true)))
         @test sanitize(san, :(y = gp_nor(x, false)))

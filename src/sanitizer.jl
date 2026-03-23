@@ -49,7 +49,7 @@ const DEFAULT_SAFE_CALLS = Set{Symbol}([
     :Float32, :Float64, :Int32, :Int64, :Bool,
     # Safe Julia builtins
     :ifelse, :typemax, :typemin, :zero, :one,
-    # GenProg boolean operators
+    # Arborist boolean operators
     :gp_nand, :gp_nor,
     # Range construction (used in for loops)
     :(:),

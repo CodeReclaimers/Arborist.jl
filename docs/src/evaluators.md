@@ -11,7 +11,7 @@ Evaluates TreeGenome expression trees directly over a data matrix. No `@eval` ne
 Available via the DynamicExpressions extension:
 ```julia
 using DynamicExpressions
-const DynExt = Base.get_extension(GenProg, :DynExprExt)
+const DynExt = Base.get_extension(Arborist, :DynExprExt)
 evaluator = DynExt.TreeFitnessEvaluator(X, y, operators)
 ```
 

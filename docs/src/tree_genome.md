@@ -2,7 +2,7 @@
 
 ## Why Two Genome Types
 
-GenProg.jl provides two genome types for different problem classes:
+Arborist.jl provides two genome types for different problem classes:
 
 ### TreeGenome (DynamicExpressions.jl backed)
 
@@ -33,11 +33,11 @@ TreeGenome lives in a package extension that loads when DynamicExpressions.jl
 is available:
 
 ```julia
-using GenProg
+using Arborist
 using DynamicExpressions
 
 # Access extension types
-const DynExt = Base.get_extension(GenProg, :DynExprExt)
+const DynExt = Base.get_extension(Arborist, :DynExprExt)
 const TreeGenome = DynExt.TreeGenome
 const TreeFitnessEvaluator = DynExt.TreeFitnessEvaluator
 ```
@@ -45,9 +45,9 @@ const TreeFitnessEvaluator = DynExt.TreeFitnessEvaluator
 ## Quick-Start Example
 
 ```julia
-using GenProg, DynamicExpressions
+using Arborist, DynamicExpressions
 
-const DynExt = Base.get_extension(GenProg, :DynExprExt)
+const DynExt = Base.get_extension(Arborist, :DynExprExt)
 const TreeGenome = DynExt.TreeGenome
 const TreeFitnessEvaluator = DynExt.TreeFitnessEvaluator
 

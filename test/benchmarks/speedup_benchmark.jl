@@ -5,7 +5,7 @@
 # without @eval compilation, which is dramatically faster for large datasets.
 
 using DynamicExpressions
-const _SpeedDynExt = Base.get_extension(GenProg, :DynExprExt)
+const _SpeedDynExt = Base.get_extension(Arborist, :DynExprExt)
 const _SpeedTreeGenome = _SpeedDynExt.TreeGenome
 const _SpeedTreeEval = _SpeedDynExt.TreeFitnessEvaluator
 
@@ -43,7 +43,7 @@ const _SpeedTreeEval = _SpeedDynExt.TreeFitnessEvaluator
     for _ in 1:n_evals
         body = [create_random_assignment(state) for _ in 1:3]
         g = ExprGenome(body, state)
-        t = @elapsed GenProg.evaluate_genome(g, expr_eval)
+        t = @elapsed Arborist.evaluate_genome(g, expr_eval)
         push!(expr_times, t)
     end
 

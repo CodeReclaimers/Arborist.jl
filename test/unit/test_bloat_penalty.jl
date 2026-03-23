@@ -43,7 +43,7 @@
         # Verify it's non-negative and the penalty is being applied by checking
         # that evaluate_genome gives a lower value than the stored fitness.
         g = result_bp.best_genome
-        raw_fitness = GenProg.evaluate_genome(g, problem.evaluator)
+        raw_fitness = Arborist.evaluate_genome(g, problem.evaluator)
         if isfinite(raw_fitness)
             expected = raw_fitness + 0.01 * complexity(g)
             @test result_bp.best_fitness ≈ expected atol=1e-10
@@ -64,8 +64,8 @@
         s = GenState(rng, fset, Dict(:x => Float32), Dict(:y => Float32), 2)
         g = ExprGenome([:(y = x)], s)
 
-        raw = GenProg.evaluate_genome(g, fe)
-        penalized = GenProg._evaluate_with_penalty(g, fe, 0.1)
+        raw = Arborist.evaluate_genome(g, fe)
+        penalized = Arborist._evaluate_with_penalty(g, fe, 0.1)
 
         @test raw == 0.0  # y = x is perfect for y = x
         @test penalized ≈ 0.0 + 0.1 * complexity(g)

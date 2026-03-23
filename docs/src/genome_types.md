@@ -1,6 +1,6 @@
 # Genome Types
 
-GenProg.jl provides four genome types for different problem classes.
+Arborist.jl provides four genome types for different problem classes.
 
 ## Decision Table
 

@@ -108,36 +108,86 @@ end
 """
     serialize(g::ExprGenome) -> String
 
-Serialize the genome body to a human-readable string (one statement per line).
+Convert an ExprGenome body to a human-readable Julia source string
+suitable for inclusion in an LLM prompt. Each statement is printed
+on its own line using Julia's standard pretty-printer.
 """
-function serialize(g::ExprGenome)
-    return join(repr.(g.body), "\n")
+function serialize(g::ExprGenome)::String
+    io = IOBuffer()
+    for (i, stmt) in enumerate(g.body)
+        print(io, repr(stmt))
+        i < length(g.body) && print(io, "\n")
+    end
+    return String(take!(io))
+end
+
+"""
+    deserialize(::Type{ExprGenome}, s::String, state::GenState) -> Union{ExprGenome, Nothing}
+
+Parse a string of Julia statements into an ExprGenome. Returns `nothing`
+if zero valid statements survive parsing and type-checking.
+
+Each line is parsed with `Meta.parse`. Successfully parsed assignment
+expressions are type-checked against the GenState using `get_lvalue_type`
+and `get_rvalue_type`. Lines that fail parsing or type-checking are
+skipped (partial recovery) rather than rejecting the whole genome.
+
+Does not eval anything; parse only.
+"""
+function deserialize(::Type{ExprGenome}, s::String,
+                     state::GenState)::Union{ExprGenome, Nothing}
+    lines = filter(!isempty, strip.(split(s, "\n")))
+    valid_stmts = Expr[]
+    for line in lines
+        expr = try
+            Meta.parse(line)
+        catch
+            nothing
+        end
+        expr isa Expr || continue
+        # Unwrap QuoteNode from repr()-style :() output.
+        # repr(:(y = x)) produces ":(y = x)" which Meta.parse returns
+        # as Expr(:quote, :(y = x)).
+        if expr.head == :quote && length(expr.args) == 1 && expr.args[1] isa Expr
+            expr = expr.args[1]
+        end
+        # Verify it is a valid assignment with consistent types.
+        if _is_valid_assignment(expr, state)
+            push!(valid_stmts, expr)
+        end
+    end
+    isempty(valid_stmts) && return nothing
+    return ExprGenome(valid_stmts, state)
 end
 
 """
     deserialize(::Type{ExprGenome}, s::String; state::Union{GenState, Nothing}=nothing) -> Union{ExprGenome, Nothing}
 
-Deserialize a genome from a string. Requires a `state` keyword argument
-to reconstruct the full `ExprGenome`. Returns `nothing` on any parse failure
-or if `state` is not provided.
+Backward-compatible keyword-argument version. Delegates to the positional
+version when `state` is provided; returns `nothing` when it is not.
 """
 function deserialize(::Type{ExprGenome}, s::String; state::Union{GenState, Nothing}=nothing)
     state === nothing && return nothing
+    return deserialize(ExprGenome, s, state)
+end
+
+"""
+    _is_valid_assignment(expr::Expr, state::GenState) -> Bool
+
+Check that an expression is a valid assignment with type-consistent
+lvalue and rvalue according to the GenState.
+"""
+function _is_valid_assignment(expr::Expr, state::GenState)::Bool
+    expr.head == :(=) || return false
+    length(expr.args) == 2 || return false
     try
-        lines = filter(!isempty, split(s, "\n"))
-        body = Expr[]
-        for line in lines
-            expr = Meta.parse(line)
-            if expr isa Expr
-                push!(body, expr)
-            else
-                return nothing
-            end
-        end
-        isempty(body) && return nothing
-        return ExprGenome(body, state)
+        lhs = expr.args[1]
+        rhs = expr.args[2]
+        ltype = get_lvalue_type(state, lhs)
+        rtype = get_rvalue_type(state, rhs)
+        return ltype == rtype
     catch
-        return nothing
+        return false
     end
 end
 

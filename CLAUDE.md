@@ -6,10 +6,11 @@ Generic, extensible genetic programming framework for Julia. Problem/Algorithm/S
 
 **Phase 1 — Core framework: COMPLETE** (2026-03-22)
 **Phase 2 — Speciation and operators: COMPLETE** (2026-03-22)
+**Phase 3 — LLM operator extension: COMPLETE** (2026-03-23)
 
-All 862 tests pass. `using GenProg` loads cleanly (~340ms precompile).
+All 932 tests pass (862 Phase 1-2 + 70 Phase 3). `using GenProg` loads cleanly without HTTP.jl. Extension loads automatically when HTTP.jl is present.
 
-Phase 3 (LLM operator extension) not yet started.
+Phase 4 (DynamicExpressions extension, TreeGenome, registration) not yet started.
 
 ## Architecture
 
@@ -20,7 +21,7 @@ src/
   genome/
     codegen.jl            # Expr-tree code generation (FunctionDetails, FunctionSet, GenState)
     evolution.jl          # crossover, Individual, Population, evolve!
-    expr_genome.jl        # ExprGenome <: AbstractGenome, GPProblem struct
+    expr_genome.jl        # ExprGenome <: AbstractGenome, GPProblem, serialize/deserialize
   operators/
     mutation.jl           # SubtreeMutation, PointMutation, HoistMutation, ExpansionMutation
     crossover.jl          # SubtreeCrossover
@@ -32,22 +33,42 @@ src/
   defaults.jl             # default_function_set(), boolean_function_set(), gp_nand, gp_nor
   speciation.jl           # NoSpeciation, ThresholdSpeciation
 ext/
-  LLMOperatorExt.jl       # placeholder (Phase 3)
+  LLMOperatorExt.jl       # LLMMutationOperator (weakdep: HTTP.jl)
   DynExprExt.jl           # placeholder (Phase 4)
+docs/
+  src/
+    llm_operator.md       # FunSearch/AlphaEvolve connection, quick-start, Ollama guide
+test/
+  mocks/mock_http.jl      # Mock HTTP infrastructure for LLM operator testing
+  integration/test_llm_operator.jl  # LLM operator integration tests
 ```
 
 ## Key Conventions
 
 - **Explicit RNG everywhere.** `GenState` carries an `rng::AbstractRNG` field. Every `rand()`/`randn()` call uses `s.rng` or a passed `rng` parameter. No global RNG usage.
-- **Deterministic collection ordering.** All sampling from `Dict`/`Set` goes through `_sorted_pairs()`, `_sorted_funcs()`, or `_sorted_types()` to ensure canonical iteration order. Julia's hash-based iteration order varies between processes; without sorting, the GP is non-reproducible even with explicit RNG.
+- **Deterministic collection ordering.** All sampling from `Dict`/`Set` goes through `_sorted_pairs()`, `_sorted_funcs()`, or `_sorted_types()` to ensure canonical iteration order.
 - **Temp variable names are `__temp_$i`**, not `gensym()`. This keeps Dict key hashes deterministic across sessions.
 - **`const FitnessEvaluator = AbstractEvaluator`** — compatibility alias so evolution.jl code referencing `FitnessEvaluator` works with the new type hierarchy.
-- **`@eval` is used only for compiling evolved programs** (in `evaluate_genome` and `evaluate_individual!`), never for generating framework types or methods. This is the Wallace.jl lesson — see Section 2 of the plan.
+- **`@eval` is used only for compiling evolved programs**, never for generating framework types or methods.
 - **`Base.invokelatest`** is required when calling `@eval`-defined functions to handle world-age issues. Do not remove it.
 - **Loop safety** uses `LoopLimitExceeded` exception via `add_loop_checks()`, not time limits. Time limits in `TableFitnessEvaluator` should be generous (1s+) to avoid GC/JIT non-determinism.
-- **Bloat penalty** is applied as `adjusted_fitness = raw_fitness + bloat_penalty * complexity(g)` after evaluation and before selection. Default `bloat_penalty=0.0` preserves existing behavior.
-- **Speciation** runs after evaluation and before selection. `ThresholdSpeciation` applies fitness sharing (raw fitness / species size) for selection pressure. `NoSpeciation` leaves fitness unchanged.
-- **IslandModel** runs islands sequentially (no threading). Migration uses ring topology every `migration_interval` generations.
+- **Bloat penalty** is applied as `adjusted_fitness = raw_fitness + bloat_penalty * complexity(g)` after evaluation and before selection.
+- **Speciation** runs after evaluation and before selection. `ThresholdSpeciation` applies fitness sharing.
+- **IslandModel** runs islands sequentially (no threading). Migration uses ring topology.
+- **LLM operator** uses a `_http_post` Ref{Function} hook for testability. Tests replace it with a mock (see `test/mocks/mock_http.jl`). All LLM failures fall back to `fallback_op` silently.
+- **serialize** uses `repr()` which produces `:()` wrapped output. **deserialize** unwraps QuoteNodes and type-checks assignments with partial recovery (invalid lines are skipped, not rejected wholesale).
+
+## Accessing the LLM Extension
+
+```julia
+using GenProg
+using HTTP  # triggers extension loading
+
+LLMExt = Base.get_extension(GenProg, :LLMOperatorExt)
+op = LLMExt.LLMMutationOperator()  # Anthropic API default
+```
+
+See `docs/src/llm_operator.md` for full examples including Ollama and OpenAI.
 
 ## Running Tests
 
@@ -55,25 +76,25 @@ ext/
 julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
-862 tests pass. Benchmarks take ~74 minutes total due to @eval overhead in multi-seed convergence tests.
+932 tests pass. Benchmarks take ~74 minutes due to @eval overhead.
 
-For faster iteration, run unit tests only:
-```
-julia --project=. -e 'using Test, GenProg, Random; @testset "unit" begin
+For faster iteration, run unit + integration tests only (~8 seconds):
+```julia
+using Test, GenProg, Random, HTTP
+@testset "quick" begin
     include("test/unit/test_evaluators.jl")
     include("test/unit/test_genome.jl")
     include("test/unit/test_operators.jl")
     include("test/unit/test_speciation.jl")
     include("test/unit/test_bloat_penalty.jl")
     include("test/unit/test_island_model.jl")
-end'
+    include("test/integration/test_llm_operator.jl")
+end
 ```
-
-Unit tests pass in ~8 seconds.
 
 ## Dependencies
 
-Zero mandatory external dependencies. Only `Random` (stdlib). HTTP.jl and DynamicExpressions.jl are declared as weakdeps for future extensions.
+Zero mandatory external dependencies. Only `Random` (stdlib). HTTP.jl and DynamicExpressions.jl are declared as weakdeps for optional extensions.
 
 ## Plan Document
 

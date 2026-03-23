@@ -11,6 +11,9 @@ using Random
     include("unit/test_bloat_penalty.jl")
     include("unit/test_island_model.jl")
 
+    # Integration tests (LLM operator — requires HTTP.jl for extension loading)
+    include("integration/test_llm_operator.jl")
+
     # Benchmarks
     include("benchmarks/max_ones.jl")
     include("benchmarks/symbolic_regression.jl")

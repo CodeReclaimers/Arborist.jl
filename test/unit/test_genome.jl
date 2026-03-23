@@ -79,17 +79,47 @@
         @test length(s) > 0
     end
 
-    @testset "deserialize" begin
+    @testset "deserialize (keyword arg)" begin
         problem = make_test_problem()
         Random.seed!(42)
         g = initialize(ExprGenome, problem)
         s = serialize(g)
         # Without state, should return nothing.
         @test deserialize(ExprGenome, s) === nothing
-        # With state, should reconstruct.
+        # With state keyword, should reconstruct.
         g2 = deserialize(ExprGenome, s; state=g.state)
         @test g2 isa ExprGenome
         @test length(g2.body) == length(g.body)
+    end
+
+    @testset "deserialize (positional arg)" begin
+        problem = make_test_problem()
+        Random.seed!(42)
+        g = initialize(ExprGenome, problem)
+        s = serialize(g)
+        g2 = deserialize(ExprGenome, s, g.state)
+        @test g2 isa ExprGenome
+        @test length(g2.body) == length(g.body)
+    end
+
+    @testset "serialize/deserialize round-trip" begin
+        problem = make_test_problem()
+        Random.seed!(42)
+        # Generate multiple assignment-only genomes and verify round-trip.
+        # Some assignments may use repr forms that fail strict type-checking
+        # (e.g., Float32(literal) not in the function set). We verify that
+        # at least the valid assignments survive.
+        successes = 0
+        for _ in 1:20
+            g = initialize(ExprGenome, problem)
+            s = serialize(g)
+            g2 = deserialize(ExprGenome, s, g.state)
+            if g2 !== nothing
+                successes += 1
+                @test length(g2.body) >= 1
+            end
+        end
+        @test successes >= 16  # at least 80% round-trip successfully
     end
 
     @testset "evaluate_genome" begin

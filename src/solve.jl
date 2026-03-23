@@ -45,7 +45,7 @@ function _initialize_population(problem::GPProblem{G,E}, algorithm::GeneticProgr
 end
 
 """
-    _tournament_select(genomes, fitnesses, tournament_size, rng) -> Int
+    _tournament_select(fitnesses, tournament_size, rng) -> Int
 
 Perform tournament selection. Returns the index of the selected individual.
 """
@@ -62,9 +62,24 @@ function _tournament_select(fitnesses::Vector{Float64}, tournament_size::Int, rn
 end
 
 """
+    _evaluate_with_penalty(genome, evaluator, bloat_penalty) -> Float64
+
+Evaluate a genome and apply bloat penalty if non-zero.
+"""
+function _evaluate_with_penalty(genome, evaluator::AbstractEvaluator, bloat_penalty::Float64)
+    raw = evaluate_genome(genome, evaluator)
+    if bloat_penalty > 0.0 && isfinite(raw)
+        raw += bloat_penalty * complexity(genome)
+    end
+    return raw
+end
+
+"""
     _run_evolution!(pop, problem, algorithm, rng; verbose, callback) -> GPResult
 
 The internal evolution loop. Not part of the public API.
+Supports bloat penalty (via algorithm.bloat_penalty) and speciation
+(via algorithm.speciation).
 """
 function _run_evolution!(pop::Tuple{Vector{G}, GenState},
                          problem::GPProblem{G,E},
@@ -75,11 +90,15 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
     genomes, state = pop
     pop_size = algorithm.pop_size
     fitnesses = fill(Inf, pop_size)
+    bp = algorithm.bloat_penalty
 
-    # Evaluate initial population.
+    # Evaluate initial population (with bloat penalty).
     for i in 1:pop_size
-        fitnesses[i] = evaluate_genome(genomes[i], problem.evaluator)
+        fitnesses[i] = _evaluate_with_penalty(genomes[i], problem.evaluator, bp)
     end
+
+    # Initialize speciation state.
+    species_state = _init_species_state(algorithm.speciation)
 
     fitness_history = Float64[]
     mean_history = Float64[]
@@ -92,7 +111,7 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
         genomes = genomes[order]
         fitnesses = fitnesses[order]
 
-        # Record history.
+        # Record history (raw/bloat-penalized fitness, before sharing).
         push!(fitness_history, fitnesses[1])
         finite_fits = filter(isfinite, fitnesses)
         mean_fit = isempty(finite_fits) ? Inf : sum(finite_fits) / length(finite_fits)
@@ -106,11 +125,15 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
             callback(gen, fitnesses[1], genomes[1])
         end
 
+        # Apply speciation and compute selection fitnesses (fitness sharing).
+        selection_fitnesses = _apply_speciation!(genomes, fitnesses,
+                                                  algorithm.speciation, species_state, rng)
+
         # Build next generation.
         next_genomes = Vector{G}(undef, pop_size)
         next_fitnesses = fill(Inf, pop_size)
 
-        # Elitism: carry top individuals forward.
+        # Elitism: carry top individuals forward (using raw fitness ranking).
         for i in 1:min(algorithm.elitism, pop_size)
             next_genomes[i] = deepcopy(genomes[i])
             next_fitnesses[i] = fitnesses[i]
@@ -121,25 +144,26 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
                  algorithm.selection.tournament_size : algorithm.tournament_size
 
         # Fill the rest via tournament selection + genetic operators.
+        # Tournament selection uses shared fitnesses for diversity pressure.
         idx = algorithm.elitism + 1
         while idx <= pop_size
             r = rand(rng)
             if r < algorithm.crossover_rate && idx + 1 <= pop_size
-                p1_idx = _tournament_select(fitnesses, t_size, rng)
-                p2_idx = _tournament_select(fitnesses, t_size, rng)
+                p1_idx = _tournament_select(selection_fitnesses, t_size, rng)
+                p2_idx = _tournament_select(selection_fitnesses, t_size, rng)
                 op = rand(rng, algorithm.crossover_ops)
                 (c1, c2) = crossover(op, genomes[p1_idx], genomes[p2_idx], rng)
                 next_genomes[idx] = c1
                 next_genomes[idx + 1] = c2
                 idx += 2
             elseif r < algorithm.crossover_rate + algorithm.mutation_rate
-                p_idx = _tournament_select(fitnesses, t_size, rng)
+                p_idx = _tournament_select(selection_fitnesses, t_size, rng)
                 op = rand(rng, algorithm.mutation_ops)
                 child = mutate(op, genomes[p_idx], rng)
                 next_genomes[idx] = child
                 idx += 1
             else
-                p_idx = _tournament_select(fitnesses, t_size, rng)
+                p_idx = _tournament_select(selection_fitnesses, t_size, rng)
                 next_genomes[idx] = deepcopy(genomes[p_idx])
                 idx += 1
             end
@@ -147,7 +171,7 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
 
         # Evaluate new individuals (skip elites which already have fitness).
         for i in (algorithm.elitism + 1):pop_size
-            next_fitnesses[i] = evaluate_genome(next_genomes[i], problem.evaluator)
+            next_fitnesses[i] = _evaluate_with_penalty(next_genomes[i], problem.evaluator, bp)
         end
 
         genomes = next_genomes
@@ -171,4 +195,208 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
         wall_time,
         fitnesses[1] < 1.0
     )
+end
+
+
+# =============================================================================
+# IslandModel solver
+# =============================================================================
+
+"""
+    solve(problem::GPProblem{G,E}, algorithm::IslandModel; verbose=false, callback=nothing) -> GPResult{G}
+
+Run an island-model evolution with multiple independent populations and periodic migration.
+Islands run sequentially (no threading). Migration uses a ring topology.
+
+Returns a `GPResult` containing the global best genome across all islands.
+"""
+function solve(problem::GPProblem{G,E},
+               algorithm::IslandModel;
+               verbose::Bool = false,
+               callback = nothing) where {G,E}
+    rng = problem.seed === nothing ? Random.default_rng() :
+          Random.MersenneTwister(problem.seed)
+
+    alg = algorithm.island_algorithm
+    n = algorithm.n_islands
+    pop_size = alg.pop_size
+    bp = alg.bloat_penalty
+
+    # Initialize n independent islands, each with its own RNG-seeded GenState.
+    island_genomes = Vector{Vector{G}}(undef, n)
+    island_states = Vector{GenState}(undef, n)
+    island_fitnesses = Vector{Vector{Float64}}(undef, n)
+    island_species = Vector{Any}(undef, n)
+
+    for i in 1:n
+        island_rng_seed = rand(rng, UInt64)
+        island_rng = Random.MersenneTwister(island_rng_seed)
+        pop = _initialize_population(problem, alg, island_rng)
+        island_genomes[i], island_states[i] = pop
+        island_fitnesses[i] = fill(Inf, pop_size)
+        island_species[i] = _init_species_state(alg.speciation)
+    end
+
+    # Evaluate initial populations.
+    for i in 1:n
+        for j in 1:pop_size
+            island_fitnesses[i][j] = _evaluate_with_penalty(
+                island_genomes[i][j], problem.evaluator, bp)
+        end
+    end
+
+    # Track global best.
+    global_best_genome = deepcopy(island_genomes[1][1])
+    global_best_fitness = Inf
+    fitness_history = Float64[]
+    mean_history = Float64[]
+
+    t_size = alg.selection isa TournamentSelection ?
+             alg.selection.tournament_size : alg.tournament_size
+
+    t0 = time()
+
+    for gen in 1:alg.generations
+        for isle in 1:n
+            genomes = island_genomes[isle]
+            fitnesses = island_fitnesses[isle]
+            state = island_states[isle]
+            species_st = island_species[isle]
+
+            # Sort by fitness.
+            order = sortperm(fitnesses)
+            genomes = genomes[order]
+            fitnesses = fitnesses[order]
+
+            # Apply speciation.
+            selection_fitnesses = _apply_speciation!(genomes, fitnesses,
+                                                      alg.speciation, species_st, state.rng)
+
+            # Build next generation.
+            next_genomes = Vector{G}(undef, pop_size)
+            next_fitnesses = fill(Inf, pop_size)
+
+            # Elitism.
+            for i in 1:min(alg.elitism, pop_size)
+                next_genomes[i] = deepcopy(genomes[i])
+                next_fitnesses[i] = fitnesses[i]
+            end
+
+            # Fill rest via tournament selection + genetic operators.
+            idx = alg.elitism + 1
+            while idx <= pop_size
+                r = rand(state.rng)
+                if r < alg.crossover_rate && idx + 1 <= pop_size
+                    p1 = _tournament_select(selection_fitnesses, t_size, state.rng)
+                    p2 = _tournament_select(selection_fitnesses, t_size, state.rng)
+                    op = rand(state.rng, alg.crossover_ops)
+                    (c1, c2) = crossover(op, genomes[p1], genomes[p2], state.rng)
+                    next_genomes[idx] = c1
+                    next_genomes[idx + 1] = c2
+                    idx += 2
+                elseif r < alg.crossover_rate + alg.mutation_rate
+                    p_idx = _tournament_select(selection_fitnesses, t_size, state.rng)
+                    op = rand(state.rng, alg.mutation_ops)
+                    child = mutate(op, genomes[p_idx], state.rng)
+                    next_genomes[idx] = child
+                    idx += 1
+                else
+                    p_idx = _tournament_select(selection_fitnesses, t_size, state.rng)
+                    next_genomes[idx] = deepcopy(genomes[p_idx])
+                    idx += 1
+                end
+            end
+
+            # Evaluate new individuals.
+            for i in (alg.elitism + 1):pop_size
+                next_fitnesses[i] = _evaluate_with_penalty(
+                    next_genomes[i], problem.evaluator, bp)
+            end
+
+            island_genomes[isle] = next_genomes
+            island_fitnesses[isle] = next_fitnesses
+        end
+
+        # Update global best across all islands.
+        for isle in 1:n
+            best_idx = argmin(island_fitnesses[isle])
+            if island_fitnesses[isle][best_idx] < global_best_fitness
+                global_best_fitness = island_fitnesses[isle][best_idx]
+                global_best_genome = deepcopy(island_genomes[isle][best_idx])
+            end
+        end
+
+        push!(fitness_history, global_best_fitness)
+        # Compute global mean across all islands.
+        all_fits = reduce(vcat, island_fitnesses)
+        finite_fits = filter(isfinite, all_fits)
+        mean_fit = isempty(finite_fits) ? Inf : sum(finite_fits) / length(finite_fits)
+        push!(mean_history, mean_fit)
+
+        if verbose
+            println("Generation $gen: global_best=$(round(global_best_fitness, digits=6)), mean=$(round(mean_fit, digits=6))")
+        end
+
+        if callback !== nothing
+            callback(gen, global_best_fitness, global_best_genome)
+        end
+
+        # Migration: ring topology, every migration_interval generations.
+        if gen % algorithm.migration_interval == 0
+            _migrate!(island_genomes, island_fitnesses, algorithm, rng)
+        end
+    end
+
+    # Collect final population from all islands, sorted by fitness.
+    all_genomes = reduce(vcat, island_genomes)
+    all_fitnesses = reduce(vcat, island_fitnesses)
+    order = sortperm(all_fitnesses)
+    all_genomes = all_genomes[order]
+    all_fitnesses = all_fitnesses[order]
+
+    wall_time = time() - t0
+
+    return GPResult{G}(
+        global_best_genome,
+        global_best_fitness,
+        all_genomes,
+        fitness_history,
+        mean_history,
+        alg.generations,
+        wall_time,
+        global_best_fitness < 1.0
+    )
+end
+
+"""
+    _migrate!(island_genomes, island_fitnesses, algorithm, rng)
+
+Perform ring migration: send the top `migration_size` individuals from
+each island to the next island, replacing the worst individuals.
+"""
+function _migrate!(island_genomes, island_fitnesses, algorithm::IslandModel, rng::AbstractRNG)
+    n = algorithm.n_islands
+    ms = algorithm.migration_size
+
+    # Collect emigrants from each island (top ms by fitness).
+    emigrants = Vector{Vector{Any}}(undef, n)
+    for i in 1:n
+        order = sortperm(island_fitnesses[i])
+        emigrants[i] = [deepcopy(island_genomes[i][order[j]]) for j in 1:min(ms, length(order))]
+    end
+
+    # Send emigrants to next island in ring, replacing worst individuals.
+    for i in 1:n
+        dest = (i % n) + 1  # ring: island i → island i+1 (wraps around)
+        order = sortperm(island_fitnesses[dest], rev=true)  # worst first
+        incoming = emigrants[i]
+        for (k, genome) in enumerate(incoming)
+            if k <= length(order)
+                worst_idx = order[k]
+                island_genomes[dest][worst_idx] = genome
+                # Re-evaluate the migrated individual on the destination island.
+                island_fitnesses[dest][worst_idx] = Inf  # will be evaluated next generation
+            end
+        end
+    end
 end

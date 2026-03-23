@@ -73,17 +73,27 @@ export
     AbstractEvolutionaryAlgorithm,
     AbstractEvolutionResult,
 
-    # Concrete types
+    # Concrete types — genome and problem
     ExprGenome,
     GPProblem,
-    GeneticProgramming,
     GPResult,
     TableFitnessEvaluator,
+
+    # Concrete types — algorithms
+    GeneticProgramming,
+    IslandModel,
+
+    # Concrete types — operators
     SubtreeMutation,
     PointMutation,
+    HoistMutation,
+    ExpansionMutation,
     SubtreeCrossover,
     TournamentSelection,
+
+    # Concrete types — speciation
     NoSpeciation,
+    ThresholdSpeciation,
 
     # Code generation types (needed for custom function sets)
     FunctionDetails,
@@ -104,6 +114,11 @@ export
     serialize,
     deserialize,
     default_function_set,
+    boolean_function_set,
+
+    # Boolean operators (available in evolved code)
+    gp_nand,
+    gp_nor,
 
     # Utility functions
     add!,

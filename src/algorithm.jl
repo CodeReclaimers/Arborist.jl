@@ -61,3 +61,38 @@ function GeneticProgramming(;
         selection
     )
 end
+
+"""
+    IslandModel <: AbstractEvolutionaryAlgorithm
+
+Island model that runs multiple independent populations (islands) with periodic
+migration. Islands run sequentially (no threading). Migration uses a ring
+topology: island i sends its best individuals to island i+1.
+
+# Fields
+- `n_islands::Int`: number of islands (default: 4)
+- `island_algorithm::GeneticProgramming`: algorithm for each island
+- `migration_interval::Int`: generations between migrations (default: 10)
+- `migration_size::Int`: number of individuals to migrate per event (default: 2)
+"""
+struct IslandModel <: AbstractEvolutionaryAlgorithm
+    n_islands::Int
+    island_algorithm::GeneticProgramming
+    migration_interval::Int
+    migration_size::Int
+end
+
+"""
+    IslandModel(; n_islands=4, island_algorithm=GeneticProgramming(),
+                  migration_interval=10, migration_size=2)
+
+Construct an `IslandModel` with keyword arguments and sensible defaults.
+"""
+function IslandModel(;
+    n_islands::Int = 4,
+    island_algorithm::GeneticProgramming = GeneticProgramming(),
+    migration_interval::Int = 10,
+    migration_size::Int = 2
+)
+    IslandModel(n_islands, island_algorithm, migration_interval, migration_size)
+end

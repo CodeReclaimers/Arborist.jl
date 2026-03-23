@@ -5,10 +5,11 @@ Generic, extensible genetic programming framework for Julia. Problem/Algorithm/S
 ## Project Status
 
 **Phase 1 — Core framework: COMPLETE** (2026-03-22)
+**Phase 2 — Speciation and operators: COMPLETE** (2026-03-22)
 
-All 695 tests pass. `using GenProg` loads cleanly. Both benchmarks (Max Ones, x² symbolic regression) converge.
+All 862 tests pass. `using GenProg` loads cleanly (~340ms precompile).
 
-Phase 2 (speciation, more operators, island model) not yet started.
+Phase 3 (LLM operator extension) not yet started.
 
 ## Architecture
 
@@ -21,15 +22,15 @@ src/
     evolution.jl          # crossover, Individual, Population, evolve!
     expr_genome.jl        # ExprGenome <: AbstractGenome, GPProblem struct
   operators/
-    mutation.jl           # SubtreeMutation, PointMutation
+    mutation.jl           # SubtreeMutation, PointMutation, HoistMutation, ExpansionMutation
     crossover.jl          # SubtreeCrossover
     selection.jl          # TournamentSelection
   evaluators.jl           # TableFitnessEvaluator <: AbstractEvaluator
-  algorithm.jl            # GeneticProgramming <: AbstractEvolutionaryAlgorithm
-  solve.jl                # solve() entry point, _run_evolution!
+  algorithm.jl            # GeneticProgramming, IslandModel
+  solve.jl                # solve() entry points, _run_evolution!, island model solver
   result.jl               # GPResult
-  defaults.jl             # default_function_set()
-  speciation.jl           # NoSpeciation
+  defaults.jl             # default_function_set(), boolean_function_set(), gp_nand, gp_nor
+  speciation.jl           # NoSpeciation, ThresholdSpeciation
 ext/
   LLMOperatorExt.jl       # placeholder (Phase 3)
   DynExprExt.jl           # placeholder (Phase 4)
@@ -44,6 +45,9 @@ ext/
 - **`@eval` is used only for compiling evolved programs** (in `evaluate_genome` and `evaluate_individual!`), never for generating framework types or methods. This is the Wallace.jl lesson — see Section 2 of the plan.
 - **`Base.invokelatest`** is required when calling `@eval`-defined functions to handle world-age issues. Do not remove it.
 - **Loop safety** uses `LoopLimitExceeded` exception via `add_loop_checks()`, not time limits. Time limits in `TableFitnessEvaluator` should be generous (1s+) to avoid GC/JIT non-determinism.
+- **Bloat penalty** is applied as `adjusted_fitness = raw_fitness + bloat_penalty * complexity(g)` after evaluation and before selection. Default `bloat_penalty=0.0` preserves existing behavior.
+- **Speciation** runs after evaluation and before selection. `ThresholdSpeciation` applies fitness sharing (raw fitness / species size) for selection pressure. `NoSpeciation` leaves fitness unchanged.
+- **IslandModel** runs islands sequentially (no threading). Migration uses ring topology every `migration_interval` generations.
 
 ## Running Tests
 
@@ -51,7 +55,21 @@ ext/
 julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
-All 695 tests should pass in ~54 seconds.
+862 tests pass. Benchmarks take ~74 minutes total due to @eval overhead in multi-seed convergence tests.
+
+For faster iteration, run unit tests only:
+```
+julia --project=. -e 'using Test, GenProg, Random; @testset "unit" begin
+    include("test/unit/test_evaluators.jl")
+    include("test/unit/test_genome.jl")
+    include("test/unit/test_operators.jl")
+    include("test/unit/test_speciation.jl")
+    include("test/unit/test_bloat_penalty.jl")
+    include("test/unit/test_island_model.jl")
+end'
+```
+
+Unit tests pass in ~8 seconds.
 
 ## Dependencies
 
@@ -59,4 +77,4 @@ Zero mandatory external dependencies. Only `Random` (stdlib). HTTP.jl and Dynami
 
 ## Plan Document
 
-`genprog_jl_plan.md` in the project root contains the full architecture and development plan across all phases. Phase 1 scope is defined in Section 10.
+`genprog_jl_plan.md` in the project root contains the full architecture and development plan across all phases.

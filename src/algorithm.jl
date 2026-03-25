@@ -17,6 +17,7 @@ via keyword arguments with sensible defaults.
 - `mutation_ops::Vector{AbstractMutationOperator}`: mutation operators
 - `crossover_ops::Vector{AbstractCrossoverOperator}`: crossover operators
 - `selection::AbstractSelectionStrategy`: selection strategy
+- `convergence_threshold::Float64`: best fitness below this value sets `converged=true` in result (default: `Inf`, meaning never converged)
 """
 struct GeneticProgramming <: AbstractEvolutionaryAlgorithm
     pop_size::Int
@@ -31,6 +32,7 @@ struct GeneticProgramming <: AbstractEvolutionaryAlgorithm
     mutation_ops::Vector{AbstractMutationOperator}
     crossover_ops::Vector{AbstractCrossoverOperator}
     selection::AbstractSelectionStrategy
+    convergence_threshold::Float64
 end
 
 """
@@ -50,7 +52,8 @@ function GeneticProgramming(;
     speciation::AbstractSpeciation = NoSpeciation(),
     mutation_ops::Vector{<:AbstractMutationOperator} = AbstractMutationOperator[SubtreeMutation(), PointMutation()],
     crossover_ops::Vector{<:AbstractCrossoverOperator} = AbstractCrossoverOperator[SubtreeCrossover()],
-    selection::AbstractSelectionStrategy = TournamentSelection(3)
+    selection::AbstractSelectionStrategy = TournamentSelection(3),
+    convergence_threshold::Float64 = Inf
 )
     GeneticProgramming(
         pop_size, generations, mutation_rate, crossover_rate,
@@ -58,7 +61,7 @@ function GeneticProgramming(;
         parallel, speciation,
         convert(Vector{AbstractMutationOperator}, mutation_ops),
         convert(Vector{AbstractCrossoverOperator}, crossover_ops),
-        selection
+        selection, convergence_threshold
     )
 end
 

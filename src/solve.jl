@@ -213,7 +213,7 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
         mean_history,
         algorithm.generations,
         wall_time,
-        fitnesses[1] < 1.0
+        fitnesses[1] < algorithm.convergence_threshold
     )
 end
 
@@ -399,7 +399,7 @@ function solve(problem::GPProblem{G,E},
         mean_history,
         alg.generations,
         wall_time,
-        global_best_fitness < 1.0
+        global_best_fitness < alg.convergence_threshold
     )
 end
 

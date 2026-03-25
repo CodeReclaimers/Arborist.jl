@@ -22,7 +22,7 @@ struct FunctionDetails
 end
 
 Base.:(==)(a::FunctionDetails, b::FunctionDetails) = a.name == b.name && a.args == b.args && a.return_type == b.return_type
-Base.isequal(a::FunctionDetails, b::FunctionDetails) = hash(a) == hash(b)
+Base.isequal(a::FunctionDetails, b::FunctionDetails) = a.name == b.name && a.args == b.args && a.return_type == b.return_type
 function Base.hash(a::FunctionDetails, h::UInt64)
 	h = hash(a.name, h)
 	for arg in a.args

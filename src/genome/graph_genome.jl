@@ -621,6 +621,6 @@ function solve(problem::GPProblem{GraphGenome, E},
         genomes[1], fitnesses[1], genomes,
         fitness_history, mean_history,
         algorithm.generations, time() - t0,
-        fitnesses[1] < 1.0
+        fitnesses[1] < algorithm.convergence_threshold
     )
 end

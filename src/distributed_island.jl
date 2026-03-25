@@ -472,7 +472,7 @@ function _distributed_sync_solve(problem::GPProblem{G,E}, algorithm::IslandModel
             mean_history,
             alg.generations,
             wall_time,
-            best_state.best_fitness < 1.0
+            best_state.best_fitness < alg.convergence_threshold
         )
     finally
         if auto_rmprocs && !isempty(added_pids)
@@ -688,7 +688,7 @@ function _distributed_async_solve(problem::GPProblem{G,E}, algorithm::IslandMode
             mean_history,
             alg.generations,
             wall_time,
-            best_state.best_fitness < 1.0
+            best_state.best_fitness < alg.convergence_threshold
         )
     finally
         if auto_rmprocs && !isempty(added_pids)

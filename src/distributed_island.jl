@@ -219,6 +219,33 @@ struct AsyncStatusMessage
 end
 
 """
+    _nonblocking_put!(ch, val; timeout=0.5) -> Bool
+
+Attempt to put `val` into channel `ch` without blocking the caller.
+Spawns the `put!` in an @async task and waits up to `timeout` seconds.
+Returns `true` if the put completed, `false` if it timed out (channel
+full) or the channel was closed. Timed-out tasks resolve later when
+space opens or the channel closes — they do not leak indefinitely.
+"""
+function _nonblocking_put!(ch, val; timeout::Float64=0.5)
+    t = @async try
+        put!(ch, val)
+        true
+    catch e
+        e isa InvalidStateException && return false
+        rethrow()
+    end
+    if timedwait(() -> istaskdone(t), timeout) === :timed_out
+        return false
+    end
+    try
+        return fetch(t)
+    catch
+        return false
+    end
+end
+
+"""
     _run_island_async(id, inboxes, status_ch, n_islands, topology,
                       migration_interval, migration_size) -> NamedTuple
 
@@ -226,10 +253,11 @@ Run the full async evolution loop for island `id`. Called via remotecall
 on a worker process. Each generation: evolve, report status, and at
 migration intervals drain inbox and push emigrants to destinations.
 
-Channel capacities are sized to prevent blocking: status channel holds
-one message per generation per island, migration inboxes hold at least
-16 batches or one per generation. A fast island never blocks on a slow
-island's full inbox.
+All channel operations are non-blocking. Status and migration put! calls
+use `_nonblocking_put!` which wraps the operation in an @async task with
+a short timeout — if the channel is full, the data is dropped rather
+than blocking the evolution loop. Inbox draining uses `isready` to avoid
+blocking on `take!`.
 """
 function _run_island_async(id::Int,
                            inboxes::Vector{RemoteChannel},
@@ -245,15 +273,10 @@ function _run_island_async(id::Int,
     for gen in 1:alg.generations
         result = _evolve_one_gen_local!(id)
 
-        # Report status. Channel is sized to hold all possible messages,
-        # so put! will not block. InvalidStateException handles channel close.
-        try
-            put!(status_ch, AsyncStatusMessage(id, gen,
-                                                result.best_fitness,
-                                                result.mean_fitness))
-        catch e
-            e isa InvalidStateException || rethrow()
-        end
+        # Report status (non-blocking; drop if channel full or closed).
+        _nonblocking_put!(status_ch, AsyncStatusMessage(id, gen,
+                                                         result.best_fitness,
+                                                         result.mean_fitness))
 
         # Migration at intervals
         if gen % migration_interval == 0
@@ -269,16 +292,11 @@ function _run_island_async(id::Int,
                 end
             end
 
-            # Push emigrants to destinations. Inbox capacity is generous,
-            # so put! should not block. InvalidStateException handles channel close.
+            # Push emigrants to destinations (non-blocking; drop if full).
             emigrants = _get_migrants_local(id, migration_size)
             destinations = migration_targets(topology, id, n_islands, rng)
             for dest in destinations
-                try
-                    put!(inboxes[dest], emigrants)
-                catch e
-                    e isa InvalidStateException || rethrow()
-                end
+                _nonblocking_put!(inboxes[dest], emigrants)
             end
         end
     end
@@ -567,18 +585,18 @@ function _distributed_async_solve(problem::GPProblem{G,E}, algorithm::IslandMode
             fetch(f)
         end
 
-        # Create migration inboxes (one per island, on the island's worker).
-        # Use generous capacity to prevent put! from blocking — a fast island
-        # must never wait on a slow island's full inbox.
-        inbox_capacity = max(16, algorithm.island_algorithm.generations)
+        # Create bounded migration inboxes (one per island, on the island's worker).
+        # _nonblocking_put! ensures a fast island never blocks on a slow island's
+        # full inbox — data is dropped rather than blocking the evolution loop.
+        inbox_capacity = 4
         inboxes = RemoteChannel[
             RemoteChannel(() -> Channel{Vector{MigrantGenome}}(inbox_capacity), w)
             for (i, w) in enumerate(workers_used)
         ]
 
-        # Status channel: capacity = total messages possible (one per gen per island)
-        status_capacity = n * algorithm.island_algorithm.generations
-        status_ch = RemoteChannel(() -> Channel{AsyncStatusMessage}(status_capacity))
+        # Status channel: bounded, coordinator polls it.
+        # _nonblocking_put! drops status messages if channel is full.
+        status_ch = RemoteChannel(() -> Channel{AsyncStatusMessage}(n * 10))
 
         t0 = time()
 

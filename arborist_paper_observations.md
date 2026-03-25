@@ -78,7 +78,12 @@ and sorting examples.
 The pattern enables Turing-complete program synthesis while keeping
 the type-consistency machinery intact. The critical implementation
 detail is thread-local simulator state (one instance per thread) to
-support parallel evaluation via `Threads.@threads`.
+support parallel evaluation via `Threads.@threads`. The bin packing
+and sorting examples implement thread-local state via closures over
+per-thread arrays. AntGenome's built-in evaluator uses a single
+module-level `Ref` and requires `parallel=false`; extending it to
+parallel evaluation would follow the same closure-based pattern
+demonstrated in the examples.
 
 ### 1.5 LLM mutation operator architecture
 
@@ -194,18 +199,34 @@ a structural template is where LLMs excel.
 
 ### 2.4 LLM operator findings
 
+**Important caveat**: All LLM bin packing data below was collected with
+the assignment-only `deserialize` parser — the LLM's output was silently
+stripped of any control flow (while loops, if statements, for loops,
+standalone function calls). Only bare assignment lines survived. This
+means the LLM's contribution was limited to constant and expression
+tuning within assignments; any structural improvements the LLM may have
+proposed were discarded. The control-flow skeleton came entirely from
+the seeded population and classical crossover.
+
+The `deserialize` parser was fixed (2026-03-25) to accept control flow.
+Experiments should be re-run with the fixed parser to determine whether
+the LLM can contribute structural improvements, not just constant tuning.
+Results with full control flow support are expected to differ — possibly
+significantly if the LLM can now propose loop structures and conditional
+logic that survive parsing.
+
 **Qwen3-Coder-30B (local Ollama, 3.3B active parameters):**
 - Fallback rate: 0.2% (3/1313 calls)
 - Mean call latency: 1.21s
 - Understood the problem representation and generated valid Julia
   with bin packing primitives on 99.8% of calls
 
-**Sample efficiency finding**: The LLM reaches fitness 1.0699 at
-generation 91; classical GP doesn't reach that level until generation
-~190. The LLM provides genuine 2x sample efficiency in *generation
-count*. However, in *wall time*, classical GP given equal budget
-(800 generations, ~4400s) achieves 1.0623, surpassing the 100-gen
-LLM result (1.0679) and the 300-gen LLM result (1.0683).
+**Sample efficiency finding** (assignment-only parser): The LLM reaches
+fitness 1.0699 at generation 91; classical GP doesn't reach that level
+until generation ~190. The LLM provides genuine 2x sample efficiency in
+*generation count*. However, in *wall time*, classical GP given equal
+budget (800 generations, ~4400s) achieves 1.0623, surpassing the
+100-gen LLM result (1.0679) and the 300-gen LLM result (1.0683).
 
 **Conclusion**: LLM operators provide sample efficiency when generation
 count is the bottleneck (expensive evaluators, limited time). Given
@@ -238,6 +259,16 @@ syntactic variants of the same algorithm into one species. Reduces
 species count from ~100 to 53-60 with only 3% computational overhead
 vs no speciation. Achieves the lowest variance across seeds (std=0.0027
 vs 0.0112 for classical GP), trading peak performance for reliability.
+
+**Transparency note on variance**: The low variance (std=0.0027) largely
+reflects template conservation — 4 out of 5 behavioral speciation seeds
+produced test fitness identical to the unevolved Best Fit template (to
+6 decimal places). Only seed 42 improved beyond the template. This
+means the speciation's diversity pressure successfully preserved the
+template structure against drift, but the strategy did not consistently
+find improvements *beyond* the template. The low variance is real but
+reflects a floor effect (convergence to the template) rather than
+convergent independent discovery of similar solutions.
 
 **Key insight**: Speciation strategy is problem-class dependent.
 For structural innovation problems (NEAT, topology search),

@@ -529,14 +529,73 @@ reduce the effective fallback rate by filtering obviously degenerate
 proposals before the expensive `@eval` step. This is the "constitutional
 mutation" pattern — not yet implemented.
 
-### 5.8 Parallelism completions
+### 5.8 Distributed island model (implemented)
 
-Phase 5 implemented `Threads.@threads` for population evaluation
-but deferred island model parallelism and concurrent LLM calls.
-Island parallelism maps naturally to `Threads.@spawn` and would
-make the LLM operator economical at larger scales (LLM mutations
+The distributed island model runs each island in its own Julia worker
+process via `Distributed.jl`. This solves the three `@eval` problems
+that make ExprGenome island models slow in a single process:
+
+1. **Compilation lock**: `@eval` takes a per-process global lock, so
+   islands in the same process compile sequentially even with threads.
+   Separate processes compile in true parallel.
+2. **World age**: Every `@eval`'d function requires `Base.invokelatest`
+   to call, preventing inlining. Separate processes have independent
+   world ages.
+3. **Module-level state**: Side-effectful evaluators (bin packing,
+   sorting, ant trail) use module-level `Ref` state. Separate processes
+   have independent state without thread-local workarounds.
+
+**Architecture**: The main process coordinates lockstep generations
+via `remotecall`/`fetch`. Worker-side state is stored in a module-level
+`Dict{Int, IslandState}` keyed by island ID — only status tuples and
+`MigrantGenome` payloads cross the wire. Migration uses pluggable
+topology dispatch (`RingTopology`, `CompleteTopology`, `RandomTopology`).
+Worker lifecycle is user-managed by default with opt-in auto-add/remove.
+
+**Contrast with PaGMO**: PaGMO/PyGMO is async-only with pluggable
+topologies. Arborist.jl supports both sync (implemented) and async
+(deferred). The sync mode is simpler, reproducible, and matches ECJ
+and DEAP defaults. Async mode with `RemoteChannel`-based migration
+is the natural follow-on for heterogeneous evaluation times.
+
+**Paper claim**: Process-level isolation is the correct granularity
+for `@eval`-based program synthesis — it eliminates all three
+contention problems without requiring the user to think about world
+age, compilation locks, or thread-local state.
+
+### 5.9 Seed template ablation for sorting
+
+**Finding**: Evolution cannot discover nested loop structure from a
+single-pass seed within 500 generations at pop=300. Both type-1-only
+runs (single adjacent-swap pass) converged to a `while true` loop
+that runs until the loop limit (5760 iterations) — using the limit
+as a poor substitute for an outer loop. Accuracy: 67–84% on length 3,
+<1% on length 8.
+
+The seed=123 run managed to advance to curriculum length 4 at
+generation 300, but only via a stochastic pre-shuffle mutation, not
+a structural improvement. Random-only initialization produced
+essentially no sorting (32% on length 3, which is near chance).
+
+**Root cause**: The mutation operators (SubtreeMutation, PointMutation,
+HoistMutation, ExpansionMutation) can modify existing loops and add
+statements inside them, but cannot "wrap" an existing expression in
+a new loop. Discovering a nested loop requires simultaneously creating
+an outer loop with correct bounds AND relocating the inner loop
+inside it — an extremely unlikely compound mutation.
+
+**Implication**: For control-flow synthesis problems requiring nested
+loops, the loop architecture must be seeded. Evolution can refine
+and simplify seeded structures but cannot discover them de novo at
+this scale. This parallels the bin packing finding that seed templates
+matter as much as the evolutionary algorithm.
+
+### 5.10 Concurrent LLM calls
+
+Deferred. With distributed islands, LLM mutations on one island
 run concurrently with classical evaluation on other islands,
-amortizing the latency).
+amortizing the latency naturally. Explicit concurrent LLM calls
+within a single island remain a future extension.
 
 ---
 
@@ -585,10 +644,11 @@ amortizing the latency).
   gating strategy
 
 ### Test suite
-- 1172 tests total (Phases 1-6 + behavioral diversity)
-- Fast tier (unit + integration): ~17 seconds
+- 1220 tests total (Phases 1-6 + behavioral diversity + distributed islands)
+- Fast tier (unit + integration): ~30 seconds (includes distributed
+  integration test that spins up 2 worker processes)
 - Full benchmark tier: ~80 seconds (GENPROG_RUN_BENCHMARKS=true)
-- Package precompile time: ~364ms (GenProg core)
+- Package precompile time: ~495ms (Arborist core + Distributed)
 
 ---
 

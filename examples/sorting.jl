@@ -110,6 +110,7 @@ struct SortingEvaluator <: Arborist.AbstractEvaluator
     rng_seed::Int          # for reproducible test arrays
     partial_credit::Bool   # whether to give partial credit via inversion count
     loop_limit::Int        # loop iteration limit for add_loop_checks
+    comparison_alpha::Float64  # weight for comparison count penalty (0 = no penalty)
 end
 
 function SortingEvaluator(;
@@ -118,9 +119,10 @@ function SortingEvaluator(;
         value_range::Int=100,
         rng_seed::Int=42,
         partial_credit::Bool=true,
-        loop_limit::Int=640)
+        loop_limit::Int=640,
+        comparison_alpha::Float64=0.0)
     SortingEvaluator(n_episodes, array_length, value_range, rng_seed,
-                     partial_credit, loop_limit)
+                     partial_credit, loop_limit, comparison_alpha)
 end
 
 Arborist.input_signature(::SortingEvaluator) = Dict{Symbol,DataType}()
@@ -128,22 +130,35 @@ Arborist.output_signature(::SortingEvaluator) = Dict(:done => Bool)
 
 function Arborist.evaluate(e::SortingEvaluator, f::Function)
     total_score = 0.0
+    total_comp_penalty = 0.0
+    n = e.array_length
+    nlogn = n * log2(n)
     for ep in 1:e.n_episodes
         ep_rng = Random.MersenneTwister(e.rng_seed + ep)
-        arr = rand(ep_rng, Int32(-e.value_range):Int32(e.value_range), e.array_length)
+        arr = rand(ep_rng, Int32(-e.value_range):Int32(e.value_range), n)
         reset_sort_state!(arr)
         try
             Base.invokelatest(f)
         catch
             # program threw (e.g. LoopLimitExceeded) — score whatever state we have
         end
+        sorted = issorted(_sort_state[].arr)
         if e.partial_credit
             total_score += inversion_count(_sort_state[].arr)
         else
-            total_score += issorted(_sort_state[].arr) ? 0.0 : 1.0
+            total_score += sorted ? 0.0 : 1.0
+        end
+        # Only reward comparison efficiency on correctly sorted episodes.
+        # This prevents evolution from trading correctness for fewer comparisons.
+        if e.comparison_alpha > 0.0 && sorted
+            total_comp_penalty += Float64(_sort_state[].comparisons) / nlogn
         end
     end
-    return total_score / e.n_episodes
+    fitness = total_score / e.n_episodes
+    if e.comparison_alpha > 0.0
+        fitness += e.comparison_alpha * (total_comp_penalty / e.n_episodes)
+    end
+    return fitness
 end
 
 # =============================================================================
@@ -158,6 +173,8 @@ mutable struct CurriculumSortingEvaluator <: Arborist.AbstractEvaluator
     rng_seed::Int
     partial_credit::Bool
     upgrade_threshold::Float64  # fitness level to trigger curriculum advance
+    comparison_alpha_base::Float64  # base multiplier for comparison penalty
+                                    # adaptive α = base * max(0, current_length - 6)
 end
 
 function CurriculumSortingEvaluator(;
@@ -167,25 +184,31 @@ function CurriculumSortingEvaluator(;
         value_range::Int=100,
         rng_seed::Int=42,
         partial_credit::Bool=true,
-        upgrade_threshold::Float64=0.05)
+        upgrade_threshold::Float64=0.05,
+        comparison_alpha_base::Float64=0.05)
     CurriculumSortingEvaluator(current_length, target_length, n_episodes,
                                value_range, rng_seed, partial_credit,
-                               upgrade_threshold)
+                               upgrade_threshold, comparison_alpha_base)
 end
 
 Arborist.input_signature(::CurriculumSortingEvaluator) = Dict{Symbol,DataType}()
 Arborist.output_signature(::CurriculumSortingEvaluator) = Dict(:done => Bool)
 
-"""Build a SortingEvaluator for the current curriculum length."""
+"""Build a SortingEvaluator for the current curriculum length.
+Adaptive α: zero for lengths ≤ 6 (correctness only), then increases
+linearly so the comparison penalty only kicks in once arrays are large
+enough for the O(n²) vs O(n log n) difference to be meaningful."""
 function _make_evaluator(c::CurriculumSortingEvaluator)
     loop_limit = 10 * c.current_length^2
+    α = c.comparison_alpha_base * max(0, c.current_length - 6)
     SortingEvaluator(
         n_episodes=c.n_episodes,
         array_length=c.current_length,
         value_range=c.value_range,
         rng_seed=c.rng_seed,
         partial_credit=c.partial_credit,
-        loop_limit=loop_limit
+        loop_limit=loop_limit,
+        comparison_alpha=α
     )
 end
 
@@ -456,21 +479,48 @@ function run_genome_on_array(g::Arborist.ExprGenome, arr::Vector{Int32};
     return copy(_sort_state[].arr)
 end
 
-"""Verify the evolved sorter on unseen test arrays."""
+"""Verification result for a single array length."""
+struct VerifyResult
+    accuracy::Float64        # fraction correctly sorted
+    mean_comparisons::Float64
+    mean_swaps::Float64
+end
+
+"""Verify the evolved sorter on unseen test arrays.
+Returns a Dict mapping array length to VerifyResult with accuracy,
+mean comparisons, and mean swaps."""
 function verify_sorter(g::Arborist.ExprGenome;
                        n_tests::Int=1000,
-                       max_length::Int=12,
+                       max_length::Int=24,
                        rng=Random.MersenneTwister(999))
-    results = Dict{Int, Float64}()
+    # Pre-compile once (use max_length for loop limit)
+    loop_limit_max = 10 * max_length^2
+    f = _sort_compile(g, loop_limit_max)
+
+    results = Dict{Int, VerifyResult}()
     for len in 3:max_length
-        loop_limit = 10 * len^2
         correct = 0
+        total_comps = 0
+        total_swaps = 0
         for _ in 1:n_tests
             arr = rand(rng, Int32(-100):Int32(100), len)
-            sorted_arr = run_genome_on_array(g, arr; loop_limit=loop_limit)
-            issorted(sorted_arr) && (correct += 1)
+            reset_sort_state!(arr)
+            if f !== nothing
+                try
+                    Base.invokelatest(f)
+                catch
+                end
+            end
+            s = _sort_state[]
+            issorted(s.arr) && (correct += 1)
+            total_comps += Int(s.comparisons)
+            total_swaps += Int(s.swaps)
         end
-        results[len] = correct / n_tests
+        results[len] = VerifyResult(
+            correct / n_tests,
+            total_comps / n_tests,
+            total_swaps / n_tests
+        )
     end
     return results
 end
@@ -533,12 +583,36 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
         mean_fit = isempty(finite_fits) ? Inf : sum(finite_fits) / length(finite_fits)
         push!(mean_history, mean_fit)
 
-        # Check curriculum advancement
-        if fitnesses[1] < evaluator.upgrade_threshold &&
-           evaluator.current_length < evaluator.target_length
+        # Check curriculum advancement using correctness-only fitness.
+        # We check the top individuals (not just genomes[1]) because with
+        # the gated comparison penalty, a correct sorter that pays the
+        # comparison cost can rank below an incorrect program that pays none.
+        should_advance = false
+        if evaluator.current_length < evaluator.target_length
+            correctness_eval = SortingEvaluator(
+                n_episodes=evaluator.n_episodes,
+                array_length=evaluator.current_length,
+                value_range=evaluator.value_range,
+                rng_seed=evaluator.rng_seed,
+                partial_credit=evaluator.partial_credit,
+                loop_limit=10 * evaluator.current_length^2,
+                comparison_alpha=0.0
+            )
+            n_check = min(algorithm.elitism * 4, pop_size)
+            for i in 1:n_check
+                c = Arborist.evaluate_genome(genomes[i], correctness_eval)
+                if c < evaluator.upgrade_threshold
+                    should_advance = true
+                    break
+                end
+            end
+        end
+        if should_advance
             old_length = evaluator.current_length
             evaluator.current_length += 1
-            println("Curriculum advance: length $old_length -> $(evaluator.current_length) at gen $gen")
+            new_α = evaluator.comparison_alpha_base * max(0, evaluator.current_length - 6)
+            α_note = new_α > 0 ? " (α=$(round(new_α, digits=3)))" : ""
+            println("Curriculum advance: length $old_length -> $(evaluator.current_length) at gen $gen$α_note")
             flush(stdout)
             # Re-evaluate entire population at new length
             for i in 1:pop_size
@@ -557,11 +631,13 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
                                                            algorithm.speciation, species_state, rng)
 
         elapsed = round(time() - t0, digits=1)
+        α = evaluator.comparison_alpha_base * max(0, evaluator.current_length - 6)
         if verbose
+            α_str = α > 0 ? " | α=$(round(α, digits=3))" : ""
             println("Gen $gen/$(algorithm.generations) | " *
                     "best=$(round(fitnesses[1], digits=4)) | " *
                     "mean=$(round(mean_fit, digits=4)) | " *
-                    "curriculum_len=$(evaluator.current_length) | " *
+                    "curriculum_len=$(evaluator.current_length)$α_str | " *
                     "elapsed=$(elapsed)s")
             flush(stdout)
         end
@@ -642,9 +718,10 @@ function run_sorting(;
         bloat_penalty::Float64 = 0.0005,
         seed::Int = 42,
         start_length::Int = 3,
-        target_length::Int = 8,
+        target_length::Int = 20,
         n_episodes::Int = 30,
         upgrade_threshold::Float64 = 0.05,
+        comparison_alpha_base::Float64 = 0.05,
         verbose::Bool = true)
 
     println("=" ^ 70)
@@ -658,6 +735,8 @@ function run_sorting(;
     println("  seed=$seed")
     println("  curriculum: start_length=$start_length -> target_length=$target_length")
     println("  n_episodes=$n_episodes, upgrade_threshold=$upgrade_threshold")
+    println("  comparison_alpha_base=$comparison_alpha_base")
+    println("  (adaptive α = $comparison_alpha_base * max(0, length - 6))")
     println("  started: $(Dates.now())")
     println("=" ^ 70)
     flush(stdout)
@@ -667,6 +746,7 @@ function run_sorting(;
         target_length=target_length,
         n_episodes=n_episodes,
         upgrade_threshold=upgrade_threshold,
+        comparison_alpha_base=comparison_alpha_base,
     )
 
     fset = sorting_function_set()
@@ -708,17 +788,26 @@ function run_sorting(;
     flush(stdout)
 
     # Verification
+    verify_max = max(target_length + 4, 24)
     println()
     println("Verification results (1000 random arrays per length, unseen seeds):")
-    verification = verify_sorter(result.best_genome; n_tests=1000, max_length=12)
-    for len in 3:12
-        pct = round(verification[len] * 100, digits=1)
-        println("  Length $len: $(lpad(pct, 5))% correct")
+    verification = verify_sorter(result.best_genome; n_tests=1000, max_length=verify_max)
+    println("  Length | Correct |  Comps  |  Swaps  | Comps/n² | Comps/(n·lg n)")
+    println("  ------+---------+---------+---------+----------+--------------")
+    for len in 3:verify_max
+        v = verification[len]
+        pct = round(v.accuracy * 100, digits=1)
+        comps = round(v.mean_comparisons, digits=1)
+        swaps = round(v.mean_swaps, digits=1)
+        comp_n2 = round(v.mean_comparisons / len^2, digits=3)
+        nlogn = len * log2(len)
+        comp_nlogn = round(v.mean_comparisons / nlogn, digits=3)
+        println("  $(lpad(len, 5)) | $(lpad(pct, 6))% | $(lpad(comps, 7)) | $(lpad(swaps, 7)) | $(lpad(comp_n2, 8)) | $(lpad(comp_nlogn, 12))")
     end
     flush(stdout)
 
     # Determine tier
-    len8_pct = verification[8]
+    len8_pct = verification[8].accuracy
     tier = if len8_pct >= 1.0
         "Tier 2 (target): 100% correct on length-8"
     elseif len8_pct >= 0.9
@@ -728,14 +817,41 @@ function run_sorting(;
     end
 
     # Check generalization
-    generalizes = all(verification[len] >= 0.95 for len in 9:12)
+    gen_max = min(verify_max, target_length + 4)
+    generalizes = gen_max > target_length &&
+                  all(verification[len].accuracy >= 0.95 for len in (target_length+1):gen_max)
     gen_str = generalizes ?
         "Yes — program generalizes beyond training distribution" :
         "No — performance degrades on longer arrays (possible overfitting to length)"
 
+    # Characterize comparison complexity
+    # Compare to n*(n-1)/2 (selection sort) and n*log2(n) (optimal)
+    comp_analysis = ""
+    if verification[verify_max].accuracy >= 0.95
+        comps_at_max = verification[verify_max].mean_comparisons
+        n = verify_max
+        sel_sort_comps = n * (n - 1) / 2
+        nlogn_comps = n * log2(n)
+        ratio_sel = comps_at_max / sel_sort_comps
+        ratio_nlogn = comps_at_max / nlogn_comps
+        comp_analysis = if ratio_sel < 0.6
+            "Sub-quadratic: $(round(comps_at_max, digits=0)) comps at n=$n " *
+            "($(round(ratio_nlogn, digits=1))× n·lg(n), $(round(ratio_sel, digits=2))× selection sort)"
+        elseif ratio_sel < 0.9
+            "Reduced quadratic: $(round(comps_at_max, digits=0)) comps at n=$n " *
+            "($(round(ratio_sel, digits=2))× selection sort)"
+        else
+            "Quadratic: $(round(comps_at_max, digits=0)) comps at n=$n " *
+            "(≈ selection sort's $(round(sel_sort_comps, digits=0)))"
+        end
+    end
+
     println()
     println("Achievement: $tier")
-    println("Generalization (length 9-12): $gen_str")
+    println("Generalization (length $(target_length+1)-$gen_max): $gen_str")
+    if !isempty(comp_analysis)
+        println("Comparison complexity: $comp_analysis")
+    end
     flush(stdout)
 
     # Save results
@@ -753,6 +869,8 @@ function run_sorting(;
         println(io, "- bloat_penalty=$bloat_penalty")
         println(io, "- curriculum: $start_length → $target_length")
         println(io, "- upgrade_threshold=$upgrade_threshold")
+        println(io, "- comparison_alpha_base=$comparison_alpha_base")
+        println(io, "- (adaptive α = $comparison_alpha_base × max(0, length − 6))")
         println(io)
         println(io, "## Results")
         println(io, "- **Best fitness:** $(round(result.best_fitness, digits=6))")
@@ -761,6 +879,9 @@ function run_sorting(;
         println(io, "- **Final curriculum length:** $(evaluator.current_length)")
         println(io, "- **Achievement:** $tier")
         println(io, "- **Generalization:** $gen_str")
+        if !isempty(comp_analysis)
+            println(io, "- **Comparison complexity:** $comp_analysis")
+        end
         println(io)
         println(io, "## Evolved Program")
         println(io, "```julia")
@@ -779,17 +900,32 @@ function run_sorting(;
         println(io, "## Verification")
         println(io, "```")
         println(io, "Verification results (1000 random arrays per length, unseen seeds):")
-        for len in 3:12
-            pct = round(verification[len] * 100, digits=1)
-            println(io, "  Length $len: $(lpad(pct, 5))% correct")
+        println(io, "  Length | Correct |  Comps  |  Swaps  | Comps/n² | Comps/(n·lg n)")
+        println(io, "  ------+---------+---------+---------+----------+--------------")
+        for len in 3:verify_max
+            v = verification[len]
+            pct = round(v.accuracy * 100, digits=1)
+            comps = round(v.mean_comparisons, digits=1)
+            swaps = round(v.mean_swaps, digits=1)
+            comp_n2 = round(v.mean_comparisons / len^2, digits=3)
+            nlogn = len * log2(len)
+            comp_nlogn = round(v.mean_comparisons / nlogn, digits=3)
+            println(io, "  $(lpad(len, 5)) | $(lpad(pct, 6))% | $(lpad(comps, 7)) | $(lpad(swaps, 7)) | $(lpad(comp_n2, 8)) | $(lpad(comp_nlogn, 12))")
         end
         println(io, "```")
         println(io)
         println(io, "## Notes")
         println(io, "This example evolves a sorting algorithm from scratch using genetic")
-        println(io, "programming with curriculum learning. The evolved program accesses the")
-        println(io, "array only through scalar primitives (sort_get, sort_n, sort_less,")
-        println(io, "sort_swap!) — no built-in sort function is available.")
+        println(io, "programming with curriculum learning and an adaptive comparison count")
+        println(io, "penalty. The evolved program accesses the array only through scalar")
+        println(io, "primitives (sort_get, sort_n, sort_less, sort_swap!) — no built-in")
+        println(io, "sort function is available.")
+        println(io)
+        println(io, "The comparison penalty α = $(comparison_alpha_base) × max(0, n − 6) is zero for")
+        println(io, "the early curriculum stages (lengths 3–6, correctness only) and")
+        println(io, "increases linearly as arrays get longer, creating pressure to reduce")
+        println(io, "comparison count. At length 24, the O(n²) vs O(n log n) difference")
+        println(io, "is ~5×, which provides meaningful fitness signal.")
         println(io)
         println(io, "Sorting is a classic GP benchmark (Koza 1992). Unlike Koza's sorting")
         println(io, "networks which used a fixed comparator representation, this example")
@@ -817,7 +953,7 @@ function main()
                        :max_depth, :seed, :start_length, :target_length, :n_episodes)
                 kwargs[key] = parse(Int, val_str)
             elseif key in (:mutation_rate, :crossover_rate, :bloat_penalty,
-                           :upgrade_threshold)
+                           :upgrade_threshold, :comparison_alpha_base)
                 kwargs[key] = parse(Float64, val_str)
             elseif key == :verbose
                 kwargs[key] = val_str == "true"

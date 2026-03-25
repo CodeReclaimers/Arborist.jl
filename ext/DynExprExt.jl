@@ -101,13 +101,11 @@ end
 # =============================================================================
 
 # DynamicExpressions v2 stores operators in an `ops` field as (unary_tuple, binary_tuple).
-# DynamicExpressions v1 stores them as separate type parameters.
-# These accessors handle both.
 function _get_unary_ops(operators::OperatorEnum)
-    hasproperty(operators, :ops) ? operators.ops[1] : ()
+    operators.ops[1]
 end
 function _get_binary_ops(operators::OperatorEnum)
-    hasproperty(operators, :ops) ? operators.ops[2] : ()
+    operators.ops[2]
 end
 
 # =============================================================================

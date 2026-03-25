@@ -185,6 +185,12 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
         return mutate(op.fallback_op, g, rng)
     end
 
+    # 7. Sanitize the deserialized AST against the function call whitelist.
+    if !sanitize(ASTSanitizer(), result.body)
+        @warn "LLMMutationOperator: sanitizer rejected LLM output, falling back"
+        return mutate(op.fallback_op, g, rng)
+    end
+
     return result
 end
 

@@ -14,7 +14,6 @@
         mutation_rate=0.5,
         crossover_rate=0.3,
         elitism=2,
-        tournament_size=3,
         speciation=ThresholdSpeciation(threshold=3.0, min_species_size=2,
                                        stagnation_limit=15)
     )

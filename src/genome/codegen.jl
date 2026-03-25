@@ -330,7 +330,7 @@ function create_random_for_loop(s::GenState; depth::Int=3)
 	if depth <= 0
 		return create_random_assignment(s)
 	end
-	iter_var = gensym("i")
+	iter_var = Symbol("_i", rand(s.rng, 1000:9999))
 	lo = Int32(rand(s.rng, 0:10))
 	hi = lo + Int32(rand(s.rng, 1:20))
 	range_expr = Expr(:call, :(:), lo, hi)
@@ -522,7 +522,7 @@ function add_loop_checks_expr(expr::Expr, limit::Int)
 		increment = :($counter += 1)
 		check = Expr(:if, Expr(:call, :>, counter, limit), Expr(:call, :throw, Expr(:call, :LoopLimitExceeded)))
 
-		body_idx = (expr.head == :for) ? 2 : 2
+		body_idx = 2
 		processed_body = add_loop_checks_expr(expr.args[body_idx], limit)
 
 		if processed_body isa Expr && processed_body.head == :block

@@ -127,32 +127,27 @@ end
 Parse a string of Julia statements into an ExprGenome. Returns `nothing`
 if zero valid statements survive parsing and type-checking.
 
-Each line is parsed with `Meta.parse`. Successfully parsed assignment
-expressions are type-checked against the GenState using `get_lvalue_type`
-and `get_rvalue_type`. Lines that fail parsing or type-checking are
-skipped (partial recovery) rather than rejecting the whole genome.
+Accepts assignments, `while` loops, `if`/`if-else` statements, `for` loops,
+blocks, `break`, `continue`, and standalone function calls. Multi-line
+control flow is supported by parsing the entire string as a block.
+
+Statements that fail parsing or type-checking are skipped (partial recovery)
+rather than rejecting the whole genome.
 
 Does not eval anything; parse only.
 """
 function deserialize(::Type{ExprGenome}, s::String,
                      state::GenState)::Union{ExprGenome, Nothing}
-    lines = filter(!isempty, strip.(split(s, "\n")))
+    # Try to parse the whole string as a block to handle multi-line control flow.
+    stmts = _parse_statements(s)
+
     valid_stmts = Expr[]
-    for line in lines
-        expr = try
-            Meta.parse(line)
-        catch
-            nothing
-        end
-        expr isa Expr || continue
+    for expr in stmts
         # Unwrap QuoteNode from repr()-style :() output.
-        # repr(:(y = x)) produces ":(y = x)" which Meta.parse returns
-        # as Expr(:quote, :(y = x)).
-        if expr.head == :quote && length(expr.args) == 1 && expr.args[1] isa Expr
+        if expr isa Expr && expr.head == :quote && length(expr.args) == 1 && expr.args[1] isa Expr
             expr = expr.args[1]
         end
-        # Verify it is a valid assignment with consistent types.
-        if _is_valid_assignment(expr, state)
+        if expr isa Expr && _is_valid_statement(expr, state)
             push!(valid_stmts, expr)
         end
     end
@@ -172,6 +167,61 @@ function deserialize(::Type{ExprGenome}, s::String; state::Union{GenState, Nothi
 end
 
 """
+    _parse_statements(s::String) -> Vector{Any}
+
+Parse a string into a list of top-level statements. First tries to parse
+the whole string as a block (to handle multi-line control flow like
+`while...end`). Falls back to line-by-line parsing if block parsing fails.
+"""
+function _parse_statements(s::String)
+    # Try block parse for multi-line control flow.
+    block = try
+        Meta.parse("begin\n" * s * "\nend")
+    catch e
+        e isa InterruptException && rethrow()
+        nothing
+    end
+    if block isa Expr && block.head == :block
+        # Extract non-LineNumberNode statements.
+        return [a for a in block.args if !(a isa LineNumberNode)]
+    end
+
+    # Fallback: line-by-line parsing.
+    lines = filter(!isempty, strip.(split(s, "\n")))
+    stmts = Any[]
+    for line in lines
+        expr = try
+            Meta.parse(line)
+        catch e
+            e isa InterruptException && rethrow()
+            nothing
+        end
+        expr === nothing || push!(stmts, expr)
+    end
+    return stmts
+end
+
+"""
+    _is_valid_statement(expr::Expr, state::GenState) -> Bool
+
+Check that an expression is a valid statement: assignment, while loop,
+if/if-else, for loop, block, or standalone function call. Validates
+recursively for compound statements.
+"""
+function _is_valid_statement(expr::Expr, state::GenState)::Bool
+    h = expr.head
+    h == :(=) && return _is_valid_assignment(expr, state)
+    h == :while && return _is_valid_while(expr, state)
+    h == :if && return _is_valid_if(expr, state)
+    h == :for && return _is_valid_for(expr, state)
+    h == :block && return _is_valid_block(expr, state)
+    h == :call && return _is_valid_call(expr, state)
+    h == :break && return true
+    h == :continue && return true
+    return false
+end
+
+"""
     _is_valid_assignment(expr::Expr, state::GenState) -> Bool
 
 Check that an expression is a valid assignment with type-consistent
@@ -186,8 +236,114 @@ function _is_valid_assignment(expr::Expr, state::GenState)::Bool
         ltype = get_lvalue_type(state, lhs)
         rtype = get_rvalue_type(state, rhs)
         return ltype == rtype
-    catch
+    catch e
+        e isa InterruptException && rethrow()
         return false
+    end
+end
+
+"""Check that a while loop has a Bool-typed condition and valid body."""
+function _is_valid_while(expr::Expr, state::GenState)::Bool
+    length(expr.args) == 2 || return false
+    try
+        cond_type = get_rvalue_type(state, expr.args[1])
+        cond_type == Bool || return false
+    catch e
+        e isa InterruptException && rethrow()
+        return false
+    end
+    body = expr.args[2]
+    body isa Expr || return true  # empty body is valid
+    return _is_valid_body(body, state)
+end
+
+"""Check that an if/if-else has a Bool-typed condition and valid branches."""
+function _is_valid_if(expr::Expr, state::GenState)::Bool
+    length(expr.args) >= 2 || return false
+    try
+        cond_type = get_rvalue_type(state, expr.args[1])
+        cond_type == Bool || return false
+    catch e
+        e isa InterruptException && rethrow()
+        return false
+    end
+    # Validate then-branch.
+    then_branch = expr.args[2]
+    if then_branch isa Expr && !_is_valid_body(then_branch, state)
+        return false
+    end
+    # Validate else-branch if present.
+    if length(expr.args) >= 3
+        else_branch = expr.args[3]
+        if else_branch isa Expr
+            # else-branch can be another :if (elseif) or a :block
+            if else_branch.head == :if
+                return _is_valid_if(else_branch, state)
+            elseif !_is_valid_body(else_branch, state)
+                return false
+            end
+        end
+    end
+    return true
+end
+
+"""Check that a for loop has a valid iterator and body."""
+function _is_valid_for(expr::Expr, state::GenState)::Bool
+    length(expr.args) == 2 || return false
+    # args[1] is the iterator assignment (e.g., :(i = 1:10))
+    iter = expr.args[1]
+    iter isa Expr && iter.head == :(=) || return false
+    # We don't type-check the iterator variable — it's loop-local.
+    body = expr.args[2]
+    body isa Expr || return true
+    return _is_valid_body(body, state)
+end
+
+"""Check that a block contains at least one valid statement."""
+function _is_valid_block(expr::Expr, state::GenState)::Bool
+    expr.head == :block || return false
+    for a in expr.args
+        a isa LineNumberNode && continue
+        a isa Expr || continue
+        if _is_valid_statement(a, state)
+            return true
+        end
+    end
+    return false
+end
+
+"""Check that a standalone function call uses a known function."""
+function _is_valid_call(expr::Expr, state::GenState)::Bool
+    expr.head == :call || return false
+    length(expr.args) >= 1 || return false
+    fn = expr.args[1]
+    fn isa Symbol || return false
+    # Check against the function set.
+    for fd in state.fset.functions
+        if fd.name == fn
+            return true
+        end
+    end
+    return false
+end
+
+"""Validate the body of a control flow statement (block or single statement)."""
+function _is_valid_body(body::Expr, state::GenState)::Bool
+    if body.head == :block
+        # At least one statement must be valid; invalid ones are tolerated.
+        for a in body.args
+            a isa LineNumberNode && continue
+            if a isa Expr && _is_valid_statement(a, state)
+                return true
+            end
+            # break/continue as bare Symbols
+            if a isa Symbol && a in (:break, :continue)
+                return true
+            end
+        end
+        return false
+    else
+        return _is_valid_statement(body, state)
     end
 end
 
@@ -241,7 +397,8 @@ function evaluate_genome(g::ExprGenome, evaluator::AbstractEvaluator)
         harness = create_harness(g.state, checked_body, fname)
         f = @eval $harness
         return evaluate(evaluator, f)
-    catch
+    catch e
+        e isa InterruptException && rethrow()
         return Inf
     end
 end

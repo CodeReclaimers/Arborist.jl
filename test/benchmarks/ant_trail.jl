@@ -32,7 +32,7 @@ const N_FOOD = length(SANTA_FE_FOOD)
     algorithm = GeneticProgramming(
         pop_size=10, generations=3,
         mutation_rate=0.4, crossover_rate=0.3,
-        elitism=1, tournament_size=3
+        elitism=1, parallel=false
     )
 
     problem = GPProblem(evaluator, AntGenome; seed=42)

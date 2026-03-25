@@ -31,6 +31,10 @@ end
 Create the initial population of genomes. Internal function.
 """
 function _initialize_population(problem::GPProblem{G,E}, algorithm::GeneticProgramming, rng::AbstractRNG) where {G,E}
+    if G !== ExprGenome
+        error("_initialize_population only supports ExprGenome. " *
+              "$(G) requires a specialized solve method (see AntGenome, GraphGenome).")
+    end
     inputs = input_signature(problem.evaluator)
     outputs = output_signature(problem.evaluator)
     state = GenState(rng, problem.function_set, inputs, outputs, problem.num_temps)
@@ -158,8 +162,7 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
         end
 
         # Determine tournament size from selection strategy.
-        t_size = algorithm.selection isa TournamentSelection ?
-                 algorithm.selection.tournament_size : algorithm.tournament_size
+        t_size = algorithm.selection.tournament_size
 
         # Fill the rest via tournament selection + genetic operators.
         # Tournament selection uses shared fitnesses for diversity pressure.
@@ -284,8 +287,7 @@ function solve(problem::GPProblem{G,E},
     fitness_history = Float64[]
     mean_history = Float64[]
 
-    t_size = alg.selection isa TournamentSelection ?
-             alg.selection.tournament_size : alg.tournament_size
+    t_size = alg.selection.tournament_size
 
     t0 = time()
 
@@ -412,14 +414,18 @@ function _migrate!(island_genomes, island_fitnesses, algorithm::IslandModel, rng
     n = algorithm.n_islands
     ms = algorithm.migration_size
 
-    # Collect emigrants from each island (top ms by fitness).
+    # Collect emigrants from each island (top ms by fitness) with their fitnesses.
     emigrants = Vector{Vector{Any}}(undef, n)
+    emigrant_fitnesses = Vector{Vector{Float64}}(undef, n)
     for i in 1:n
         order = sortperm(island_fitnesses[i])
-        emigrants[i] = [deepcopy(island_genomes[i][order[j]]) for j in 1:min(ms, length(order))]
+        k = min(ms, length(order))
+        emigrants[i] = [deepcopy(island_genomes[i][order[j]]) for j in 1:k]
+        emigrant_fitnesses[i] = [island_fitnesses[i][order[j]] for j in 1:k]
     end
 
     # Send emigrants to topology-determined destinations, replacing worst.
+    # Preserve source fitness — all islands share the same evaluator.
     for i in 1:n
         destinations = migration_targets(algorithm.topology, i, n, rng)
         for dest in destinations
@@ -429,7 +435,7 @@ function _migrate!(island_genomes, island_fitnesses, algorithm::IslandModel, rng
                 if k <= length(order)
                     worst_idx = order[k]
                     island_genomes[dest][worst_idx] = genome
-                    island_fitnesses[dest][worst_idx] = Inf
+                    island_fitnesses[dest][worst_idx] = emigrant_fitnesses[i][k]
                 end
             end
         end

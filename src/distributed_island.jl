@@ -4,6 +4,14 @@
 # process via Distributed.jl. This eliminates @eval contention between
 # islands: each process has its own compilation lock, world age counter,
 # and module-level state.
+#
+# KNOWN LIMITATION: GraphGenome (NEAT) uses a global innovation counter.
+# In distributed mode, each worker has an independent counter starting at 0,
+# so different workers will assign identical innovation numbers to unrelated
+# mutations. During migration, _neat_crossover aligns by innovation number,
+# which would corrupt network topology. GraphGenome is not yet reachable via
+# the distributed path (see _initialize_population), but this must be
+# addressed before enabling it.
 
 # =============================================================================
 # Worker-local island state
@@ -83,8 +91,7 @@ function _evolve_one_gen_local!(id::Int)
     selection_fitnesses = _apply_speciation!(genomes, fitnesses,
                                               alg.speciation, island.species_state, rng)
 
-    t_size = alg.selection isa TournamentSelection ?
-             alg.selection.tournament_size : alg.tournament_size
+    t_size = alg.selection.tournament_size
 
     # Build next generation
     G = eltype(genomes)
@@ -167,7 +174,7 @@ function _inject_migrants_local!(id::Int, migrants::Vector{MigrantGenome})
         if k <= length(order)
             worst_idx = order[k]
             island.genomes[worst_idx] = from_migrant(m, island.state)
-            island.fitnesses[worst_idx] = Inf  # will be re-evaluated next gen
+            island.fitnesses[worst_idx] = m.fitness  # preserve source fitness
         end
     end
     return nothing
@@ -219,8 +226,10 @@ Run the full async evolution loop for island `id`. Called via remotecall
 on a worker process. Each generation: evolve, report status, and at
 migration intervals drain inbox and push emigrants to destinations.
 
-All channel operations are non-blocking — a fast island never blocks
-on a slow island's full inbox.
+Channel capacities are sized to prevent blocking: status channel holds
+one message per generation per island, migration inboxes hold at least
+16 batches or one per generation. A fast island never blocks on a slow
+island's full inbox.
 """
 function _run_island_async(id::Int,
                            inboxes::Vector{RemoteChannel},
@@ -236,7 +245,8 @@ function _run_island_async(id::Int,
     for gen in 1:alg.generations
         result = _evolve_one_gen_local!(id)
 
-        # Report status (non-blocking; drop if channel full)
+        # Report status. Channel is sized to hold all possible messages,
+        # so put! will not block. InvalidStateException handles channel close.
         try
             put!(status_ch, AsyncStatusMessage(id, gen,
                                                 result.best_fitness,
@@ -259,14 +269,14 @@ function _run_island_async(id::Int,
                 end
             end
 
-            # Push emigrants to destinations (non-blocking)
+            # Push emigrants to destinations. Inbox capacity is generous,
+            # so put! should not block. InvalidStateException handles channel close.
             emigrants = _get_migrants_local(id, migration_size)
             destinations = migration_targets(topology, id, n_islands, rng)
             for dest in destinations
                 try
                     put!(inboxes[dest], emigrants)
                 catch e
-                    # Destination inbox full — drop rather than block
                     e isa InvalidStateException || rethrow()
                 end
             end
@@ -557,15 +567,18 @@ function _distributed_async_solve(problem::GPProblem{G,E}, algorithm::IslandMode
             fetch(f)
         end
 
-        # Create bounded migration inboxes (one per island, on the island's worker)
-        inbox_capacity = 4
+        # Create migration inboxes (one per island, on the island's worker).
+        # Use generous capacity to prevent put! from blocking — a fast island
+        # must never wait on a slow island's full inbox.
+        inbox_capacity = max(16, algorithm.island_algorithm.generations)
         inboxes = RemoteChannel[
             RemoteChannel(() -> Channel{Vector{MigrantGenome}}(inbox_capacity), w)
             for (i, w) in enumerate(workers_used)
         ]
 
-        # Status channel: bounded, coordinator polls it
-        status_ch = RemoteChannel(() -> Channel{AsyncStatusMessage}(n * 10))
+        # Status channel: capacity = total messages possible (one per gen per island)
+        status_capacity = n * algorithm.island_algorithm.generations
+        status_ch = RemoteChannel(() -> Channel{AsyncStatusMessage}(status_capacity))
 
         t0 = time()
 

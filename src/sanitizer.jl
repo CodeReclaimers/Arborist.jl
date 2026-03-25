@@ -76,6 +76,15 @@ function sanitize(san::ASTSanitizer, expr::Expr)::Bool
         return false
     end
 
+    # Reject broadcast/dot-call syntax (e.g., Base.run.(`cmd`))
+    # which parses as expr.head == :. and could bypass the call whitelist.
+    if expr.head == :. && length(expr.args) >= 1
+        fn = expr.args[1]
+        if fn isa Expr || (fn isa Symbol && fn ∉ san.allowed_calls)
+            return false
+        end
+    end
+
     if expr.head == :call
         fn = expr.args[1]
         # Reject qualified calls (e.g., Base.run, Sys.exit)

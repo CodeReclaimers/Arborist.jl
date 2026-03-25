@@ -202,7 +202,7 @@ end
 
 function deserialize(::Type{GraphGenome}, s::String,
                      n_inputs::Int, n_outputs::Int)
-    # Parsing is complex; return nothing for now.
+    @warn "GraphGenome deserialization is not yet implemented"
     return nothing
 end
 
@@ -458,7 +458,8 @@ function evaluate_genome(g::GraphGenome, e::GraphEvaluator)
         end
 
         return total_se / (n_samples * length(output_ids))
-    catch
+    catch e
+        e isa InterruptException && rethrow()
         return Inf
     end
 end
@@ -580,8 +581,7 @@ function solve(problem::GPProblem{GraphGenome, E},
             next_fitnesses[i] = fitnesses[i]
         end
 
-        t_size = algorithm.selection isa TournamentSelection ?
-                 algorithm.selection.tournament_size : algorithm.tournament_size
+        t_size = algorithm.selection.tournament_size
 
         idx = algorithm.elitism + 1
         while idx <= pop_size

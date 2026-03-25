@@ -241,7 +241,8 @@ function deserialize(::Type{AntGenome}, s::String,
             expr = expr.args[1]
         end
         return AntGenome(expr, primitives, conditions, max_depth)
-    catch
+    catch e
+        e isa InterruptException && rethrow()
         return nothing
     end
 end
@@ -275,7 +276,8 @@ function evaluate(e::AntEvaluator, f::Function)
         moves_before = ant.moves
         try
             Base.invokelatest(f)
-        catch
+        catch e
+            e isa InterruptException && rethrow()
             break
         end
         calls += 1
@@ -297,7 +299,8 @@ function evaluate_genome(g::AntGenome, e::AntEvaluator)
         func_expr = Expr(:function, Expr(:call, fname), g.program)
         f = @eval $func_expr
         return evaluate(e, f)
-    catch
+    catch e
+        e isa InterruptException && rethrow()
         return Inf
     end
 end
@@ -310,11 +313,23 @@ end
     solve(problem::GPProblem{AntGenome}, algorithm::GeneticProgramming; ...) -> GPResult
 
 Run GP evolution with AntGenome for side-effectful program synthesis.
+
+!!! warning
+    AntGenome uses a module-level simulator reference (`_ant_sim_ref`) that is
+    not thread-safe. The `parallel` field on `algorithm` must be `false`.
+    For parallel side-effectful evaluation, use thread-local state as
+    demonstrated in the bin packing example.
 """
 function solve(problem::GPProblem{AntGenome, E},
                algorithm::GeneticProgramming;
                verbose::Bool = false,
                callback = nothing) where {E<:AntEvaluator}
+    if algorithm.parallel
+        error("AntGenome uses module-level simulator state (_ant_sim_ref) that is " *
+              "not thread-safe. Set parallel=false in GeneticProgramming. " *
+              "For parallel side-effectful evaluation, use thread-local state " *
+              "as demonstrated in examples/bin_packing.jl.")
+    end
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
@@ -368,8 +383,7 @@ function solve(problem::GPProblem{AntGenome, E},
             next_fitnesses[i] = fitnesses[i]
         end
 
-        t_size = algorithm.selection isa TournamentSelection ?
-                 algorithm.selection.tournament_size : algorithm.tournament_size
+        t_size = algorithm.selection.tournament_size
 
         idx = algorithm.elitism + 1
         while idx <= pop_size

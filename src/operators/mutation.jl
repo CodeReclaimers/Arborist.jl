@@ -69,7 +69,8 @@ function mutate(op::PointMutation, g::ExprGenome, rng::AbstractRNG)
             target = rand(rng, all_nodes)
             try
                 mutate!(g.state, target)
-            catch
+            catch e
+                e isa InterruptException && rethrow()
                 # If mutation fails (e.g., no compatible lvalues), keep as-is.
             end
         end
@@ -162,7 +163,8 @@ function mutate(op::ExpansionMutation, g::ExprGenome, rng::AbstractRNG)
     # Try to wrap the leaf in a function call.
     wrapped = try
         wrap_rvalue(g.state, leaf_value)
-    catch
+    catch e
+        e isa InterruptException && rethrow()
         nothing
     end
 
@@ -194,7 +196,8 @@ function _collect_leaf_positions!(positions::Vector{Tuple{Expr, Int}}, expr::Exp
             try
                 get_rvalue_type(s, a)
                 push!(positions, (expr, i))
-            catch
+            catch e
+                e isa InterruptException && rethrow()
                 # Not a known rvalue (e.g., iterator variable), skip.
             end
         end

@@ -50,7 +50,7 @@ _f32_not(a::Float32) = Float32(!(a > 0.5f0))
         mutation_rate=0.4,
         crossover_rate=0.3,
         elitism=2,
-        tournament_size=5
+        selection=Arborist.TournamentSelection(5)
     )
 
     # 4-bit parity is a hard benchmark. We require at least 1/5 seeds to reach

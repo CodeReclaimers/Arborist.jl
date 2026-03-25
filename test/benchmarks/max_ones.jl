@@ -18,8 +18,7 @@
         generations=100,
         mutation_rate=0.4,
         crossover_rate=0.2,
-        elitism=2,
-        tournament_size=3
+        elitism=2
     )
 
     result = solve(problem, algorithm; verbose=false)

@@ -63,7 +63,8 @@
         problem = GPProblem(evaluator, AntGenome; seed=42)
         algorithm = GeneticProgramming(
             pop_size=10, generations=3,
-            mutation_rate=0.4, crossover_rate=0.2
+            mutation_rate=0.4, crossover_rate=0.2,
+            parallel=false
         )
 
         result = solve(problem, algorithm; verbose=false)

@@ -53,7 +53,8 @@ function crossover(s::GenState, parent_a::Expr, parent_b::Expr)
     for (i, na) in enumerate(nodes_a)
         types_a[i] = try
             get_rvalue_type(s, na)
-        catch
+        catch e
+            e isa InterruptException && rethrow()
             nothing
         end
     end
@@ -61,7 +62,8 @@ function crossover(s::GenState, parent_a::Expr, parent_b::Expr)
     for (j, nb) in enumerate(nodes_b)
         type_b = try
             get_rvalue_type(s, nb)
-        catch
+        catch e
+            e isa InterruptException && rethrow()
             nothing
         end
         type_b === nothing && continue
@@ -210,7 +212,8 @@ function evaluate_individual!(pop::Population, ind::Individual)
         harness = create_harness(pop.state, checked_body, fname)
         f = @eval $harness
         ind.fitness = evaluate(pop.evaluator, f)
-    catch
+    catch e
+        e isa InterruptException && rethrow()
         ind.fitness = Inf
     end
     return ind.fitness
@@ -252,7 +255,8 @@ function mutate_individual(s::GenState, ind::Individual)
             target = rand(s.rng, all_nodes)
             try
                 mutate!(s, target)
-            catch
+            catch e
+                e isa InterruptException && rethrow()
                 # If mutation fails (e.g., no compatible lvalues), keep as-is.
             end
         end

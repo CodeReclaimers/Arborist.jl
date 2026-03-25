@@ -67,7 +67,8 @@ function evaluate(fe::TableFitnessEvaluator, f::Function)
         result = try
             args = [in_row[name] for (name, _) in sorted_inputs]
             Base.invokelatest(f, args...)
-        catch
+        catch e
+            e isa InterruptException && rethrow()
             nothing
         end
         elapsed_ns = time_ns() - t0
@@ -88,7 +89,8 @@ function evaluate(fe::TableFitnessEvaluator, f::Function)
                     se += (Float64(result[k]) - Float64(expected))^2
                 end
             end
-        catch
+        catch e
+            e isa InterruptException && rethrow()
             n_errors += 1
             continue
         end

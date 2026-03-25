@@ -70,6 +70,71 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
         @test deserialize(ExprGenome, "", state) === nothing
     end
 
+    @testset "deserialize accepts control flow" begin
+        fset = FunctionSet(Set{FunctionDetails}())
+        for func in [:+, :-, :*, :/]
+            add!(fset, func, 2, Float32, Float32)
+        end
+        for op in [:>, :<]
+            add!(fset, op, 2, Float32, Bool)
+        end
+        rng = Random.MersenneTwister(42)
+        # Use 2 temps so t1, t2 are available as Float32 variables
+        state = GenState(rng, fset, Dict(:x => Float32), Dict(:y => Float32), 2)
+
+        # while loop with Bool condition (using variables, not Float32() calls)
+        s_while = """
+        while x > y
+            y = x - y
+        end
+        """
+        g = deserialize(ExprGenome, s_while, state)
+        @test g !== nothing
+        @test any(e -> e isa Expr && e.head == :while, g.body)
+        println("  deserialize while: $(length(g.body)) statements")
+
+        # if-else
+        s_if = """
+        if x > y
+            y = x + y
+        else
+            y = x - y
+        end
+        """
+        g2 = deserialize(ExprGenome, s_if, state)
+        @test g2 !== nothing
+        @test any(e -> e isa Expr && e.head == :if, g2.body)
+        println("  deserialize if-else: $(length(g2.body)) statements")
+
+        # for loop
+        s_for = """
+        for i = 1:10
+            y = x + y
+        end
+        """
+        g3 = deserialize(ExprGenome, s_for, state)
+        @test g3 !== nothing
+        @test any(e -> e isa Expr && e.head == :for, g3.body)
+        println("  deserialize for: $(length(g3.body)) statements")
+
+        # Mixed: assignments + control flow
+        s_mixed = """
+        y = x * x
+        while x > y
+            y = y + x
+        end
+        """
+        g4 = deserialize(ExprGenome, s_mixed, state)
+        @test g4 !== nothing
+        @test length(g4.body) == 2
+        println("  deserialize mixed: $(length(g4.body)) statements")
+
+        # Pure assignment still works (backward compat)
+        g5 = deserialize(ExprGenome, "y = x + x", state)
+        @test g5 !== nothing
+        @test length(g5.body) >= 1
+    end
+
     @testset "Valid mock response" begin
         (g, state, rng) = make_llm_test_setup()
 

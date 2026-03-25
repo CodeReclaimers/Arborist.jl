@@ -421,7 +421,7 @@ function _common_kwargs(; seed::Int=42, generations::Int=100, pop_size::Int=200)
     Dict{Symbol,Any}(
         :pop_size => pop_size, :generations => generations,
         :mutation_rate => 0.4, :crossover_rate => 0.3,
-        :elitism => 3, :tournament_size => 3,
+        :elitism => 3,
         :bloat_penalty => 0.0005,
         :n_episodes => 20, :n_items => 200, :rng_seed => seed,
         :item_dist => :uniform,
@@ -758,8 +758,7 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
             next_fitnesses[i] = fitnesses[i]
         end
 
-        t_size = algorithm.selection isa Arborist.TournamentSelection ?
-                 algorithm.selection.tournament_size : algorithm.tournament_size
+        t_size = algorithm.selection.tournament_size
 
         idx = algorithm.elitism + 1
         while idx <= pop_size
@@ -962,7 +961,7 @@ function run_bin_packing(;
         mutation_rate::Float64 = 0.4,
         crossover_rate::Float64 = 0.3,
         elitism::Int = 3,
-        tournament_size::Int = 5,
+        tournament_size::Int = 5,  # used via TournamentSelection
         bloat_penalty::Float64 = 0.001,
         speciation::Arborist.AbstractSpeciation = Arborist.NoSpeciation(),
         mutation_ops::Union{Nothing, Vector} = nothing,
@@ -1016,7 +1015,7 @@ function run_bin_packing(;
         :mutation_rate => mutation_rate,
         :crossover_rate => crossover_rate,
         :elitism => elitism,
-        :tournament_size => tournament_size,
+        :selection => Arborist.TournamentSelection(tournament_size),
         :bloat_penalty => bloat_penalty,
         :speciation => speciation,
     )
@@ -1161,7 +1160,7 @@ function run_experiment_a(; generations::Int=100, pop_size::Int=200)
     common_kwargs = Dict{Symbol,Any}(
         :pop_size => pop_size, :generations => generations,
         :mutation_rate => 0.4, :crossover_rate => 0.3,
-        :elitism => 3, :tournament_size => 3,
+        :elitism => 3,
         :bloat_penalty => 0.0005,
         :n_episodes => 20, :n_items => 200, :rng_seed => 42,
         :item_dist => :uniform,
@@ -1314,7 +1313,7 @@ function run_experiment_b(; generations::Int=100, pop_size::Int=200)
     common_kwargs = Dict{Symbol,Any}(
         :pop_size => pop_size, :generations => generations,
         :mutation_rate => 0.4, :crossover_rate => 0.3,
-        :elitism => 3, :tournament_size => 3,
+        :elitism => 3,
         :bloat_penalty => 0.0005,
         :n_episodes => 20, :n_items => 200, :rng_seed => 42,
     )

@@ -41,7 +41,7 @@ end
 Reconstruct an ExprGenome from a MigrantGenome using the local GenState.
 """
 function from_migrant(m::MigrantGenome, state::GenState)
-    @assert m.genome_type == :ExprGenome "Expected ExprGenome migrant, got $(m.genome_type)"
+    m.genome_type == :ExprGenome || throw(ArgumentError("Expected ExprGenome migrant, got $(m.genome_type)"))
     ExprGenome(deepcopy(m.data), state)
 end
 
@@ -66,7 +66,7 @@ Reconstruct an AntGenome from a MigrantGenome.
 """
 function from_migrant(m::MigrantGenome, primitives::Vector{Symbol},
                       conditions::Vector{Symbol}, max_depth::Int)
-    @assert m.genome_type == :AntGenome "Expected AntGenome migrant, got $(m.genome_type)"
+    m.genome_type == :AntGenome || throw(ArgumentError("Expected AntGenome migrant, got $(m.genome_type)"))
     AntGenome(deepcopy(m.data), primitives, conditions, max_depth)
 end
 
@@ -90,7 +90,7 @@ end
 Reconstruct a GraphGenome from a MigrantGenome.
 """
 function from_migrant(m::MigrantGenome, ::Type{GraphGenome})
-    @assert m.genome_type == :GraphGenome "Expected GraphGenome migrant, got $(m.genome_type)"
+    m.genome_type == :GraphGenome || throw(ArgumentError("Expected GraphGenome migrant, got $(m.genome_type)"))
     nodes, connections, n_inputs, n_outputs = m.data
     GraphGenome(deepcopy(nodes), deepcopy(connections), n_inputs, n_outputs, m.fitness)
 end

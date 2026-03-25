@@ -17,8 +17,7 @@ const _KozaTreeEval = _KozaDynExt.TreeFitnessEvaluator
         generations=300,
         mutation_rate=0.4,
         crossover_rate=0.2,
-        elitism=2,
-        tournament_size=3
+        elitism=2
     )
 
     xs = Float32.(range(-1, 1, length=20))

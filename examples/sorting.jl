@@ -659,8 +659,7 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
             next_fitnesses[i] = fitnesses[i]
         end
 
-        t_size = algorithm.selection isa Arborist.TournamentSelection ?
-                 algorithm.selection.tournament_size : algorithm.tournament_size
+        t_size = algorithm.selection.tournament_size
 
         idx = algorithm.elitism + 1
         while idx <= pop_size
@@ -772,7 +771,7 @@ function run_sorting(;
         mutation_rate   = mutation_rate,
         crossover_rate  = crossover_rate,
         elitism         = elitism,
-        tournament_size = tournament_size,
+        selection       = Arborist.TournamentSelection(tournament_size),
         max_depth       = max_depth,
         bloat_penalty   = bloat_penalty,
         mutation_ops    = [Arborist.SubtreeMutation(), Arborist.PointMutation(),

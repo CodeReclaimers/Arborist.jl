@@ -3,8 +3,9 @@ using Arborist
 using Random
 
 # Benchmarks are opt-in due to long runtime.
-# Run with: GENPROG_RUN_BENCHMARKS=true julia -e 'using Pkg; Pkg.test("Arborist")'
-const RUN_BENCHMARKS = get(ENV, "GENPROG_RUN_BENCHMARKS", "false") == "true"
+# Run with: ARBORIST_RUN_BENCHMARKS=true julia -e 'using Pkg; Pkg.test("Arborist")'
+const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
+                           get(ENV, "GENPROG_RUN_BENCHMARKS", "false")) == "true"
 
 @testset "Arborist.jl" begin
     # Unit tests — always run, target < 30s total
@@ -26,7 +27,7 @@ const RUN_BENCHMARKS = get(ENV, "GENPROG_RUN_BENCHMARKS", "false") == "true"
     include("integration/test_distributed_islands.jl")
 
     if RUN_BENCHMARKS
-        @info "Running full benchmark suite (GENPROG_RUN_BENCHMARKS=true)"
+        @info "Running full benchmark suite (ARBORIST_RUN_BENCHMARKS=true)"
         include("benchmarks/max_ones.jl")
         include("benchmarks/symbolic_regression.jl")
         include("benchmarks/koza_regression.jl")
@@ -35,6 +36,6 @@ const RUN_BENCHMARKS = get(ENV, "GENPROG_RUN_BENCHMARKS", "false") == "true"
         include("benchmarks/speedup_benchmark.jl")
         include("benchmarks/xor_neat.jl")
     else
-        @info "Skipping benchmarks (set GENPROG_RUN_BENCHMARKS=true to run)"
+        @info "Skipping benchmarks (set ARBORIST_RUN_BENCHMARKS=true to run)"
     end
 end

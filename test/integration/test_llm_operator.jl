@@ -1,6 +1,4 @@
-# Load HTTP to trigger the extension, then load mock infrastructure.
-using HTTP
-const LLMExt = Base.get_extension(Arborist, :LLMOperatorExt)
+# LLMMutationOperator is now in core (no extension needed).
 include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
 
 @testset "LLMMutationOperator integration" begin
@@ -75,12 +73,12 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
     @testset "Valid mock response" begin
         (g, state, rng) = make_llm_test_setup()
 
-        op = LLMExt.LLMMutationOperator(
+        op = LLMMutationOperator(
             endpoint="https://api.anthropic.com/v1/messages",
             api_key_env="",  # skip key check
         )
 
-        install_mock_http!(LLMExt)
+        install_mock_http!()
         try
             # Register a mock that returns a type-correct mutated program.
             register_mock_response!("anthropic.com",
@@ -93,20 +91,20 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
             @test any(e -> string(e) == string(:(y = x * x)), result.body)
         finally
             clear_mock_responses!()
-            restore_http!(LLMExt)
+            restore_http!()
         end
     end
 
     @testset "OpenAI-format mock response" begin
         (g, state, rng) = make_llm_test_setup()
 
-        op = LLMExt.LLMMutationOperator(
+        op = LLMMutationOperator(
             endpoint="http://localhost:11434/v1/chat/completions",
             model="llama3",
             api_key_env="",
         )
 
-        install_mock_http!(LLMExt)
+        install_mock_http!()
         try
             register_mock_response!("localhost",
                 mock_openai_response("y = x + Float32(1.0)"))
@@ -116,19 +114,19 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
             @test !isempty(result.body)
         finally
             clear_mock_responses!()
-            restore_http!(LLMExt)
+            restore_http!()
         end
     end
 
     @testset "Garbage response falls back gracefully" begin
         (g, state, rng) = make_llm_test_setup()
 
-        op = LLMExt.LLMMutationOperator(
+        op = LLMMutationOperator(
             endpoint="https://api.anthropic.com/v1/messages",
             api_key_env="",
         )
 
-        install_mock_http!(LLMExt)
+        install_mock_http!()
         try
             register_mock_response!("anthropic.com",
                 mock_anthropic_response("this is not julia code!!!"))
@@ -139,20 +137,20 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
             @test !isempty(result.body)
         finally
             clear_mock_responses!()
-            restore_http!(LLMExt)
+            restore_http!()
         end
     end
 
     @testset "Timeout falls back gracefully" begin
         (g, state, rng) = make_llm_test_setup()
 
-        op = LLMExt.LLMMutationOperator(
+        op = LLMMutationOperator(
             endpoint="https://api.anthropic.com/v1/messages",
             api_key_env="",
             timeout_seconds=1.0,
         )
 
-        install_mock_http!(LLMExt)
+        install_mock_http!()
         try
             # Register a mock that throws a timeout-like exception.
             register_mock_response!("anthropic.com",
@@ -163,7 +161,7 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
             @test !isempty(result.body)
         finally
             clear_mock_responses!()
-            restore_http!(LLMExt)
+            restore_http!()
         end
     end
 
@@ -171,7 +169,7 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
         (g, state, rng) = make_llm_test_setup()
 
         # Use a key env var that definitely doesn't exist.
-        op = LLMExt.LLMMutationOperator(
+        op = LLMMutationOperator(
             endpoint="https://api.anthropic.com/v1/messages",
             api_key_env="GENPROG_TEST_NONEXISTENT_KEY_12345",
         )
@@ -205,7 +203,7 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
             add!(fset, op, 2, Float32, Bool)
         end
 
-        llm_op = LLMExt.LLMMutationOperator(
+        llm_op = LLMMutationOperator(
             endpoint="https://api.anthropic.com/v1/messages",
             api_key_env="",
         )
@@ -219,7 +217,7 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
             mutation_ops=AbstractMutationOperator[llm_op, SubtreeMutation(), PointMutation()],
         )
 
-        install_mock_http!(LLMExt)
+        install_mock_http!()
         try
             # Register a mock that returns a valid mutation.
             register_mock_response!("anthropic.com",
@@ -231,7 +229,7 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
             @test length(result.fitness_history) == 5
         finally
             clear_mock_responses!()
-            restore_http!(LLMExt)
+            restore_http!()
         end
     end
 
@@ -250,7 +248,7 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
                 add!(fset, func, 2, Float32, Float32)
             end
 
-            llm_op = LLMExt.LLMMutationOperator()
+            llm_op = LLMMutationOperator()
 
             problem = GPProblem(fe, ExprGenome; function_set=fset, num_temps=2, seed=42)
             algorithm = GeneticProgramming(

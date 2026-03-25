@@ -76,6 +76,9 @@ include("migration.jl")
 # --- Distributed island support ---
 include("distributed_island.jl")
 
+# --- LLM mutation operator (uses Downloads.jl stdlib) ---
+include("llm_operator.jl")
+
 # --- Public API exports ---
 export
     # Abstract types
@@ -180,6 +183,9 @@ export
     add_loop_checks,
     unravel,
     setup_workers,
+
+    # LLM mutation operator
+    LLMMutationOperator,
 
     # Legacy API (from evolution.jl)
     Individual,

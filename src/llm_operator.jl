@@ -1,34 +1,36 @@
-"""
-LLMOperatorExt — Package extension that provides LLMMutationOperator
-when HTTP.jl is available. Implements the FunSearch/AlphaEvolve pattern:
-serialize genome → prompt LLM → parse response → validate → return.
-"""
-module LLMOperatorExt
+# LLM mutation operator — implements the FunSearch/AlphaEvolve pattern:
+# serialize genome -> prompt LLM -> parse response -> validate -> return.
+# Uses Downloads.jl (stdlib) for HTTP POST requests.
 
-using Arborist
-using Arborist: AbstractMutationOperator, ExprGenome, GenState,
-              serialize, deserialize, SubtreeMutation,
-              get_lvalue_type, get_rvalue_type
-import Arborist: mutate
-using HTTP
-using Random
+using Downloads
 
 # =============================================================================
 # HTTP hook for testability
 # =============================================================================
 
 """
-Default HTTP POST implementation delegating to HTTP.jl.
+Default HTTP POST implementation using Downloads.jl (stdlib).
 Tests replace `_http_post[]` with a mock function.
 """
 function _default_http_post(endpoint, headers, body, timeout)
-    HTTP.post(endpoint, headers, body; readtimeout=round(Int, timeout))
+    output = IOBuffer()
+    resp = Downloads.request(endpoint;
+        method="POST",
+        headers=headers,
+        input=IOBuffer(body),
+        output=output,
+        timeout=round(Int, timeout))
+    status = resp.status
+    if status >= 400
+        error("HTTP request failed with status $status: $(String(take!(output)))")
+    end
+    return String(take!(output))
 end
 
 """
     _http_post
 
-Module-level hook for HTTP POST calls. Default implementation uses HTTP.jl.
+Module-level hook for HTTP POST calls. Default implementation uses Downloads.jl.
 Tests can replace this with a mock function via `_http_post[] = mock_fn`.
 """
 const _http_post = Ref{Function}(_default_http_post)
@@ -160,7 +162,7 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
     body = _build_request_body(op, source, is_anthropic)
 
     # 4. Make the HTTP call via the replaceable hook.
-    response = try
+    response_text = try
         _http_post[](op.endpoint, headers, body, op.timeout_seconds)
     catch e
         @warn "LLMMutationOperator: HTTP request failed" exception=e
@@ -168,8 +170,7 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
     end
 
     # 5. Extract text from response.
-    response_body = _get_response_body(response)
-    text = _extract_response_text(response_body, is_anthropic)
+    text = _extract_response_text(response_text, is_anthropic)
 
     if text === nothing
         @warn "LLMMutationOperator: failed to extract text from response"
@@ -214,18 +215,6 @@ function _json_escape(s::String)
     return s
 end
 
-"""Extract the response body as a String, handling both real HTTP.Response and mock objects."""
-function _get_response_body(response)
-    body = response.body
-    if body isa AbstractVector{UInt8}
-        return String(copy(body))
-    elseif body isa AbstractString
-        return String(body)
-    else
-        return string(body)
-    end
-end
-
 """
 Extract the assistant's text from an API JSON response.
 Handles both Anthropic (\"text\" field) and OpenAI-compatible (\"content\" field) formats.
@@ -253,5 +242,3 @@ function _find_last_json_string(json::String, key::String)
     raw = replace(raw, "\\\\" => "\\")
     return raw
 end
-
-end # module LLMOperatorExt

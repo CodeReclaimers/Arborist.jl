@@ -13,6 +13,9 @@ using Dates
 using Random
 using Statistics
 
+# Downloads.jl (stdlib) is used for LLM experiments — no extra install needed.
+using Downloads
+
 # =============================================================================
 # Bin packing simulator (module-level mutable state, following AntGenome pattern)
 # =============================================================================
@@ -346,6 +349,170 @@ function behavioral_distance(a::BinPackingFingerprint, b::BinPackingFingerprint)
 end
 
 # =============================================================================
+# TrackedMutation — wrapper for tracking LLM operator call metrics
+# =============================================================================
+
+mutable struct TrackedMutation <: Arborist.AbstractMutationOperator
+    inner::Any          # the wrapped operator (e.g., LLMMutationOperator)
+    n_calls::Int        # total mutate() calls
+    n_slow::Int         # calls > 0.5s (likely successful LLM inference)
+    total_latency::Float64
+end
+
+TrackedMutation(inner) = TrackedMutation(inner, 0, 0, 0.0)
+
+function Arborist.mutate(op::TrackedMutation, genome::Arborist.ExprGenome, rng::AbstractRNG)
+    t0 = time()
+    result = Arborist.mutate(op.inner, genome, rng)
+    dt = time() - t0
+    op.n_calls += 1
+    op.total_latency += dt
+    if dt > 0.5  # LLM inference takes seconds; SubtreeMutation takes microseconds
+        op.n_slow += 1
+    end
+    return result
+end
+
+# =============================================================================
+# LLM system prompt for bin packing (used by Experiment A)
+# =============================================================================
+
+const BP_LLM_SYSTEM_PROMPT = """
+You are a genetic programming mutation operator for an online bin
+packing heuristic written in Julia.
+
+The program runs once per item to be packed. It has access to these
+primitives:
+  bp_n_bins()::Int32          -- number of currently open bins
+  bp_bin_remaining(i::Int32)::Float32  -- remaining capacity of bin i (1-indexed)
+  bp_item_size()::Float32     -- size of current item (between 0 and 1)
+  bp_capacity()::Float32      -- bin capacity (always 1.0)
+  bp_place_in_bin(i::Int32)::Bool  -- place item in bin i, returns true if successful
+
+The program uses these temp variables:
+  __temp_1, __temp_2, __temp_3 :: Int32  (loop counters, bin indices)
+  __temp_4, __temp_5, __temp_6 :: Float32  (scores, remainders)
+  result :: Bool  (output, set by bp_place_in_bin)
+
+Rules:
+- Return ONLY valid Julia assignment statements and control flow
+- Use only the variables and primitives listed above
+- Do not import anything or define functions
+- The goal is to place the item in the bin that minimizes wasted space
+  (Best Fit: find the bin with least remaining capacity that still fits)
+- A while loop scanning from bin 1 to bp_n_bins() with a conditional
+  tracking the best bin found so far is the key structure to discover
+
+Respond with only the Julia statements, nothing else.
+"""
+
+# =============================================================================
+# Shared overnight experiment helpers
+# =============================================================================
+
+const OVERNIGHT_SEEDS = [42, 123, 456, 789, 1337]
+
+function _classical_ops()
+    [Arborist.SubtreeMutation(), Arborist.PointMutation(),
+     Arborist.HoistMutation(), Arborist.ExpansionMutation()]
+end
+
+function _common_kwargs(; seed::Int=42, generations::Int=100, pop_size::Int=200)
+    Dict{Symbol,Any}(
+        :pop_size => pop_size, :generations => generations,
+        :mutation_rate => 0.4, :crossover_rate => 0.3,
+        :elitism => 3, :tournament_size => 3,
+        :bloat_penalty => 0.0005,
+        :n_episodes => 20, :n_items => 200, :rng_seed => seed,
+        :item_dist => :uniform,
+    )
+end
+
+function _check_ollama()
+    try
+        output = IOBuffer()
+        Downloads.request(
+            "http://localhost:11434/v1/chat/completions";
+            method="POST",
+            headers=["Content-Type" => "application/json"],
+            input=IOBuffer("""{"model":"qwen3-coder:30b","messages":[{"role":"user","content":"Reply OK"}],"max_tokens":5}"""),
+            output=output,
+            timeout=30
+        )
+        println("Ollama check: OK")
+        flush(stdout)
+        return true
+    catch e
+        println("ERROR: Ollama not reachable: $e")
+        flush(stdout)
+        return false
+    end
+end
+
+function _make_tracked_llm()
+    llm_ext = Base.get_extension(Arborist, :LLMOperatorExt)
+    llm_op = llm_ext.LLMMutationOperator(
+        endpoint    = "http://localhost:11434/v1/chat/completions",
+        model       = "qwen3-coder:30b",
+        api_key_env = "",
+        system_prompt = BP_LLM_SYSTEM_PROMPT,
+        temperature = 0.7,
+        max_tokens  = 256,
+        timeout_seconds = 60.0,
+        fallback_op = Arborist.SubtreeMutation()
+    )
+    return TrackedMutation(llm_op)
+end
+
+function _ensure_data_dir()
+    d = joinpath(@__DIR__, "data")
+    isdir(d) || mkpath(d)
+    return d
+end
+
+"""Write seed results to a TSV data file for combine_results."""
+function _write_seed_data(filename::String, rows::Vector)
+    data_dir = _ensure_data_dir()
+    path = joinpath(data_dir, filename)
+    open(path, "w") do io
+        println(io, "seed\ttrain\ttest\twall_time\tff_test\tbf_test\tllm_calls\tllm_ok\tllm_latency")
+        for r in rows
+            println(io, join([r.seed, round(r.train, digits=6), round(r.test, digits=6),
+                              round(r.wall_time, digits=1), round(r.ff_test, digits=6),
+                              round(r.bf_test, digits=6), r.llm_calls, r.llm_ok,
+                              round(r.llm_latency, digits=2)], "\t"))
+        end
+    end
+    println("Data written to: $path")
+    flush(stdout)
+end
+
+"""Read TSV data file written by _write_seed_data."""
+function _read_seed_data(filename::String)
+    data_dir = _ensure_data_dir()
+    path = joinpath(data_dir, filename)
+    isfile(path) || return nothing
+    rows = NamedTuple[]
+    for line in readlines(path)
+        startswith(line, "seed") && continue
+        parts = split(line, "\t")
+        length(parts) >= 6 || continue
+        push!(rows, (
+            seed = round(Int, parse(Float64, parts[1])),
+            train = parse(Float64, parts[2]),
+            test = parse(Float64, parts[3]),
+            wall_time = parse(Float64, parts[4]),
+            ff_test = parse(Float64, parts[5]),
+            bf_test = parse(Float64, parts[6]),
+            llm_calls = length(parts) >= 7 ? round(Int, parse(Float64, parts[7])) : 0,
+            llm_ok = length(parts) >= 8 ? round(Int, parse(Float64, parts[8])) : 0,
+            llm_latency = length(parts) >= 9 ? parse(Float64, parts[9]) : 0.0,
+        ))
+    end
+    return rows
+end
+
+# =============================================================================
 # Custom GenState and initial program generation
 #
 # The standard GenState only includes types from inputs/outputs in used_types.
@@ -568,8 +735,16 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
         if verbose
             n_species = species_state isa Vector ? length(species_state) : 0
             species_str = n_species > 0 ? " | species=$n_species" : ""
+            # LLM tracking stats
+            llm_str = ""
+            for op in algorithm.mutation_ops
+                if op isa TrackedMutation
+                    llm_str = " | llm_calls=$(op.n_calls) llm_ok=$(op.n_slow)"
+                    break
+                end
+            end
             println("Gen $gen/$(algorithm.generations) | best=$(round(fitnesses[1], digits=4)) | " *
-                    "mean=$(round(mean_fit, digits=4))$species_str | elapsed=$(elapsed)s")
+                    "mean=$(round(mean_fit, digits=4))$species_str$llm_str | elapsed=$(elapsed)s")
             flush(stdout)
         end
 
@@ -790,12 +965,14 @@ function run_bin_packing(;
         tournament_size::Int = 5,
         bloat_penalty::Float64 = 0.001,
         speciation::Arborist.AbstractSpeciation = Arborist.NoSpeciation(),
+        mutation_ops::Union{Nothing, Vector} = nothing,
         n_episodes::Int = 20,
         n_items::Int = 200,
         capacity::Float32 = 1.0f0,
         item_dist::Symbol = :uniform,
         rng_seed::Int = 42,
         num_temps::Int = 6,
+        output_file::String = "bin_packing_results.md",
         verbose::Bool = true)
 
     _ensure_bp_states()
@@ -833,16 +1010,20 @@ function run_bin_packing(;
         "threshold=$(speciation.threshold), sharing=$(speciation.sharing_formula)"
     end
 
-    algorithm = Arborist.GeneticProgramming(
-        pop_size = pop_size,
-        generations = generations,
-        mutation_rate = mutation_rate,
-        crossover_rate = crossover_rate,
-        elitism = elitism,
-        tournament_size = tournament_size,
-        bloat_penalty = bloat_penalty,
-        speciation = speciation,
+    algo_kwargs = Dict{Symbol,Any}(
+        :pop_size => pop_size,
+        :generations => generations,
+        :mutation_rate => mutation_rate,
+        :crossover_rate => crossover_rate,
+        :elitism => elitism,
+        :tournament_size => tournament_size,
+        :bloat_penalty => bloat_penalty,
+        :speciation => speciation,
     )
+    if mutation_ops !== nothing
+        algo_kwargs[:mutation_ops] = mutation_ops
+    end
+    algorithm = Arborist.GeneticProgramming(; algo_kwargs...)
 
     println("\nStarting evolution: pop=$pop_size, gens=$generations, speciation=$spec_desc")
     println("-" ^ 70)
@@ -889,7 +1070,7 @@ function run_bin_packing(;
     flush(stdout)
 
     # Save results
-    results_path = joinpath(@__DIR__, "bin_packing_results.md")
+    results_path = joinpath(@__DIR__, output_file)
     open(results_path, "w") do io
         println(io, "# Bin Packing Evolution Results")
         println(io)
@@ -938,7 +1119,14 @@ function run_bin_packing(;
     println("\nResults saved to: $results_path")
     flush(stdout)
 
-    return result
+    return (
+        result = result,
+        ff_train = ff_score, bf_train = bf_score, wf_train = wf_score,
+        ff_test = test_ff, bf_test = test_bf,
+        evolved_test = test_evolved,
+        wall_time = wall_time,
+        program_text = pretty_print_genome(result.best_genome),
+    )
 end
 
 """Create a BehavioralSpeciation configured for bin packing."""
@@ -960,15 +1148,748 @@ function bp_behavioral_speciation(;
     )
 end
 
+# =============================================================================
+# Experiment A: LLM Operator via Local Ollama
+# =============================================================================
+
+function run_experiment_a(; generations::Int=100, pop_size::Int=200)
+    println("=" ^ 70)
+    println("EXPERIMENT A: LLM Operator via Local Ollama")
+    println("=" ^ 70)
+    flush(stdout)
+
+    common_kwargs = Dict{Symbol,Any}(
+        :pop_size => pop_size, :generations => generations,
+        :mutation_rate => 0.4, :crossover_rate => 0.3,
+        :elitism => 3, :tournament_size => 3,
+        :bloat_penalty => 0.0005,
+        :n_episodes => 20, :n_items => 200, :rng_seed => 42,
+        :item_dist => :uniform,
+    )
+
+    classical_ops = [Arborist.SubtreeMutation(), Arborist.PointMutation(),
+                     Arborist.HoistMutation(), Arborist.ExpansionMutation()]
+
+    # --- A1: Classical only (control) ---
+    println("\n>>> Variant A1: Classical only (control)")
+    flush(stdout)
+    r_a1 = run_bin_packing(; common_kwargs...,
+        mutation_ops = classical_ops,
+        output_file = "bin_packing_results_a1.md",
+    )
+
+    # --- A2: Classical + LLM (if Ollama available) ---
+    r_a2 = nothing
+    tracked_llm = nothing
+    ollama_ok = false
+
+    try
+        output = IOBuffer()
+        Downloads.request(
+            "http://localhost:11434/v1/chat/completions";
+            method="POST",
+            headers=["Content-Type" => "application/json"],
+            input=IOBuffer("""{"model":"qwen3-coder:30b","messages":[{"role":"user","content":"Reply with only: OK"}],"max_tokens":5}"""),
+            output=output,
+            timeout=30
+        )
+        println("\nOllama check: ", String(take!(output)))
+        ollama_ok = true
+    catch e
+        println("\nERROR: Ollama not reachable: $e")
+        println("Skipping LLM variant (A2).")
+        println("To test manually:")
+        println("  curl http://localhost:11434/v1/chat/completions \\")
+        println("    -H 'Content-Type: application/json' \\")
+        println("    -d '{\"model\":\"qwen3-coder:30b\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply OK\"}],\"max_tokens\":5}'")
+    end
+    flush(stdout)
+
+    if ollama_ok
+        println("\n>>> Variant A2: Classical + Qwen3-Coder LLM (20% weight)")
+        flush(stdout)
+
+        llm_ext = Base.get_extension(Arborist, :LLMOperatorExt)
+        llm_op = llm_ext.LLMMutationOperator(
+            endpoint    = "http://localhost:11434/v1/chat/completions",
+            model       = "qwen3-coder:30b",
+            api_key_env = "",
+            system_prompt = BP_LLM_SYSTEM_PROMPT,
+            temperature = 0.7,
+            max_tokens  = 256,
+            timeout_seconds = 60.0,
+            fallback_op = Arborist.SubtreeMutation()
+        )
+        tracked_llm = TrackedMutation(llm_op)
+
+        llm_ops = [tracked_llm, Arborist.SubtreeMutation(), Arborist.PointMutation(),
+                   Arborist.HoistMutation(), Arborist.ExpansionMutation()]
+
+        r_a2 = run_bin_packing(; common_kwargs...,
+            mutation_ops = llm_ops,
+            output_file = "bin_packing_results_a2.md",
+        )
+    end
+
+    # --- Write combined results ---
+    results_path = joinpath(@__DIR__, "bin_packing_results_llm.md")
+    open(results_path, "w") do io
+        println(io, "# Experiment A: LLM Operator Impact (Uniform Distribution)")
+        println(io, "\nGenerated: $(Dates.now())")
+        println(io, "\n## Configuration")
+        println(io, "- Population: $pop_size, Generations: $generations")
+        println(io, "- Mutation rate: 0.4, Crossover rate: 0.3")
+        println(io, "- Bloat penalty: 0.0005, Tournament size: 3, Elitism: 3")
+        println(io, "- Episodes: 20, Items: 200, Distribution: uniform, Seed: 42")
+
+        println(io, "\n## Results")
+        println(io, "\n| Config | Best (train) | Best (test) | vs FF (test) | vs BF (test) | LLM fallback rate | Time |")
+        println(io, "|---|---|---|---|---|---|---|")
+
+        # A1 row
+        vs_ff_a1 = round((r_a1.ff_test - r_a1.evolved_test) / r_a1.ff_test * 100, digits=2)
+        vs_bf_a1 = round((r_a1.bf_test - r_a1.evolved_test) / r_a1.bf_test * 100, digits=2)
+        println(io, "| Classical only (A1) | $(round(r_a1.result.best_fitness, digits=4)) | " *
+                "$(round(r_a1.evolved_test, digits=4)) | $(vs_ff_a1)% | $(vs_bf_a1)% | N/A | $(round(r_a1.wall_time, digits=1))s |")
+
+        if r_a2 !== nothing && tracked_llm !== nothing
+            vs_ff_a2 = round((r_a2.ff_test - r_a2.evolved_test) / r_a2.ff_test * 100, digits=2)
+            vs_bf_a2 = round((r_a2.bf_test - r_a2.evolved_test) / r_a2.bf_test * 100, digits=2)
+            fallback_rate = tracked_llm.n_calls > 0 ?
+                round((tracked_llm.n_calls - tracked_llm.n_slow) / tracked_llm.n_calls * 100, digits=1) : 0.0
+            mean_latency = tracked_llm.n_calls > 0 ?
+                round(tracked_llm.total_latency / tracked_llm.n_calls, digits=2) : 0.0
+            println(io, "| Classical + Qwen3-Coder (A2) | $(round(r_a2.result.best_fitness, digits=4)) | " *
+                    "$(round(r_a2.evolved_test, digits=4)) | $(vs_ff_a2)% | $(vs_bf_a2)% | " *
+                    "$(fallback_rate)% | $(round(r_a2.wall_time, digits=1))s |")
+        else
+            println(io, "| Classical + Qwen3-Coder (A2) | — | — | — | — | — | Ollama unavailable |")
+        end
+
+        println(io, "\n## Baselines (test set)")
+        println(io, "- First Fit: $(round(r_a1.ff_test, digits=4))")
+        println(io, "- Best Fit: $(round(r_a1.bf_test, digits=4))")
+
+        if tracked_llm !== nothing
+            println(io, "\n## LLM Operator Metrics")
+            println(io, "- Total LLM calls: $(tracked_llm.n_calls)")
+            println(io, "- Successful parses (>0.5s): $(tracked_llm.n_slow)")
+            fallback_n = tracked_llm.n_calls - tracked_llm.n_slow
+            fallback_pct = tracked_llm.n_calls > 0 ?
+                round(fallback_n / tracked_llm.n_calls * 100, digits=1) : 0.0
+            println(io, "- Fallback count: $fallback_n ($fallback_pct%)")
+            mean_lat = tracked_llm.n_calls > 0 ?
+                round(tracked_llm.total_latency / tracked_llm.n_calls, digits=2) : 0.0
+            println(io, "- Mean call latency: $(mean_lat)s")
+            println(io, "- Total LLM time: $(round(tracked_llm.total_latency, digits=1))s")
+        end
+
+        println(io, "\n## Best Evolved Programs")
+        println(io, "\n### A1: Classical Only")
+        println(io, "```julia")
+        println(io, r_a1.program_text)
+        println(io, "```")
+
+        if r_a2 !== nothing
+            println(io, "\n### A2: Classical + LLM")
+            println(io, "```julia")
+            println(io, r_a2.program_text)
+            println(io, "```")
+        end
+    end
+    println("\nExperiment A results saved to: $results_path")
+    flush(stdout)
+end
+
+# =============================================================================
+# Experiment B: Bimodal Item Distribution
+# =============================================================================
+
+function run_experiment_b(; generations::Int=100, pop_size::Int=200)
+    println("=" ^ 70)
+    println("EXPERIMENT B: Bimodal Item Distribution")
+    println("=" ^ 70)
+    flush(stdout)
+
+    common_kwargs = Dict{Symbol,Any}(
+        :pop_size => pop_size, :generations => generations,
+        :mutation_rate => 0.4, :crossover_rate => 0.3,
+        :elitism => 3, :tournament_size => 3,
+        :bloat_penalty => 0.0005,
+        :n_episodes => 20, :n_items => 200, :rng_seed => 42,
+    )
+
+    # --- Bimodal baselines ---
+    bimodal_eval = BinPackingEvaluator(n_episodes=20, n_items=200,
+        capacity=1.0f0, item_dist=:bimodal, rng_seed=42)
+    ff_bimodal = baseline_normalized(first_fit, bimodal_eval)
+    bf_bimodal = baseline_normalized(best_fit, bimodal_eval)
+    println("\nBimodal baselines:")
+    println("  First Fit: $(round(ff_bimodal, digits=4))")
+    println("  Best Fit:  $(round(bf_bimodal, digits=4))")
+    flush(stdout)
+
+    # --- B1: Uniform distribution baseline ---
+    println("\n>>> Variant B1: Uniform distribution (reference)")
+    flush(stdout)
+    r_b1 = run_bin_packing(; common_kwargs...,
+        item_dist = :uniform,
+        output_file = "bin_packing_results_b1.md",
+    )
+
+    # --- B2: Bimodal, no speciation ---
+    println("\n>>> Variant B2: Bimodal, no speciation")
+    flush(stdout)
+    r_b2 = run_bin_packing(; common_kwargs...,
+        item_dist = :bimodal,
+        output_file = "bin_packing_results_b2.md",
+    )
+
+    # --- B3: Bimodal, behavioral speciation ---
+    println("\n>>> Variant B3: Bimodal, behavioral speciation")
+    flush(stdout)
+    r_b3 = run_bin_packing(; common_kwargs...,
+        item_dist = :bimodal,
+        speciation = bp_behavioral_speciation(threshold=0.15, sharing_formula=:sqrt),
+        output_file = "bin_packing_results_b3.md",
+    )
+
+    # --- Write combined results ---
+    results_path = joinpath(@__DIR__, "bin_packing_results_bimodal.md")
+    open(results_path, "w") do io
+        println(io, "# Experiment B: Bimodal Item Distribution")
+        println(io, "\nGenerated: $(Dates.now())")
+        println(io, "\n## Configuration")
+        println(io, "- Population: $pop_size, Generations: $generations")
+        println(io, "- Mutation rate: 0.4, Crossover rate: 0.3")
+        println(io, "- Bloat penalty: 0.0005, Tournament size: 3, Elitism: 3")
+        println(io, "- Episodes: 20, Items: 200, Seed: 42")
+
+        println(io, "\n## Bimodal Baselines")
+        println(io, "- First Fit: $(round(ff_bimodal, digits=4))")
+        println(io, "- Best Fit: $(round(bf_bimodal, digits=4))")
+        println(io, "- Gap (FF-BF): $(round(ff_bimodal - bf_bimodal, digits=4))")
+
+        println(io, "\n## Results")
+        println(io, "\n| Config | Distribution | Best (train) | Best (test) | vs FF (test) | vs BF (test) | Time |")
+        println(io, "|---|---|---|---|---|---|---|")
+
+        for (name, r, dist) in [("No speciation (B1)", r_b1, "uniform"),
+                                 ("No speciation (B2)", r_b2, "bimodal"),
+                                 ("Behavioral spec (B3)", r_b3, "bimodal")]
+            vs_ff = round((r.ff_test - r.evolved_test) / r.ff_test * 100, digits=2)
+            vs_bf = round((r.bf_test - r.evolved_test) / r.bf_test * 100, digits=2)
+            println(io, "| $name | $dist | $(round(r.result.best_fitness, digits=4)) | " *
+                    "$(round(r.evolved_test, digits=4)) | $(vs_ff)% | $(vs_bf)% | $(round(r.wall_time, digits=1))s |")
+        end
+
+        println(io, "\n## Best Evolved Programs")
+        for (name, r) in [("B1: Uniform", r_b1), ("B2: Bimodal", r_b2), ("B3: Bimodal + Behavioral Speciation", r_b3)]
+            println(io, "\n### $name")
+            println(io, "```julia")
+            println(io, r.program_text)
+            println(io, "```")
+        end
+    end
+    println("\nExperiment B results saved to: $results_path")
+    flush(stdout)
+end
+
+# =============================================================================
+# Group 1: Extended LLM run (300 generations)
+# =============================================================================
+
+function run_extended_classical(; generations::Int=300, pop_size::Int=200)
+    println("=" ^ 70)
+    println("G1A: Classical GP, $generations generations (extended)")
+    println("=" ^ 70)
+    flush(stdout)
+
+    r = run_bin_packing(; _common_kwargs(seed=42, generations=generations, pop_size=pop_size)...,
+        mutation_ops=_classical_ops(),
+        output_file="bin_packing_results_g1a.md",
+    )
+
+    # Write fitness history to data file
+    data_dir = _ensure_data_dir()
+    open(joinpath(data_dir, "extended_classical_history.tsv"), "w") do io
+        println(io, "generation\tbest_fitness")
+        for (gen, fit) in enumerate(r.result.fitness_history)
+            println(io, "$gen\t$(round(fit, digits=6))")
+        end
+    end
+
+    results_path = joinpath(@__DIR__, "bin_packing_results_extended_classical.md")
+    open(results_path, "w") do io
+        println(io, "# G1A: Extended Classical GP ($generations generations)\n")
+        println(io, "Generated: $(Dates.now())\n")
+        println(io, "## Result")
+        println(io, "- Train fitness: $(round(r.result.best_fitness, digits=4))")
+        println(io, "- Test fitness: $(round(r.evolved_test, digits=4))")
+        vs_bf = round((r.bf_test - r.evolved_test) / r.bf_test * 100, digits=2)
+        println(io, "- vs Best Fit (test): $(vs_bf)%")
+        println(io, "- Wall time: $(round(r.wall_time, digits=1))s\n")
+        println(io, "## Fitness History (every 10 gens)")
+        println(io, "| Gen | Best |")
+        println(io, "|-----|------|")
+        for gen in 1:10:length(r.result.fitness_history)
+            println(io, "| $gen | $(round(r.result.fitness_history[gen], digits=4)) |")
+        end
+        if length(r.result.fitness_history) % 10 != 1
+            println(io, "| $(length(r.result.fitness_history)) | $(round(r.result.fitness_history[end], digits=4)) |")
+        end
+        println(io, "\n## Best Program\n```julia")
+        println(io, r.program_text)
+        println(io, "```")
+    end
+    println("G1A results saved to: $results_path")
+    flush(stdout)
+    return r
+end
+
+function run_extended_llm(; generations::Int=300, pop_size::Int=200)
+    println("=" ^ 70)
+    println("G1B: Classical + LLM GP, $generations generations (extended)")
+    println("=" ^ 70)
+    flush(stdout)
+
+    if !_check_ollama()
+        open(joinpath(@__DIR__, "bin_packing_results_extended_llm.md"), "w") do io
+            println(io, "# G1B: SKIPPED — Ollama unavailable")
+        end
+        return nothing
+    end
+
+    tracked = _make_tracked_llm()
+    llm_ops = [tracked; _classical_ops()]
+    r = run_bin_packing(; _common_kwargs(seed=42, generations=generations, pop_size=pop_size)...,
+        mutation_ops=llm_ops,
+        output_file="bin_packing_results_g1b.md",
+    )
+
+    # Write fitness history
+    data_dir = _ensure_data_dir()
+    open(joinpath(data_dir, "extended_llm_history.tsv"), "w") do io
+        println(io, "generation\tbest_fitness")
+        for (gen, fit) in enumerate(r.result.fitness_history)
+            println(io, "$gen\t$(round(fit, digits=6))")
+        end
+    end
+
+    fallback_rate = tracked.n_calls > 0 ?
+        round((tracked.n_calls - tracked.n_slow) / tracked.n_calls * 100, digits=1) : 0.0
+    mean_lat = tracked.n_calls > 0 ?
+        round(tracked.total_latency / tracked.n_calls, digits=2) : 0.0
+
+    results_path = joinpath(@__DIR__, "bin_packing_results_extended_llm.md")
+    open(results_path, "w") do io
+        println(io, "# G1B: Extended Classical + LLM GP ($generations generations)\n")
+        println(io, "Generated: $(Dates.now())\n")
+        println(io, "## Result")
+        println(io, "- Train fitness: $(round(r.result.best_fitness, digits=4))")
+        println(io, "- Test fitness: $(round(r.evolved_test, digits=4))")
+        vs_bf = round((r.bf_test - r.evolved_test) / r.bf_test * 100, digits=2)
+        println(io, "- vs Best Fit (test): $(vs_bf)%")
+        println(io, "- Wall time: $(round(r.wall_time, digits=1))s\n")
+        println(io, "## LLM Metrics")
+        println(io, "- Total calls: $(tracked.n_calls)")
+        println(io, "- Successful: $(tracked.n_slow) ($(round(100.0 - fallback_rate, digits=1))%)")
+        println(io, "- Fallback rate: $(fallback_rate)%")
+        println(io, "- Mean latency: $(mean_lat)s")
+        println(io, "- Total LLM time: $(round(tracked.total_latency, digits=1))s\n")
+        println(io, "## Fitness History (every 10 gens)")
+        println(io, "| Gen | Best |")
+        println(io, "|-----|------|")
+        for gen in 1:10:length(r.result.fitness_history)
+            println(io, "| $gen | $(round(r.result.fitness_history[gen], digits=4)) |")
+        end
+        if length(r.result.fitness_history) % 10 != 1
+            println(io, "| $(length(r.result.fitness_history)) | $(round(r.result.fitness_history[end], digits=4)) |")
+        end
+        println(io, "\n## Best Program\n```julia")
+        println(io, r.program_text)
+        println(io, "```")
+    end
+    println("G1B results saved to: $results_path")
+    flush(stdout)
+    return r
+end
+
+# =============================================================================
+# Group 2: Multi-seed comparison (5 seeds × 4 configs)
+# =============================================================================
+
+function _run_multiseed(label::String;
+                        make_ops_fn, speciation_fn=() -> Arborist.NoSpeciation(),
+                        generations::Int=100, pop_size::Int=200)
+    seeds = OVERNIGHT_SEEDS
+    rows = NamedTuple[]
+
+    for (i, seed) in enumerate(seeds)
+        println("\n--- $label: Seed $seed ($i/$(length(seeds))) ---")
+        flush(stdout)
+
+        ops = make_ops_fn()
+        tracked = nothing
+        for op in ops
+            if op isa TrackedMutation
+                tracked = op
+                break
+            end
+        end
+
+        r = run_bin_packing(; _common_kwargs(seed=seed, generations=generations, pop_size=pop_size)...,
+            mutation_ops=ops,
+            speciation=speciation_fn(),
+            output_file="bin_packing_results_$(label)_seed$(seed).md",
+        )
+
+        push!(rows, (
+            seed=seed,
+            train=r.result.best_fitness,
+            test=r.evolved_test,
+            wall_time=r.wall_time,
+            ff_test=r.ff_test,
+            bf_test=r.bf_test,
+            llm_calls=tracked === nothing ? 0 : tracked.n_calls,
+            llm_ok=tracked === nothing ? 0 : tracked.n_slow,
+            llm_latency=tracked === nothing ? 0.0 : tracked.total_latency,
+            program=r.program_text,
+        ))
+    end
+
+    _write_seed_data("$(label).tsv", rows)
+
+    # Summary markdown
+    test_fits = [r.test for r in rows]
+    bf_tests = [r.bf_test for r in rows]
+    beats_bf = sum(t < b for (t, b) in zip(test_fits, bf_tests))
+    mean_test = Statistics.mean(test_fits)
+    std_test = length(test_fits) > 1 ? Statistics.std(test_fits) : 0.0
+
+    results_path = joinpath(@__DIR__, "bin_packing_results_$(label).md")
+    open(results_path, "w") do io
+        println(io, "# Multi-seed Results: $label\n")
+        println(io, "Generated: $(Dates.now())\n")
+        println(io, "## Summary")
+        println(io, "- Mean test fitness: $(round(mean_test, digits=4)) ± $(round(std_test, digits=4))")
+        println(io, "- Min: $(round(minimum(test_fits), digits=4)), Max: $(round(maximum(test_fits), digits=4))")
+        mean_bf = Statistics.mean(bf_tests)
+        vs_bf = round((mean_bf - mean_test) / mean_bf * 100, digits=2)
+        println(io, "- vs BF (mean): $(vs_bf)%")
+        println(io, "- Seeds beating BF: $beats_bf/$(length(seeds))")
+        total_time = sum(r.wall_time for r in rows)
+        println(io, "- Total wall time: $(round(total_time, digits=1))s")
+
+        if any(r.llm_calls > 0 for r in rows)
+            total_calls = sum(r.llm_calls for r in rows)
+            total_ok = sum(r.llm_ok for r in rows)
+            total_lt = sum(r.llm_latency for r in rows)
+            fb = total_calls > 0 ? round((total_calls - total_ok) / total_calls * 100, digits=1) : 0.0
+            println(io, "\n## LLM Metrics (aggregate)")
+            println(io, "- Total calls: $total_calls, Successful: $total_ok, Fallback: $(fb)%")
+            println(io, "- Total LLM time: $(round(total_lt, digits=1))s")
+        end
+
+        println(io, "\n## Per-seed Results")
+        println(io, "| Seed | Train | Test | vs BF | Time |")
+        println(io, "|------|-------|------|-------|------|")
+        for r in rows
+            vs = round((r.bf_test - r.test) / r.bf_test * 100, digits=2)
+            println(io, "| $(r.seed) | $(round(r.train, digits=4)) | $(round(r.test, digits=4)) | $(vs)% | $(round(r.wall_time, digits=1))s |")
+        end
+
+        println(io, "\n## Best Program (best seed)")
+        best_idx = argmin(test_fits)
+        println(io, "Seed $(rows[best_idx].seed), test=$(round(rows[best_idx].test, digits=4))")
+        println(io, "```julia")
+        println(io, rows[best_idx].program)
+        println(io, "```")
+    end
+    println("\n$label results saved to: $results_path")
+    flush(stdout)
+    return rows
+end
+
+function run_multiseed_classical()
+    println("=" ^ 70)
+    println("G2A: Multi-seed Classical GP ($(length(OVERNIGHT_SEEDS)) seeds × 100 gen)")
+    println("=" ^ 70)
+    flush(stdout)
+    _run_multiseed("multiseed_classical", make_ops_fn=_classical_ops)
+end
+
+function run_multiseed_behavioral()
+    println("=" ^ 70)
+    println("G2B: Multi-seed Behavioral Speciation ($(length(OVERNIGHT_SEEDS)) seeds × 100 gen)")
+    println("=" ^ 70)
+    flush(stdout)
+    _run_multiseed("multiseed_behavioral",
+        make_ops_fn=_classical_ops,
+        speciation_fn=() -> bp_behavioral_speciation(threshold=0.15, sharing_formula=:sqrt))
+end
+
+function run_multiseed_llm()
+    println("=" ^ 70)
+    println("G2C: Multi-seed Classical + LLM ($(length(OVERNIGHT_SEEDS)) seeds × 100 gen)")
+    println("=" ^ 70)
+    flush(stdout)
+
+    if !_check_ollama()
+        open(joinpath(@__DIR__, "bin_packing_results_multiseed_llm.md"), "w") do io
+            println(io, "# G2C: SKIPPED — Ollama unavailable")
+        end
+        return nothing
+    end
+
+    _run_multiseed("multiseed_llm",
+        make_ops_fn=() -> [_make_tracked_llm(); _classical_ops()])
+end
+
+function run_template_baseline()
+    println("=" ^ 70)
+    println("G2D: Template Baseline (no evolution)")
+    println("=" ^ 70)
+    flush(stdout)
+
+    seeds = OVERNIGHT_SEEDS
+    fset = bin_packing_function_set()
+    rng = Random.MersenneTwister(42)
+    state = _bp_create_state(rng, fset)
+
+    # Best-fit seed template (type 4 — clean best-fit scanner)
+    template_body = _bp_seeded_body(state, 4)
+    genome = Arborist.ExprGenome(template_body, state)
+
+    _ensure_bp_states()
+    f = _bp_compile(genome)
+    if f === nothing
+        println("ERROR: Template compilation failed")
+        flush(stdout)
+        return nothing
+    end
+
+    rows = NamedTuple[]
+    for seed in seeds
+        test_eval = BinPackingEvaluator(n_episodes=20, n_items=200,
+            capacity=1.0f0, item_dist=:uniform, rng_seed=seed + 1000)
+        test_ff = baseline_normalized(first_fit, test_eval)
+        test_bf = baseline_normalized(best_fit, test_eval)
+        test_template = Arborist.evaluate(test_eval, f)
+        push!(rows, (
+            seed=seed, train=test_template, test=test_template,
+            wall_time=0.0, ff_test=test_ff, bf_test=test_bf,
+            llm_calls=0, llm_ok=0, llm_latency=0.0,
+            program=pretty_print_genome(genome),
+        ))
+        vs_bf = round((test_bf - test_template) / test_bf * 100, digits=2)
+        println("  Seed $seed: template=$(round(test_template, digits=4)) bf=$(round(test_bf, digits=4)) vs_bf=$(vs_bf)%")
+        flush(stdout)
+    end
+
+    _write_seed_data("multiseed_template.tsv", rows)
+
+    test_fits = [r.test for r in rows]
+    bf_tests = [r.bf_test for r in rows]
+    beats_bf = sum(t < b for (t, b) in zip(test_fits, bf_tests))
+    mean_test = Statistics.mean(test_fits)
+    std_test = length(test_fits) > 1 ? Statistics.std(test_fits) : 0.0
+
+    results_path = joinpath(@__DIR__, "bin_packing_results_multiseed_template.md")
+    open(results_path, "w") do io
+        println(io, "# Multi-seed Results: Template Baseline (no evolution)\n")
+        println(io, "Generated: $(Dates.now())\n")
+        println(io, "## Summary")
+        println(io, "- Mean test fitness: $(round(mean_test, digits=4)) ± $(round(std_test, digits=4))")
+        println(io, "- Seeds beating BF: $beats_bf/$(length(seeds))\n")
+        println(io, "## Per-seed Results")
+        println(io, "| Seed | Template | FF | BF | vs BF |")
+        println(io, "|------|----------|-----|-----|-------|")
+        for r in rows
+            vs = round((r.bf_test - r.test) / r.bf_test * 100, digits=2)
+            println(io, "| $(r.seed) | $(round(r.test, digits=4)) | $(round(r.ff_test, digits=4)) | $(round(r.bf_test, digits=4)) | $(vs)% |")
+        end
+        println(io, "\n## Template Program\n```julia")
+        println(io, rows[1].program)
+        println(io, "```")
+    end
+    println("Template baseline results saved to: $results_path")
+    flush(stdout)
+    return rows
+end
+
+# =============================================================================
+# Group 3: Time-normalized comparison
+# =============================================================================
+
+function run_timenorm_classical(; pop_size::Int=200)
+    target_gens = 800
+    println("=" ^ 70)
+    println("G3A: Time-normalized Classical GP ($target_gens generations)")
+    println("  Target wall time: ~1800s (matching LLM variant A2)")
+    println("=" ^ 70)
+    flush(stdout)
+
+    r = run_bin_packing(; _common_kwargs(seed=42, generations=target_gens, pop_size=pop_size)...,
+        mutation_ops=_classical_ops(),
+        output_file="bin_packing_results_g3a.md",
+    )
+
+    data_dir = _ensure_data_dir()
+    open(joinpath(data_dir, "timenorm_classical.tsv"), "w") do io
+        println(io, "generations\ttrain\ttest\twall_time\tff_test\tbf_test")
+        println(io, "$target_gens\t$(round(r.result.best_fitness, digits=6))\t$(round(r.evolved_test, digits=6))\t$(round(r.wall_time, digits=1))\t$(round(r.ff_test, digits=6))\t$(round(r.bf_test, digits=6))")
+    end
+
+    results_path = joinpath(@__DIR__, "bin_packing_results_timenorm.md")
+    vs_bf = round((r.bf_test - r.evolved_test) / r.bf_test * 100, digits=2)
+    open(results_path, "w") do io
+        println(io, "# Group 3: Time-Normalized Comparison\n")
+        println(io, "Generated: $(Dates.now())\n")
+        println(io, "## Comparison (same wall-clock budget)")
+        println(io, "| Config | Generations | Test fitness | vs BF | Wall time |")
+        println(io, "|--------|------------|-------------|-------|-----------|")
+        println(io, "| Classical (A1, ref) | 100 | 1.0782 | 0.05% | 218s |")
+        println(io, "| Classical + LLM (A2, ref) | 100 | 1.0679 | 1.00% | 1767s |")
+        println(io, "| Classical time-matched (G3A) | $target_gens | $(round(r.evolved_test, digits=4)) | $(vs_bf)% | $(round(r.wall_time, digits=1))s |")
+        println(io, "\n## Best Program (G3A)\n```julia")
+        println(io, r.program_text)
+        println(io, "```")
+    end
+    println("G3A results saved to: $results_path")
+    flush(stdout)
+    return r
+end
+
+# =============================================================================
+# Combine all overnight results
+# =============================================================================
+
+function run_combine_results()
+    println("=" ^ 70)
+    println("Combining overnight results")
+    println("=" ^ 70)
+    flush(stdout)
+
+    results_path = joinpath(@__DIR__, "bin_packing_overnight_results.md")
+    open(results_path, "w") do io
+        println(io, "# Arborist.jl — Overnight Bin Packing Experiment Results\n")
+        println(io, "Generated: $(Dates.now())")
+
+        # --- Multi-seed summary ---
+        println(io, "\n## 1. Multi-seed Comparison (5 seeds: $(join(OVERNIGHT_SEEDS, ", ")))\n")
+        println(io, "| Config | Mean test | Std | Min | Max | vs BF (mean) | Beats BF |")
+        println(io, "|--------|-----------|-----|-----|-----|-------------|----------|")
+
+        configs = [
+            ("Best-fit template", "multiseed_template.tsv"),
+            ("Classical GP", "multiseed_classical.tsv"),
+            ("Behavioral speciation", "multiseed_behavioral.tsv"),
+            ("Classical + LLM", "multiseed_llm.tsv"),
+        ]
+        per_seed = Dict{String, Vector}()
+        for (name, file) in configs
+            rows = _read_seed_data(file)
+            if rows === nothing || isempty(rows)
+                println(io, "| $name | — | — | — | — | — | — |")
+                continue
+            end
+            per_seed[name] = rows
+            tests = [r.test for r in rows]
+            bfs = [r.bf_test for r in rows]
+            m = round(Statistics.mean(tests), digits=4)
+            s = round(Statistics.std(tests), digits=4)
+            vs = round((Statistics.mean(bfs) - Statistics.mean(tests)) / Statistics.mean(bfs) * 100, digits=2)
+            beats = sum(t < b for (t, b) in zip(tests, bfs))
+            println(io, "| $name | $m | $s | $(round(minimum(tests),digits=4)) | $(round(maximum(tests),digits=4)) | $(vs)% | $beats/$(length(tests)) |")
+        end
+
+        println(io, "\n### Per-seed Detail\n")
+        println(io, "| Seed | Template | Classical | Behavioral | LLM |")
+        println(io, "|------|----------|-----------|------------|-----|")
+        for seed in OVERNIGHT_SEEDS
+            parts = [string(seed)]
+            for (name, _) in configs
+                rows = get(per_seed, name, nothing)
+                if rows === nothing
+                    push!(parts, "—")
+                else
+                    idx = findfirst(r -> r.seed == seed, rows)
+                    push!(parts, idx === nothing ? "—" : string(round(rows[idx].test, digits=4)))
+                end
+            end
+            println(io, "| ", join(parts, " | "), " |")
+        end
+
+        # --- Extended run ---
+        println(io, "\n## 2. Extended Run (300 generations, seed 42)\n")
+        data_dir = _ensure_data_dir()
+        for (label, file) in [("Classical (G1A)", "extended_classical_history.tsv"),
+                               ("Classical + LLM (G1B)", "extended_llm_history.tsv")]
+            path = joinpath(data_dir, file)
+            if isfile(path)
+                lines = readlines(path)
+                data = Tuple{Int,Float64}[]
+                for l in lines
+                    startswith(l, "gen") && continue
+                    ps = split(l, "\t")
+                    length(ps) >= 2 || continue
+                    push!(data, (parse(Int, ps[1]), parse(Float64, ps[2])))
+                end
+                if !isempty(data)
+                    println(io, "### $label")
+                    println(io, "| Gen | Best |")
+                    println(io, "|-----|------|")
+                    for (gen, fit) in data
+                        if gen == 1 || gen % 10 == 0 || gen == length(data)
+                            println(io, "| $gen | $(round(fit, digits=4)) |")
+                        end
+                    end
+                    println(io, "")
+                end
+            else
+                println(io, "### $label — data not found\n")
+            end
+        end
+
+        # --- Time-normalized ---
+        println(io, "\n## 3. Time-Normalized Comparison\n")
+        tn_path = joinpath(@__DIR__, "bin_packing_results_timenorm.md")
+        if isfile(tn_path)
+            for line in readlines(tn_path)
+                startswith(line, "# ") && continue  # skip title
+                startswith(line, "Generated:") && continue
+                println(io, line)
+            end
+        else
+            println(io, "Time-normalized results not yet available.")
+        end
+
+        println(io, "\n## 4. Key Findings\n")
+        println(io, "*To be completed after reviewing all results.*")
+    end
+
+    println("Combined results saved to: $results_path")
+    flush(stdout)
+end
+
+# =============================================================================
+# Main entry point
+# =============================================================================
+
 function main()
+    experiment = nothing
     kwargs = Dict{Symbol, Any}()
+
     for arg in ARGS
         m = match(r"^--(\w+)=(.+)$", arg)
         if m !== nothing
             key = Symbol(m.captures[1])
             val_str = m.captures[2]
-            if key in (:pop_size, :generations, :n_episodes, :n_items, :rng_seed,
-                        :elitism, :tournament_size, :num_temps)
+            if key == :experiment
+                experiment = val_str
+            elseif key in (:pop_size, :generations, :n_episodes, :n_items, :rng_seed,
+                           :elitism, :tournament_size, :num_temps)
                 kwargs[key] = parse(Int, val_str)
             elseif key in (:mutation_rate, :crossover_rate, :bloat_penalty)
                 kwargs[key] = parse(Float64, val_str)
@@ -990,7 +1911,50 @@ function main()
         end
     end
 
-    run_bin_packing(; kwargs...)
+    if experiment === nothing
+        run_bin_packing(; kwargs...)
+        return
+    end
+
+    exp_kwargs = Dict{Symbol,Any}()
+    haskey(kwargs, :generations) && (exp_kwargs[:generations] = kwargs[:generations])
+    haskey(kwargs, :pop_size) && (exp_kwargs[:pop_size] = kwargs[:pop_size])
+
+    # Fault tolerance: write error to results file on failure
+    try
+        if experiment == "llm"
+            run_experiment_a(; exp_kwargs...)
+        elseif experiment == "bimodal"
+            run_experiment_b(; exp_kwargs...)
+        elseif experiment == "extended_classical"
+            run_extended_classical(; exp_kwargs...)
+        elseif experiment == "extended_llm"
+            run_extended_llm(; exp_kwargs...)
+        elseif experiment == "multiseed_classical"
+            run_multiseed_classical()
+        elseif experiment == "multiseed_behavioral"
+            run_multiseed_behavioral()
+        elseif experiment == "multiseed_llm"
+            run_multiseed_llm()
+        elseif experiment == "template_baseline"
+            run_template_baseline()
+        elseif experiment == "timenorm_classical"
+            run_timenorm_classical(; filter(p -> p.first == :pop_size, exp_kwargs)...)
+        elseif experiment == "combine_results"
+            run_combine_results()
+        else
+            error("Unknown experiment: $experiment")
+        end
+    catch e
+        output_path = joinpath(@__DIR__, "bin_packing_results_$(experiment)_FAILED.md")
+        open(output_path, "w") do io
+            println(io, "# EXPERIMENT FAILED: $experiment\n")
+            println(io, "Error: $e\n")
+            println(io, "Stacktrace:")
+            Base.show_backtrace(io, catch_backtrace())
+        end
+        rethrow(e)
+    end
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

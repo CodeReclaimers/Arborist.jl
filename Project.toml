@@ -6,7 +6,7 @@ version = "0.1.0"
 
 [deps]
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
-HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [weakdeps]
@@ -14,17 +14,14 @@ DynamicExpressions = "a40a106e-89c9-4ca8-8020-a735e8728b6b"
 
 [extensions]
 DynExprExt = "DynamicExpressions"
-LLMOperatorExt = "HTTP"
 
 [compat]
 DynamicExpressions = "1, 2"
-HTTP = "1"
 julia = "1.10"
 
 [extras]
 DynamicExpressions = "a40a106e-89c9-4ca8-8020-a735e8728b6b"
-HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test", "HTTP", "DynamicExpressions"]
+test = ["Test", "DynamicExpressions"]

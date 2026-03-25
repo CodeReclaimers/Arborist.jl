@@ -73,3 +73,11 @@ abstract type AbstractEvolutionaryAlgorithm end
 Base type for results returned by `solve`.
 """
 abstract type AbstractEvolutionResult end
+
+"""
+    AbstractTopology
+
+Base type for island migration topologies. Concrete subtypes define
+`migration_targets(t, i, n_islands, rng)` returning destination island indices.
+"""
+abstract type AbstractTopology end

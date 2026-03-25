@@ -69,34 +69,49 @@ end
     IslandModel <: AbstractEvolutionaryAlgorithm
 
 Island model that runs multiple independent populations (islands) with periodic
-migration. Migration uses a ring topology: island i sends its best individuals
-to island i+1. Islands can run in parallel when `island_algorithm.parallel=true`
-and multiple threads are available.
+migration. Supports pluggable topologies and optional distributed execution
+where each island runs in its own worker process.
 
 # Fields
 - `n_islands::Int`: number of islands (default: 4)
 - `island_algorithm::GeneticProgramming`: algorithm for each island
 - `migration_interval::Int`: generations between migrations (default: 10)
 - `migration_size::Int`: number of individuals to migrate per event (default: 2)
+- `topology::AbstractTopology`: migration topology (default: `RingTopology()`)
+- `distributed::Bool`: run each island in a separate worker process (default: false)
+- `async::Bool`: asynchronous evolution — islands evolve independently (default: false, requires distributed=true)
 """
 struct IslandModel <: AbstractEvolutionaryAlgorithm
     n_islands::Int
     island_algorithm::GeneticProgramming
     migration_interval::Int
     migration_size::Int
+    topology::AbstractTopology
+    distributed::Bool
+    async::Bool
 end
 
 """
     IslandModel(; n_islands=4, island_algorithm=GeneticProgramming(),
-                  migration_interval=10, migration_size=2)
+                  migration_interval=10, migration_size=2,
+                  topology=RingTopology(), distributed=false, async=false)
 
 Construct an `IslandModel` with keyword arguments and sensible defaults.
+When `distributed=true`, each island runs in its own worker process via
+`Distributed.jl`, eliminating `@eval` contention between islands.
 """
 function IslandModel(;
     n_islands::Int = 4,
     island_algorithm::GeneticProgramming = GeneticProgramming(),
     migration_interval::Int = 10,
-    migration_size::Int = 2
+    migration_size::Int = 2,
+    topology::AbstractTopology = RingTopology(),
+    distributed::Bool = false,
+    async::Bool = false
 )
-    IslandModel(n_islands, island_algorithm, migration_interval, migration_size)
+    if async && !distributed
+        throw(ArgumentError("async=true requires distributed=true"))
+    end
+    IslandModel(n_islands, island_algorithm, migration_interval, migration_size,
+                topology, distributed, async)
 end

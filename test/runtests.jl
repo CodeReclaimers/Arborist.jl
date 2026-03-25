@@ -14,6 +14,8 @@ const RUN_BENCHMARKS = get(ENV, "GENPROG_RUN_BENCHMARKS", "false") == "true"
     include("unit/test_speciation.jl")
     include("unit/test_bloat_penalty.jl")
     include("unit/test_island_model.jl")
+    include("unit/test_topology.jl")
+    include("unit/test_migrant_genome.jl")
     include("unit/test_sanitizer.jl")
     include("unit/test_ant_genome.jl")
     include("unit/test_graph_genome.jl")
@@ -21,6 +23,7 @@ const RUN_BENCHMARKS = get(ENV, "GENPROG_RUN_BENCHMARKS", "false") == "true"
     # Integration tests — always run, target < 60s total
     include("integration/test_llm_operator.jl")
     include("integration/test_tree_genome.jl")
+    include("integration/test_distributed_islands.jl")
 
     if RUN_BENCHMARKS
         @info "Running full benchmark suite (GENPROG_RUN_BENCHMARKS=true)"

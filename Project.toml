@@ -1,29 +1,30 @@
 name = "Arborist"
 uuid = "226a4f77-d45f-40bb-908f-e1e2bc89957a"
 authors = ["CodeReclaimers LLC <github@codereclaimers.com>"]
-version = "0.1.0"
 description = "Generic genetic programming for Julia: Problem/Algorithm/Solve API with ExprGenome, TreeGenome, GraphGenome, and LLM mutation operators."
+version = "0.1.0"
 
 [deps]
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [weakdeps]
-HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 DynamicExpressions = "a40a106e-89c9-4ca8-8020-a735e8728b6b"
 
 [extensions]
-LLMOperatorExt = "HTTP"
 DynExprExt = "DynamicExpressions"
+LLMOperatorExt = "HTTP"
 
 [compat]
-julia = "1.10"
-HTTP = "1"
 DynamicExpressions = "1, 2"
+HTTP = "1"
+julia = "1.10"
 
 [extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 DynamicExpressions = "a40a106e-89c9-4ca8-8020-a735e8728b6b"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test", "HTTP", "DynamicExpressions"]

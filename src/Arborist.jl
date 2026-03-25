@@ -18,6 +18,7 @@ result    = solve(problem, algorithm; verbose=true)
 module Arborist
 
 using Random
+using Distributed
 
 # --- Abstract type hierarchy ---
 include("abstractions.jl")
@@ -44,6 +45,9 @@ include("sanitizer.jl")
 # --- Speciation strategies ---
 include("speciation.jl")
 
+# --- Migration topology types ---
+include("topology.jl")
+
 # --- Result type ---
 include("result.jl")
 
@@ -65,6 +69,12 @@ include("solve.jl")
 include("genome/ant_genome.jl")
 include("genome/graph_genome.jl")
 include("genome/linear_genome.jl")
+
+# --- Migration types (needs all genome types) ---
+include("migration.jl")
+
+# --- Distributed island support ---
+include("distributed_island.jl")
 
 # --- Public API exports ---
 export
@@ -89,6 +99,18 @@ export
     # Concrete types — algorithms
     GeneticProgramming,
     IslandModel,
+
+    # Topology types
+    AbstractTopology,
+    RingTopology,
+    CompleteTopology,
+    RandomTopology,
+    migration_targets,
+
+    # Migration
+    MigrantGenome,
+    to_migrant,
+    from_migrant,
 
     # Concrete types — operators
     SubtreeMutation,
@@ -157,6 +179,7 @@ export
     create_harness,
     add_loop_checks,
     unravel,
+    setup_workers,
 
     # Legacy API (from evolution.jl)
     Individual,

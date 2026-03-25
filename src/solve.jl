@@ -230,7 +230,21 @@ Returns a `GPResult` containing the global best genome across all islands.
 function solve(problem::GPProblem{G,E},
                algorithm::IslandModel;
                verbose::Bool = false,
-               callback = nothing) where {G,E}
+               callback = nothing,
+               auto_addprocs::Bool = false,
+               auto_rmprocs::Bool = false) where {G,E}
+    # Dispatch to distributed solvers if requested
+    if algorithm.distributed && !algorithm.async
+        return _distributed_sync_solve(problem, algorithm;
+                                        verbose=verbose, callback=callback,
+                                        auto_addprocs=auto_addprocs,
+                                        auto_rmprocs=auto_rmprocs)
+    elseif algorithm.distributed && algorithm.async
+        error("Asynchronous distributed island model is not yet implemented. " *
+              "Use async=false for synchronous distributed mode.")
+    end
+
+    # --- Sequential in-process mode (original behavior) ---
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
@@ -388,8 +402,9 @@ end
 """
     _migrate!(island_genomes, island_fitnesses, algorithm, rng)
 
-Perform ring migration: send the top `migration_size` individuals from
-each island to the next island, replacing the worst individuals.
+Perform migration using the algorithm's topology. Sends the top
+`migration_size` individuals from each island to its topology-determined
+destinations, replacing the worst individuals on those destinations.
 """
 function _migrate!(island_genomes, island_fitnesses, algorithm::IslandModel, rng::AbstractRNG)
     n = algorithm.n_islands
@@ -402,17 +417,18 @@ function _migrate!(island_genomes, island_fitnesses, algorithm::IslandModel, rng
         emigrants[i] = [deepcopy(island_genomes[i][order[j]]) for j in 1:min(ms, length(order))]
     end
 
-    # Send emigrants to next island in ring, replacing worst individuals.
+    # Send emigrants to topology-determined destinations, replacing worst.
     for i in 1:n
-        dest = (i % n) + 1  # ring: island i → island i+1 (wraps around)
-        order = sortperm(island_fitnesses[dest], rev=true)  # worst first
-        incoming = emigrants[i]
-        for (k, genome) in enumerate(incoming)
-            if k <= length(order)
-                worst_idx = order[k]
-                island_genomes[dest][worst_idx] = genome
-                # Re-evaluate the migrated individual on the destination island.
-                island_fitnesses[dest][worst_idx] = Inf  # will be evaluated next generation
+        destinations = migration_targets(algorithm.topology, i, n, rng)
+        for dest in destinations
+            order = sortperm(island_fitnesses[dest], rev=true)  # worst first
+            incoming = emigrants[i]
+            for (k, genome) in enumerate(incoming)
+                if k <= length(order)
+                    worst_idx = order[k]
+                    island_genomes[dest][worst_idx] = genome
+                    island_fitnesses[dest][worst_idx] = Inf
+                end
             end
         end
     end

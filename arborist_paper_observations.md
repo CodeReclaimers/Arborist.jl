@@ -545,18 +545,44 @@ that make ExprGenome island models slow in a single process:
    sorting, ant trail) use module-level `Ref` state. Separate processes
    have independent state without thread-local workarounds.
 
-**Architecture**: The main process coordinates lockstep generations
-via `remotecall`/`fetch`. Worker-side state is stored in a module-level
+**Architecture**: Worker-side state is stored in a module-level
 `Dict{Int, IslandState}` keyed by island ID — only status tuples and
 `MigrantGenome` payloads cross the wire. Migration uses pluggable
 topology dispatch (`RingTopology`, `CompleteTopology`, `RandomTopology`).
 Worker lifecycle is user-managed by default with opt-in auto-add/remove.
 
+Two modes are implemented:
+
+- **Synchronous**: The main process coordinates lockstep generations
+  via `remotecall`/`fetch`. Simpler, reproducible with seeded RNGs,
+  matches ECJ and DEAP defaults.
+- **Asynchronous**: Each island runs its full evolution loop
+  independently. Migration via bounded `RemoteChannel` inboxes with
+  non-blocking `put!/take!` — a fast island never blocks on a slow
+  one. Status monitoring via `AsyncStatusMessage` channel polled by
+  the coordinator. Provides natural load balancing and implicit
+  parsimony pressure (smaller/faster programs get more evolutionary
+  turns per unit time).
+
+**Benchmark results** (sorting example, 2 islands, 50 pop × 50 gen,
+length-6 arrays):
+- Sequential (in-process): 5.39s
+- Sync distributed: 5.86s (0.92x — `remotecall` overhead exceeds
+  benefit at this small problem size)
+- Async distributed: 3.66s (1.47x speedup — islands truly parallel
+  without coordination overhead)
+
+The sync overhead at small scale is expected: each `remotecall`/`fetch`
+round-trip costs ~1-2ms, and with 50 generations × 2 islands that adds
+~200ms of pure coordination overhead on top of ~5s of computation. The
+crossover point where sync distributed beats sequential is at larger
+population sizes or more expensive fitness evaluations (e.g., bin
+packing with 200 items per episode).
+
 **Contrast with PaGMO**: PaGMO/PyGMO is async-only with pluggable
-topologies. Arborist.jl supports both sync (implemented) and async
-(deferred). The sync mode is simpler, reproducible, and matches ECJ
-and DEAP defaults. Async mode with `RemoteChannel`-based migration
-is the natural follow-on for heterogeneous evaluation times.
+topologies. Arborist.jl supports both sync and async with the same
+topology types. The async mode's non-blocking channel design matches
+PaGMO's philosophy of never letting one island gate another.
 
 **Paper claim**: Process-level isolation is the correct granularity
 for `@eval`-based program synthesis — it eliminates all three
@@ -592,10 +618,14 @@ matter as much as the evolutionary algorithm.
 
 ### 5.10 Concurrent LLM calls
 
-Deferred. With distributed islands, LLM mutations on one island
-run concurrently with classical evaluation on other islands,
-amortizing the latency naturally. Explicit concurrent LLM calls
-within a single island remain a future extension.
+With distributed async islands, LLM mutations on one island run
+concurrently with classical evaluation on other islands, amortizing
+the latency naturally. A heterogeneous island configuration — some
+islands using `LLMMutationOperator`, others using classical operators
+— would exploit this automatically without any additional code.
+Explicit concurrent LLM calls within a single island remain a future
+extension but are less important now that async distributed provides
+inter-island concurrency.
 
 ---
 
@@ -643,12 +673,20 @@ within a single island remain a future extension.
   sorting — additive penalty creates perverse incentive regardless of
   gating strategy
 
+### Distributed island model (sorting, 2 islands)
+- Sequential (in-process): 5.39s wall time
+- Sync distributed: 5.86s (0.92x — overhead exceeds benefit at small scale)
+- Async distributed: 3.66s (1.47x speedup)
+- All three modes produce identical best fitness (0.4715)
+- Async advantage grows with problem size (more expensive evaluations
+  amortize the fixed `remotecall` overhead)
+
 ### Test suite
-- 1220 tests total (Phases 1-6 + behavioral diversity + distributed islands)
-- Fast tier (unit + integration): ~30 seconds (includes distributed
-  integration test that spins up 2 worker processes)
+- 1226 tests total (Phases 1-6 + behavioral diversity + distributed islands)
+- Fast tier (unit + integration): ~40 seconds (includes sync and async
+  distributed integration tests, each spinning up 2 worker processes)
 - Full benchmark tier: ~80 seconds (GENPROG_RUN_BENCHMARKS=true)
-- Package precompile time: ~495ms (Arborist core + Distributed)
+- Package precompile time: ~510ms (Arborist core + Distributed)
 
 ---
 

@@ -240,8 +240,10 @@ function solve(problem::GPProblem{G,E},
                                         auto_addprocs=auto_addprocs,
                                         auto_rmprocs=auto_rmprocs)
     elseif algorithm.distributed && algorithm.async
-        error("Asynchronous distributed island model is not yet implemented. " *
-              "Use async=false for synchronous distributed mode.")
+        return _distributed_async_solve(problem, algorithm;
+                                         verbose=verbose, callback=callback,
+                                         auto_addprocs=auto_addprocs,
+                                         auto_rmprocs=auto_rmprocs)
     end
 
     # --- Sequential in-process mode (original behavior) ---

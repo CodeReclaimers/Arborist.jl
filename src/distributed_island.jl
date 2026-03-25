@@ -195,6 +195,88 @@ function _cleanup_island_local(id::Int)
 end
 
 # =============================================================================
+# Async island support
+# =============================================================================
+
+"""
+    AsyncStatusMessage
+
+Status update sent from an async island worker to the coordinator.
+Concrete struct (not NamedTuple) to ensure reliable cross-process serialization.
+"""
+struct AsyncStatusMessage
+    island_id::Int
+    generation::Int
+    best_fitness::Float64
+    mean_fitness::Float64
+end
+
+"""
+    _run_island_async(id, inboxes, status_ch, n_islands, topology,
+                      migration_interval, migration_size) -> NamedTuple
+
+Run the full async evolution loop for island `id`. Called via remotecall
+on a worker process. Each generation: evolve, report status, and at
+migration intervals drain inbox and push emigrants to destinations.
+
+All channel operations are non-blocking — a fast island never blocks
+on a slow island's full inbox.
+"""
+function _run_island_async(id::Int,
+                           inboxes::Vector{RemoteChannel},
+                           status_ch::RemoteChannel,
+                           n_islands::Int,
+                           topology::AbstractTopology,
+                           migration_interval::Int,
+                           migration_size::Int)
+    island = _local_islands[id]::IslandState
+    alg = island.algorithm
+    rng = island.rng
+
+    for gen in 1:alg.generations
+        result = _evolve_one_gen_local!(id)
+
+        # Report status (non-blocking; drop if channel full)
+        try
+            put!(status_ch, AsyncStatusMessage(id, gen,
+                                                result.best_fitness,
+                                                result.mean_fitness))
+        catch e
+            e isa InvalidStateException || rethrow()
+        end
+
+        # Migration at intervals
+        if gen % migration_interval == 0
+            # Drain inbox (non-blocking)
+            my_inbox = inboxes[id]
+            while isready(my_inbox)
+                try
+                    migrants = take!(my_inbox)
+                    _inject_migrants_local!(id, migrants)
+                catch e
+                    e isa InvalidStateException && break
+                    rethrow()
+                end
+            end
+
+            # Push emigrants to destinations (non-blocking)
+            emigrants = _get_migrants_local(id, migration_size)
+            destinations = migration_targets(topology, id, n_islands, rng)
+            for dest in destinations
+                try
+                    put!(inboxes[dest], emigrants)
+                catch e
+                    # Destination inbox full — drop rather than block
+                    e isa InvalidStateException || rethrow()
+                end
+            end
+        end
+    end
+
+    return _get_final_state_local(id)
+end
+
+# =============================================================================
 # Worker acquisition and setup
 # =============================================================================
 
@@ -415,5 +497,189 @@ function _distributed_migrate!(workers::Vector{Int}, n_islands::Int,
     end
     for f in inject_futures
         fetch(f)
+    end
+end
+
+# =============================================================================
+# Distributed asynchronous solve
+# =============================================================================
+
+"""
+    _distributed_async_solve(problem, algorithm; kwargs...) -> GPResult
+
+Asynchronous distributed island model: each island evolves independently
+on its own worker process. Migration happens peer-to-peer via RemoteChannels.
+The coordinator monitors progress and gathers results when all islands finish.
+
+Unlike sync mode, there is no lock-step generation coordination. Each island
+runs at its own pace. This provides natural load balancing and implicit
+parsimony pressure (smaller/faster programs get more evolutionary turns).
+
+The `fitness_history` in the returned GPResult contains one entry per status
+message received from workers, not one per generation. This is inherent to
+async — there is no well-defined global generation counter.
+"""
+function _distributed_async_solve(problem::GPProblem{G,E}, algorithm::IslandModel;
+                                   verbose::Bool=false, callback=nothing,
+                                   auto_addprocs::Bool=false,
+                                   auto_rmprocs::Bool=false) where {G,E}
+    rng = problem.seed === nothing ? Random.default_rng() :
+          Random.MersenneTwister(problem.seed)
+
+    n = algorithm.n_islands
+    alg = algorithm.island_algorithm
+
+    workers_used, added_pids = _acquire_workers(n; auto_add=auto_addprocs)
+
+    # Verify custom evaluator types are available on workers
+    eval_type = typeof(problem.evaluator)
+    eval_mod = parentmodule(eval_type)
+    if eval_mod !== @__MODULE__
+        type_sym = nameof(eval_type)
+        for w in workers_used
+            available = remotecall_fetch(isdefined, w, Main, type_sym)
+            if !available
+                error("Evaluator type $type_sym is not available on worker $w.\n" *
+                      "Load your problem code on all workers with:\n" *
+                      "  @everywhere include(\"your_script.jl\")")
+            end
+        end
+    end
+
+    try
+        # Generate per-island seeds
+        island_seeds = [rand(rng, UInt64) for _ in 1:n]
+
+        # Initialize islands on workers
+        init_futures = [remotecall(_init_island_local, w, problem, alg, seed, i)
+                        for (i, (w, seed)) in enumerate(zip(workers_used, island_seeds))]
+        for f in init_futures
+            fetch(f)
+        end
+
+        # Create bounded migration inboxes (one per island, on the island's worker)
+        inbox_capacity = 4
+        inboxes = RemoteChannel[
+            RemoteChannel(() -> Channel{Vector{MigrantGenome}}(inbox_capacity), w)
+            for (i, w) in enumerate(workers_used)
+        ]
+
+        # Status channel: bounded, coordinator polls it
+        status_ch = RemoteChannel(() -> Channel{AsyncStatusMessage}(n * 10))
+
+        t0 = time()
+
+        # Launch async evolution on each worker
+        island_futures = [
+            remotecall(_run_island_async, w, i,
+                       inboxes, status_ch,
+                       n, algorithm.topology,
+                       algorithm.migration_interval, algorithm.migration_size)
+            for (i, w) in enumerate(workers_used)
+        ]
+
+        # Monitor progress until all islands complete
+        global_best_fitness = Inf
+        global_best_island = 1
+        fitness_history = Float64[]
+        mean_history = Float64[]
+        island_gen = zeros(Int, n)
+        island_best = fill(Inf, n)
+
+        all_done = false
+        while !all_done
+            # Drain all available status messages
+            while isready(status_ch)
+                msg = take!(status_ch)
+                island_gen[msg.island_id] = msg.generation
+                island_best[msg.island_id] = msg.best_fitness
+
+                if msg.best_fitness < global_best_fitness
+                    global_best_fitness = msg.best_fitness
+                    global_best_island = msg.island_id
+                end
+
+                # Record history entry per status message
+                push!(fitness_history, global_best_fitness)
+                push!(mean_history, msg.mean_fitness)
+            end
+
+            if verbose && any(g -> g > 0, island_gen)
+                min_gen = minimum(island_gen)
+                max_gen = maximum(island_gen)
+                elapsed = round(time() - t0, digits=1)
+                println("Progress: gens=$(min_gen)-$(max_gen), " *
+                        "global_best=$(round(global_best_fitness, digits=6)), " *
+                        "elapsed=$(elapsed)s")
+                flush(stdout)
+            end
+
+            if callback !== nothing && any(g -> g > 0, island_gen)
+                callback(minimum(island_gen), global_best_fitness, nothing)
+            end
+
+            all_done = all(isready(f) for f in island_futures)
+            if !all_done
+                sleep(0.1)
+            end
+        end
+
+        # Drain remaining status messages
+        while isready(status_ch)
+            msg = take!(status_ch)
+            if msg.best_fitness < global_best_fitness
+                global_best_fitness = msg.best_fitness
+                global_best_island = msg.island_id
+            end
+            push!(fitness_history, global_best_fitness)
+            push!(mean_history, msg.mean_fitness)
+        end
+
+        # Collect final states
+        final_states = [fetch(f) for f in island_futures]
+
+        # Ensure we have at least one history entry
+        if isempty(fitness_history)
+            push!(fitness_history, global_best_fitness)
+            push!(mean_history, Inf)
+        end
+
+        # Merge final populations
+        all_genomes = reduce(vcat, [s.genomes for s in final_states])
+        all_fitnesses = reduce(vcat, [s.fitnesses for s in final_states])
+        order = sortperm(all_fitnesses)
+        all_genomes = all_genomes[order]
+        all_fitnesses = all_fitnesses[order]
+
+        best_state = final_states[global_best_island]
+        wall_time = time() - t0
+
+        # Cleanup
+        cleanup_futures = [remotecall(_cleanup_island_local, w, i)
+                           for (i, w) in enumerate(workers_used)]
+        for f in cleanup_futures
+            fetch(f)
+        end
+
+        # Close channels
+        close(status_ch)
+        for inbox in inboxes
+            close(inbox)
+        end
+
+        return GPResult{G}(
+            best_state.best_genome,
+            best_state.best_fitness,
+            all_genomes,
+            fitness_history,
+            mean_history,
+            alg.generations,
+            wall_time,
+            best_state.best_fitness < 1.0
+        )
+    finally
+        if auto_rmprocs && !isempty(added_pids)
+            rmprocs(added_pids)
+        end
     end
 end

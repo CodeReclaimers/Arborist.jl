@@ -90,19 +90,48 @@ using Distributed
         end
     end
 
-    @testset "async=true errors (not yet implemented)" begin
-        input_cols = Dict(:x => Float32)
-        output_cols = Dict(:y => Float32)
-        input_rows = [Dict{Symbol,Any}(:x => 1.0f0)]
-        output_rows = [Dict{Symbol,Any}(:y => 1.0f0)]
-        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
-                                    time_limit_ns=1_000_000_000)
+    @testset "Async distributed solve (2 islands)" begin
+        added = addprocs(2; exeflags="--project=$(Base.active_project())")
+        @everywhere using Arborist
 
-        problem = GPProblem(fe, ExprGenome; seed=42)
-        algorithm = IslandModel(n_islands=2, distributed=true, async=true)
-        # Should error because async is not yet implemented, but also
-        # because no workers are available. The distributed dispatch
-        # should trigger before the async error in the current code path.
-        @test_throws Exception solve(problem, algorithm)
+        try
+            input_cols = Dict(:x => Float32)
+            output_cols = Dict(:y => Float32)
+            xs = Float32[-1.0, 0.0, 1.0]
+            input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
+            output_rows = [Dict{Symbol,Any}(:y => v^2) for v in xs]
+            fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
+                                        time_limit_ns=1_000_000_000)
+
+            fset = FunctionSet(Set{FunctionDetails}())
+            for func in [:+, :-, :*]
+                add!(fset, func, 2, Float32, Float32)
+            end
+
+            problem = GPProblem(fe, ExprGenome; function_set=fset, num_temps=2, seed=42)
+            algorithm = IslandModel(
+                n_islands=2,
+                island_algorithm=GeneticProgramming(
+                    pop_size=20, generations=15,
+                    mutation_rate=0.4, crossover_rate=0.2,
+                    parallel=false
+                ),
+                migration_interval=5, migration_size=2,
+                distributed=true, async=true
+            )
+
+            result = solve(problem, algorithm; verbose=false)
+
+            # Validity checks (async is non-deterministic)
+            @test result isa GPResult{ExprGenome}
+            @test result.best_fitness >= 0.0
+            @test result.best_fitness < Inf
+            @test result.generations_run == 15
+            @test length(result.population) == 2 * 20
+            @test !isempty(result.fitness_history)
+            @test result.wall_time > 0.0
+        finally
+            rmprocs(added)
+        end
     end
 end

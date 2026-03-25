@@ -175,6 +175,7 @@ mutable struct CurriculumSortingEvaluator <: Arborist.AbstractEvaluator
     upgrade_threshold::Float64  # fitness level to trigger curriculum advance
     comparison_alpha_base::Float64  # base multiplier for comparison penalty
                                     # adaptive α = base * max(0, current_length - 6)
+    max_seed_type::Int     # max seed template type to use (1-4, 0=random only)
 end
 
 function CurriculumSortingEvaluator(;
@@ -185,10 +186,12 @@ function CurriculumSortingEvaluator(;
         rng_seed::Int=42,
         partial_credit::Bool=true,
         upgrade_threshold::Float64=0.05,
-        comparison_alpha_base::Float64=0.05)
+        comparison_alpha_base::Float64=0.05,
+        max_seed_type::Int=4)
     CurriculumSortingEvaluator(current_length, target_length, n_episodes,
                                value_range, rng_seed, partial_credit,
-                               upgrade_threshold, comparison_alpha_base)
+                               upgrade_threshold, comparison_alpha_base,
+                               max_seed_type)
 end
 
 Arborist.input_signature(::CurriculumSortingEvaluator) = Dict{Symbol,DataType}()
@@ -544,9 +547,13 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
 
     # Initialize population: mix of seeded templates and random programs
     genomes = Vector{Arborist.ExprGenome}(undef, pop_size)
-    n_seed_types = 4
-    seeds_per_type = max(1, pop_size ÷ 10)
-    n_seeded = min(seeds_per_type * n_seed_types, pop_size ÷ 2)
+    n_seed_types = evaluator.max_seed_type
+    if n_seed_types > 0
+        seeds_per_type = max(1, pop_size ÷ 10)
+        n_seeded = min(seeds_per_type * n_seed_types, pop_size ÷ 2)
+    else
+        n_seeded = 0
+    end
     for i in 1:pop_size
         if i <= n_seeded
             seed_type = ((i - 1) % n_seed_types) + 1
@@ -722,6 +729,7 @@ function run_sorting(;
         n_episodes::Int = 30,
         upgrade_threshold::Float64 = 0.05,
         comparison_alpha_base::Float64 = 0.05,
+        max_seed_type::Int = 4,
         verbose::Bool = true)
 
     println("=" ^ 70)
@@ -737,6 +745,12 @@ function run_sorting(;
     println("  n_episodes=$n_episodes, upgrade_threshold=$upgrade_threshold")
     println("  comparison_alpha_base=$comparison_alpha_base")
     println("  (adaptive α = $comparison_alpha_base * max(0, length - 6))")
+    seed_desc = max_seed_type == 0 ? "none (random only)" :
+                max_seed_type == 1 ? "type 1 only (single-pass adjacent swap)" :
+                max_seed_type == 2 ? "types 1-2 (single-pass + bubble sort skeleton)" :
+                max_seed_type == 3 ? "types 1-3 (single-pass + bubble + reverse)" :
+                "types 1-4 (single-pass + bubble + reverse + selection sort)"
+    println("  seed templates: $seed_desc")
     println("  started: $(Dates.now())")
     println("=" ^ 70)
     flush(stdout)
@@ -747,6 +761,7 @@ function run_sorting(;
         n_episodes=n_episodes,
         upgrade_threshold=upgrade_threshold,
         comparison_alpha_base=comparison_alpha_base,
+        max_seed_type=max_seed_type,
     )
 
     fset = sorting_function_set()
@@ -950,7 +965,8 @@ function main()
             key = Symbol(m.captures[1])
             val_str = m.captures[2]
             if key in (:pop_size, :generations, :elitism, :tournament_size,
-                       :max_depth, :seed, :start_length, :target_length, :n_episodes)
+                       :max_depth, :seed, :start_length, :target_length,
+                       :n_episodes, :max_seed_type)
                 kwargs[key] = parse(Int, val_str)
             elseif key in (:mutation_rate, :crossover_rate, :bloat_penalty,
                            :upgrade_threshold, :comparison_alpha_base)

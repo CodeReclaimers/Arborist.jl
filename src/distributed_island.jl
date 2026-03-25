@@ -91,8 +91,6 @@ function _evolve_one_gen_local!(id::Int)
     selection_fitnesses = _apply_speciation!(genomes, fitnesses,
                                               alg.speciation, island.species_state, rng)
 
-    t_size = alg.selection.tournament_size
-
     # Build next generation
     G = eltype(genomes)
     next_genomes = Vector{G}(undef, pop_size)
@@ -103,29 +101,8 @@ function _evolve_one_gen_local!(id::Int)
         next_fitnesses[i] = fitnesses[i]
     end
 
-    idx = alg.elitism + 1
-    while idx <= pop_size
-        r = rand(rng)
-        if r < alg.crossover_rate && idx + 1 <= pop_size
-            p1 = _tournament_select(selection_fitnesses, t_size, rng)
-            p2 = _tournament_select(selection_fitnesses, t_size, rng)
-            op = rand(rng, alg.crossover_ops)
-            (c1, c2) = crossover(op, genomes[p1], genomes[p2], rng)
-            next_genomes[idx] = c1
-            next_genomes[idx + 1] = c2
-            idx += 2
-        elseif r < alg.crossover_rate + alg.mutation_rate
-            p_idx = _tournament_select(selection_fitnesses, t_size, rng)
-            op = rand(rng, alg.mutation_ops)
-            child = mutate(op, genomes[p_idx], rng)
-            next_genomes[idx] = child
-            idx += 1
-        else
-            p_idx = _tournament_select(selection_fitnesses, t_size, rng)
-            next_genomes[idx] = deepcopy(genomes[p_idx])
-            idx += 1
-        end
-    end
+    _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
+                             alg, rng, alg.elitism + 1)
 
     # Evaluate new individuals
     for i in (alg.elitism + 1):pop_size

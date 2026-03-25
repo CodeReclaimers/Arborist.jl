@@ -219,6 +219,11 @@ function crossover(g1::AntGenome, g2::AntGenome, rng::AbstractRNG)
             AntGenome(c2_prog, g1.primitives, g1.conditions, g1.max_depth))
 end
 
+# Operator-dispatch fallbacks: delegate to genome-specific methods,
+# allowing the shared _breed_next_generation! to use uniform dispatch.
+crossover(::AbstractCrossoverOperator, g1::AntGenome, g2::AntGenome, rng::AbstractRNG) = crossover(g1, g2, rng)
+mutate(::AbstractMutationOperator, g::AntGenome, rng::AbstractRNG) = mutate(g, rng)
+
 function distance(g1::AntGenome, g2::AntGenome)
     Float64(abs(length(unravel(g1.program)) - length(unravel(g2.program))))
 end
@@ -377,37 +382,12 @@ function solve(problem::GPProblem{AntGenome, E},
         next_fitnesses = fill(Inf, pop_size)
 
         for i in 1:min(algorithm.elitism, pop_size)
-            next_genomes[i] = AntGenome(deepcopy(genomes[i].program),
-                                        genomes[i].primitives, genomes[i].conditions,
-                                        genomes[i].max_depth)
+            next_genomes[i] = deepcopy(genomes[i])
             next_fitnesses[i] = fitnesses[i]
         end
 
-        t_size = algorithm.selection.tournament_size
-
-        idx = algorithm.elitism + 1
-        while idx <= pop_size
-            r = rand(rng)
-            if r < algorithm.crossover_rate && idx + 1 <= pop_size
-                p1 = _tournament_select(selection_fitnesses, t_size, rng)
-                p2 = _tournament_select(selection_fitnesses, t_size, rng)
-                (c1, c2) = crossover(genomes[p1], genomes[p2], rng)
-                next_genomes[idx] = c1
-                next_genomes[idx + 1] = c2
-                idx += 2
-            elseif r < algorithm.crossover_rate + algorithm.mutation_rate
-                p_idx = _tournament_select(selection_fitnesses, t_size, rng)
-                next_genomes[idx] = mutate(genomes[p_idx], rng)
-                idx += 1
-            else
-                p_idx = _tournament_select(selection_fitnesses, t_size, rng)
-                next_genomes[idx] = AntGenome(deepcopy(genomes[p_idx].program),
-                                              genomes[p_idx].primitives,
-                                              genomes[p_idx].conditions,
-                                              genomes[p_idx].max_depth)
-                idx += 1
-            end
-        end
+        _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
+                                 algorithm, rng, algorithm.elitism + 1)
 
         for i in (algorithm.elitism + 1):pop_size
             next_fitnesses[i] = evaluate_genome(next_genomes[i], evaluator)

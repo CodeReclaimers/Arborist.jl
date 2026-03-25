@@ -133,6 +133,19 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
         g5 = deserialize(ExprGenome, "y = x + x", state)
         @test g5 !== nothing
         @test length(g5.body) >= 1
+
+        # Full serialize → deserialize round-trip with control flow
+        g_rt_in = ExprGenome([
+            :(y = x * x),
+            Expr(:while, :(x > y), Expr(:block, :(y = x + y)))
+        ], state)
+        s_rt = serialize(g_rt_in)
+        g_rt_out = deserialize(ExprGenome, s_rt, state)
+        @test g_rt_out !== nothing
+        @test length(g_rt_out.body) == 2
+        @test any(e -> e isa Expr && e.head == :(=), g_rt_out.body)
+        @test any(e -> e isa Expr && e.head == :while, g_rt_out.body)
+        println("  serialize round-trip with control flow: $(length(g_rt_out.body)) statements")
     end
 
     @testset "Valid mock response" begin

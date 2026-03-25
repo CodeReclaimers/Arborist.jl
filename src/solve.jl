@@ -66,6 +66,48 @@ function _tournament_select(fitnesses::Vector{Float64}, tournament_size::Int, rn
 end
 
 """
+    _breed_next_generation!(next_genomes, genomes, selection_fitnesses, alg, rng, start_idx)
+
+Fill `next_genomes[start_idx:end]` via tournament selection and genetic
+operators (crossover, mutation, or copy). Shared across all solve paths.
+
+Crossover and mutation dispatch through operator objects from `alg.crossover_ops`
+and `alg.mutation_ops`. Genome types that use direct dispatch (AntGenome,
+GraphGenome) provide fallback methods that ignore the operator argument.
+"""
+function _breed_next_generation!(next_genomes::Vector{G},
+                                  genomes::Vector{G},
+                                  selection_fitnesses::Vector{Float64},
+                                  alg::GeneticProgramming,
+                                  rng::AbstractRNG,
+                                  start_idx::Int) where G
+    pop_size = length(next_genomes)
+    t_size = alg.selection.tournament_size
+    idx = start_idx
+    while idx <= pop_size
+        r = rand(rng)
+        if r < alg.crossover_rate && idx + 1 <= pop_size
+            p1 = _tournament_select(selection_fitnesses, t_size, rng)
+            p2 = _tournament_select(selection_fitnesses, t_size, rng)
+            op = rand(rng, alg.crossover_ops)
+            (c1, c2) = crossover(op, genomes[p1], genomes[p2], rng)
+            next_genomes[idx] = c1
+            next_genomes[idx + 1] = c2
+            idx += 2
+        elseif r < alg.crossover_rate + alg.mutation_rate
+            p_idx = _tournament_select(selection_fitnesses, t_size, rng)
+            op = rand(rng, alg.mutation_ops)
+            next_genomes[idx] = mutate(op, genomes[p_idx], rng)
+            idx += 1
+        else
+            p_idx = _tournament_select(selection_fitnesses, t_size, rng)
+            next_genomes[idx] = deepcopy(genomes[p_idx])
+            idx += 1
+        end
+    end
+end
+
+"""
     _evaluate_with_penalty(genome, evaluator, bloat_penalty) -> Float64
 
 Evaluate a genome and apply bloat penalty if non-zero.
@@ -161,34 +203,9 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
             next_fitnesses[i] = fitnesses[i]
         end
 
-        # Determine tournament size from selection strategy.
-        t_size = algorithm.selection.tournament_size
-
         # Fill the rest via tournament selection + genetic operators.
-        # Tournament selection uses shared fitnesses for diversity pressure.
-        idx = algorithm.elitism + 1
-        while idx <= pop_size
-            r = rand(rng)
-            if r < algorithm.crossover_rate && idx + 1 <= pop_size
-                p1_idx = _tournament_select(selection_fitnesses, t_size, rng)
-                p2_idx = _tournament_select(selection_fitnesses, t_size, rng)
-                op = rand(rng, algorithm.crossover_ops)
-                (c1, c2) = crossover(op, genomes[p1_idx], genomes[p2_idx], rng)
-                next_genomes[idx] = c1
-                next_genomes[idx + 1] = c2
-                idx += 2
-            elseif r < algorithm.crossover_rate + algorithm.mutation_rate
-                p_idx = _tournament_select(selection_fitnesses, t_size, rng)
-                op = rand(rng, algorithm.mutation_ops)
-                child = mutate(op, genomes[p_idx], rng)
-                next_genomes[idx] = child
-                idx += 1
-            else
-                p_idx = _tournament_select(selection_fitnesses, t_size, rng)
-                next_genomes[idx] = deepcopy(genomes[p_idx])
-                idx += 1
-            end
-        end
+        _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
+                                 algorithm, rng, algorithm.elitism + 1)
 
         # Evaluate new individuals (skip elites which already have fitness).
         _parallel_evaluate!(next_fitnesses, next_genomes, problem.evaluator, bp,
@@ -287,8 +304,6 @@ function solve(problem::GPProblem{G,E},
     fitness_history = Float64[]
     mean_history = Float64[]
 
-    t_size = alg.selection.tournament_size
-
     t0 = time()
 
     for gen in 1:alg.generations
@@ -318,29 +333,8 @@ function solve(problem::GPProblem{G,E},
             end
 
             # Fill rest via tournament selection + genetic operators.
-            idx = alg.elitism + 1
-            while idx <= pop_size
-                r = rand(state.rng)
-                if r < alg.crossover_rate && idx + 1 <= pop_size
-                    p1 = _tournament_select(selection_fitnesses, t_size, state.rng)
-                    p2 = _tournament_select(selection_fitnesses, t_size, state.rng)
-                    op = rand(state.rng, alg.crossover_ops)
-                    (c1, c2) = crossover(op, genomes[p1], genomes[p2], state.rng)
-                    next_genomes[idx] = c1
-                    next_genomes[idx + 1] = c2
-                    idx += 2
-                elseif r < alg.crossover_rate + alg.mutation_rate
-                    p_idx = _tournament_select(selection_fitnesses, t_size, state.rng)
-                    op = rand(state.rng, alg.mutation_ops)
-                    child = mutate(op, genomes[p_idx], state.rng)
-                    next_genomes[idx] = child
-                    idx += 1
-                else
-                    p_idx = _tournament_select(selection_fitnesses, t_size, state.rng)
-                    next_genomes[idx] = deepcopy(genomes[p_idx])
-                    idx += 1
-                end
-            end
+            _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
+                                     alg, state.rng, alg.elitism + 1)
 
             # Evaluate new individuals.
             for i in (alg.elitism + 1):pop_size

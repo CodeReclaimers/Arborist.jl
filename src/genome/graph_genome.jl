@@ -181,6 +181,10 @@ function crossover(g1::GraphGenome, g2::GraphGenome, rng::AbstractRNG)
     return (child1, child2)
 end
 
+# Operator-dispatch fallbacks for shared _breed_next_generation!.
+crossover(::AbstractCrossoverOperator, g1::GraphGenome, g2::GraphGenome, rng::AbstractRNG) = crossover(g1, g2, rng)
+mutate(::AbstractMutationOperator, g::GraphGenome, rng::AbstractRNG) = mutate(g, rng)
+
 function distance(g1::GraphGenome, g2::GraphGenome)
     _neat_distance(g1, g2)
 end
@@ -577,36 +581,16 @@ function solve(problem::GPProblem{GraphGenome, E},
         next_fitnesses = fill(Inf, pop_size)
 
         for i in 1:min(algorithm.elitism, pop_size)
-            next_genomes[i] = _copy_graph(genomes[i])
+            next_genomes[i] = deepcopy(genomes[i])
             next_fitnesses[i] = fitnesses[i]
         end
 
-        t_size = algorithm.selection.tournament_size
-
-        idx = algorithm.elitism + 1
-        while idx <= pop_size
-            r = rand(rng)
-            if r < algorithm.crossover_rate && idx + 1 <= pop_size
-                p1 = _tournament_select(selection_fitnesses, t_size, rng)
-                p2 = _tournament_select(selection_fitnesses, t_size, rng)
-                (c1, c2) = crossover(genomes[p1], genomes[p2], rng)
-                next_genomes[idx] = c1
-                next_genomes[idx + 1] = c2
-                idx += 2
-            elseif r < algorithm.crossover_rate + algorithm.mutation_rate
-                p_idx = _tournament_select(selection_fitnesses, t_size, rng)
-                next_genomes[idx] = mutate(genomes[p_idx], rng)
-                idx += 1
-            else
-                p_idx = _tournament_select(selection_fitnesses, t_size, rng)
-                next_genomes[idx] = _copy_graph(genomes[p_idx])
-                idx += 1
-            end
-        end
+        _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
+                                 algorithm, rng, algorithm.elitism + 1)
 
         for i in (algorithm.elitism + 1):pop_size
             next_fitnesses[i] = evaluate_genome(next_genomes[i], evaluator)
-            next_genomes[i].fitness = next_fitnesses[i]
+            next_genomes[i].fitness = next_fitnesses[i]  # NEAT crossover uses cached fitness
         end
 
         genomes = next_genomes

@@ -75,6 +75,22 @@ This is significantly lighter than the 14 packages HTTP.jl imposed
 (which was removed in favor of Downloads.jl stdlib). Users get TreeGenome
 and TreeFitnessEvaluator available immediately with `using Arborist`.
 
+**Precompilation benchmarks (2026-03-27, Julia 1.11.5, Linux):**
+
+| Scenario | Time |
+|----------|------|
+| Cold precompile (Arborist + DynamicExpressions, from clean cache) | 6.9s |
+| Arborist precompile alone | 0.7s |
+| DynamicExpressions precompile | 6.0s |
+| Warm load (`using Arborist`) | 0.14s |
+
+The 6.9s cold precompile is dominated by DynamicExpressions (6.0s), not
+Arborist (0.7s). This is a one-time cost per Julia version; subsequent
+loads are 0.14s. For comparison, HTTP.jl's cold precompile was ~4s, so the
+switch from HTTP to DynamicExpressions adds ~2s to the one-time compile
+but provides TreeGenome as a first-class feature rather than requiring
+extension setup.
+
 ### 1.4 The simulator pattern for side-effectful programs
 
 ExprGenome's type system assumes pure functions with typed inputs and

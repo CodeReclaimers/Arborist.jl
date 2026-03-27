@@ -5,9 +5,6 @@
 # over ExprGenome for pure function approximation problems.
 
 using DynamicExpressions
-const _KozaDynExt = Base.get_extension(Arborist, :DynExprExt)
-const _KozaTreeGenome = _KozaDynExt.TreeGenome
-const _KozaTreeEval = _KozaDynExt.TreeFitnessEvaluator
 
 @testset "Koza symbolic regression suite (TreeGenome)" begin
     operators = OperatorEnum(; binary_operators=[+, -, *, /], unary_operators=[abs])
@@ -25,10 +22,10 @@ const _KozaTreeEval = _KozaDynExt.TreeFitnessEvaluator
 
     @testset "Koza-1: x^4 + x^3 + x^2 + x" begin
         y = xs .^ 4 .+ xs .^ 3 .+ xs .^ 2 .+ xs
-        evaluator = _KozaTreeEval(X, y, operators)
+        evaluator = TreeFitnessEvaluator(X, y, operators)
 
         successes = map(1:5) do seed
-            problem = GPProblem(evaluator, _KozaTreeGenome{Float32}; seed=seed)
+            problem = GPProblem(evaluator, TreeGenome{Float32}; seed=seed)
             result = solve(problem, algorithm; verbose=false)
             result.best_fitness < 0.1
         end
@@ -41,10 +38,10 @@ const _KozaTreeEval = _KozaDynExt.TreeFitnessEvaluator
 
     @testset "Koza-2: x^5 - 2x^3 + x" begin
         y = xs .^ 5 .- 2 .* xs .^ 3 .+ xs
-        evaluator = _KozaTreeEval(X, y, operators)
+        evaluator = TreeFitnessEvaluator(X, y, operators)
 
         successes = map(1:5) do seed
-            problem = GPProblem(evaluator, _KozaTreeGenome{Float32}; seed=seed)
+            problem = GPProblem(evaluator, TreeGenome{Float32}; seed=seed)
             result = solve(problem, algorithm; verbose=false)
             result.best_fitness < 0.1
         end
@@ -57,10 +54,10 @@ const _KozaTreeEval = _KozaDynExt.TreeFitnessEvaluator
 
     @testset "Koza-3: x^6 - 2x^4 + x^2" begin
         y = xs .^ 6 .- 2 .* xs .^ 4 .+ xs .^ 2
-        evaluator = _KozaTreeEval(X, y, operators)
+        evaluator = TreeFitnessEvaluator(X, y, operators)
 
         successes = map(1:5) do seed
-            problem = GPProblem(evaluator, _KozaTreeGenome{Float32}; seed=seed)
+            problem = GPProblem(evaluator, TreeGenome{Float32}; seed=seed)
             result = solve(problem, algorithm; verbose=false)
             result.best_fitness < 0.1
         end

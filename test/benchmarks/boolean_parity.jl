@@ -9,9 +9,6 @@
 # operates on numeric types. Fitness = MSE over all 16 input combinations.
 
 using DynamicExpressions
-const _ParityDynExt = Base.get_extension(Arborist, :DynExprExt)
-const _ParityTreeGenome = _ParityDynExt.TreeGenome
-const _ParityTreeEval = _ParityDynExt.TreeFitnessEvaluator
 
 # Boolean operators that work on Float32 (0.0/1.0 encoded)
 _f32_and(a::Float32, b::Float32) = Float32((a > 0.5f0) & (b > 0.5f0))
@@ -42,7 +39,7 @@ _f32_not(a::Float32) = Float32(!(a > 0.5f0))
         y[bits + 1] = Float32(n_true % 2 == 0)
     end
 
-    evaluator = _ParityTreeEval(X, y, operators)
+    evaluator = TreeFitnessEvaluator(X, y, operators)
 
     algorithm = GeneticProgramming(
         pop_size=200,
@@ -57,7 +54,7 @@ _f32_not(a::Float32) = Float32(!(a > 0.5f0))
     # 90% accuracy (fitness <= 0.1). Higher convergence rates require larger
     # populations or more generations.
     successes = map(1:5) do seed
-        problem = GPProblem(evaluator, _ParityTreeGenome{Float32}; seed=seed)
+        problem = GPProblem(evaluator, TreeGenome{Float32}; seed=seed)
         result = solve(problem, algorithm; verbose=false)
         println("    Parity seed=$seed: fitness=$(round(result.best_fitness, digits=4))")
         flush(stdout)

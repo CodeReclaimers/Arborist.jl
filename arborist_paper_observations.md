@@ -66,6 +66,15 @@ ExprGenome due to ~11 minutes per seed from `@eval` overhead) becomes
 tractable with TreeGenome, demonstrating the practical significance
 of the distinction.
 
+**Dependency decision (2026-03-27):** TreeGenome is a first-class genome
+type, not an optional add-on. DynamicExpressions.jl is included as a
+direct dependency rather than requiring extension setup. The dependency
+cost is modest: 9 external packages total (DynamicExpressions + 8
+lightweight transitive deps like ChainRulesCore, Compat, MacroTools).
+This is significantly lighter than the 14 packages HTTP.jl imposed
+(which was removed in favor of Downloads.jl stdlib). Users get TreeGenome
+and TreeFitnessEvaluator available immediately with `using Arborist`.
+
 ### 1.4 The simulator pattern for side-effectful programs
 
 ExprGenome's type system assumes pure functions with typed inputs and

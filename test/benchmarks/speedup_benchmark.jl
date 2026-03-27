@@ -5,9 +5,6 @@
 # without @eval compilation, which is dramatically faster for large datasets.
 
 using DynamicExpressions
-const _SpeedDynExt = Base.get_extension(Arborist, :DynExprExt)
-const _SpeedTreeGenome = _SpeedDynExt.TreeGenome
-const _SpeedTreeEval = _SpeedDynExt.TreeFitnessEvaluator
 
 @testset "TreeGenome vs ExprGenome evaluation speedup" begin
     # Koza-1: x^4 + x^3 + x^2 + x, 1000 evaluation points.
@@ -33,7 +30,7 @@ const _SpeedTreeEval = _SpeedDynExt.TreeFitnessEvaluator
     # --- TreeGenome setup ---
     operators = OperatorEnum(; binary_operators=[+, -, *, /], unary_operators=[abs])
     X = reshape(xs, 1, :)
-    tree_eval = _SpeedTreeEval(X, y_vals, operators)
+    tree_eval = TreeFitnessEvaluator(X, y_vals, operators)
 
     # Time 50 evaluations each.
     n_evals = 50
@@ -50,8 +47,8 @@ const _SpeedTreeEval = _SpeedDynExt.TreeFitnessEvaluator
     # TreeGenome evaluations
     tree_times = Float64[]
     for _ in 1:n_evals
-        tree = _SpeedDynExt._random_tree(rng, operators, 1, Float32, 3, :grow)
-        g = _SpeedTreeGenome{Float32}(tree, operators, 1)
+        tree = Arborist._random_tree(rng, operators, 1, Float32, 3, :grow)
+        g = TreeGenome{Float32}(tree, operators, 1)
         t = @elapsed evaluate(tree_eval, g)
         push!(tree_times, t)
     end

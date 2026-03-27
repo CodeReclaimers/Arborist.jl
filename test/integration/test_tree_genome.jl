@@ -1,8 +1,5 @@
-# TreeGenome integration tests — requires DynamicExpressions.jl for extension loading.
+# TreeGenome integration tests — requires DynamicExpressions.jl.
 using DynamicExpressions
-const DynExt = Base.get_extension(Arborist, :DynExprExt)
-const TreeGenome = DynExt.TreeGenome
-const TreeFitnessEvaluator = DynExt.TreeFitnessEvaluator
 
 @testset "TreeGenome integration" begin
 

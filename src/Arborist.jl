@@ -79,6 +79,9 @@ include("distributed_island.jl")
 # --- LLM mutation operator (uses Downloads.jl stdlib) ---
 include("llm_operator.jl")
 
+# --- TreeGenome (DynamicExpressions.jl) ---
+include("tree_genome.jl")
+
 # --- Public API exports ---
 export
     # Abstract types
@@ -95,9 +98,12 @@ export
     ExprGenome,
     AntGenome,
     GraphGenome,
+    TreeGenome,
     GPProblem,
     GPResult,
     TableFitnessEvaluator,
+    TreeFitnessEvaluator,
+    SymbolicRegressionEvaluator,
 
     # Concrete types — algorithms
     GeneticProgramming,

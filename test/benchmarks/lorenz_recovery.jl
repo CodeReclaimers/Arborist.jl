@@ -13,9 +13,6 @@
 
 using DynamicExpressions
 _std(v) = sqrt(sum((v .- sum(v)/length(v)).^2) / (length(v) - 1))
-const _LorenzDynExt = Base.get_extension(Arborist, :DynExprExt)
-const _LorenzTreeGenome = _LorenzDynExt.TreeGenome
-const _LorenzTreeEval = _LorenzDynExt.TreeFitnessEvaluator
 
 """
 Generate Lorenz trajectory data via RK4 integration.
@@ -109,10 +106,10 @@ end
     # --- dx/dt = σ(y - x) = 10y - 10x ---
     # Linear combination — the easiest of the three.
     @testset "dx/dt = σ(y - x)" begin
-        evaluator = _LorenzTreeEval(X, dxdt, operators)
+        evaluator = TreeFitnessEvaluator(X, dxdt, operators)
 
         results = map(1:5) do seed
-            problem = GPProblem(evaluator, _LorenzTreeGenome{Float32}; seed=seed)
+            problem = GPProblem(evaluator, TreeGenome{Float32}; seed=seed)
             result = solve(problem, algorithm; verbose=false)
             (fitness=result.best_fitness, wall_time=result.wall_time)
         end
@@ -128,10 +125,10 @@ end
     # --- dy/dt = x(ρ - z) - y = 28x - xz - y ---
     # Requires the cross-term xz. Hardest of the three.
     @testset "dy/dt = x(ρ - z) - y" begin
-        evaluator = _LorenzTreeEval(X, dydt, operators)
+        evaluator = TreeFitnessEvaluator(X, dydt, operators)
 
         results = map(1:5) do seed
-            problem = GPProblem(evaluator, _LorenzTreeGenome{Float32}; seed=seed)
+            problem = GPProblem(evaluator, TreeGenome{Float32}; seed=seed)
             result = solve(problem, algorithm; verbose=false)
             (fitness=result.best_fitness, wall_time=result.wall_time)
         end
@@ -148,10 +145,10 @@ end
     # --- dz/dt = xy - βz ---
     # Requires the cross-term xy.
     @testset "dz/dt = xy - βz" begin
-        evaluator = _LorenzTreeEval(X, dzdt, operators)
+        evaluator = TreeFitnessEvaluator(X, dzdt, operators)
 
         results = map(1:5) do seed
-            problem = GPProblem(evaluator, _LorenzTreeGenome{Float32}; seed=seed)
+            problem = GPProblem(evaluator, TreeGenome{Float32}; seed=seed)
             result = solve(problem, algorithm; verbose=false)
             (fitness=result.best_fitness, wall_time=result.wall_time)
         end

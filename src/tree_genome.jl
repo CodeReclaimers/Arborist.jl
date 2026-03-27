@@ -1,23 +1,11 @@
-"""
-DynExprExt — Package extension providing TreeGenome backed by
-DynamicExpressions.jl Node{T} for fast vectorized evaluation.
+# tree_genome.jl — TreeGenome backed by DynamicExpressions.jl Node{T}
+# for fast vectorized evaluation without @eval.
+#
+# TreeGenome is appropriate for pure function approximation (symbolic regression,
+# system identification). For programs requiring control flow, mutable state, or
+# side effects, use ExprGenome instead.
 
-TreeGenome is appropriate for pure function approximation (symbolic regression,
-system identification). For programs requiring control flow, mutable state, or
-side effects, use ExprGenome instead.
-"""
-module DynExprExt
-
-using Arborist
-using Arborist: AbstractGenome, AbstractEvaluator, AbstractMutationOperator,
-              AbstractCrossoverOperator, GPProblem, GeneticProgramming,
-              GPResult, TournamentSelection, NoSpeciation,
-              SubtreeMutation, PointMutation, SubtreeCrossover,
-              _tournament_select, _apply_speciation!, _init_species_state
-import Arborist: mutate, crossover, distance, complexity, serialize, deserialize,
-               solve, evaluate, evaluate_genome, input_signature, output_signature
 using DynamicExpressions
-using Random
 
 # =============================================================================
 # TreeGenome struct
@@ -155,7 +143,7 @@ end
 # AbstractGenome interface for TreeGenome
 # =============================================================================
 
-function Arborist.mutate(g::TreeGenome{T}, rng::AbstractRNG) where T
+function mutate(g::TreeGenome{T}, rng::AbstractRNG) where T
     r = rand(rng, 1:3)
     if r == 1
         return _point_mutate(g, rng)
@@ -166,25 +154,25 @@ function Arborist.mutate(g::TreeGenome{T}, rng::AbstractRNG) where T
     end
 end
 
-function Arborist.crossover(g1::TreeGenome{T}, g2::TreeGenome{T}, rng::AbstractRNG) where T
+function crossover(g1::TreeGenome{T}, g2::TreeGenome{T}, rng::AbstractRNG) where T
     _subtree_crossover(g1, g2, rng)
 end
 
-function Arborist.distance(g1::TreeGenome{T}, g2::TreeGenome{T}) where T
+function distance(g1::TreeGenome{T}, g2::TreeGenome{T}) where T
     # Node count difference. Known limitation: less semantically meaningful
     # than ExprGenome's symmetric-difference metric.
     Float64(abs(count_nodes(g1.tree) - count_nodes(g2.tree)))
 end
 
-function Arborist.complexity(g::TreeGenome{T}) where T
+function complexity(g::TreeGenome{T}) where T
     Float64(count_nodes(g.tree))
 end
 
-function Arborist.serialize(g::TreeGenome{T}) where T
+function serialize(g::TreeGenome{T}) where T
     string_tree(g.tree, g.operators)
 end
 
-function Arborist.deserialize(::Type{TreeGenome{T}}, s::String,
+function deserialize(::Type{TreeGenome{T}}, s::String,
                              operators::OperatorEnum, n_features::Int) where T
     tree = _parse_prefix_expr(strip(s), operators, n_features, T)
     tree === nothing && return nothing
@@ -193,15 +181,15 @@ end
 
 # --- Operator dispatches for TreeGenome ---
 
-function Arborist.mutate(::SubtreeMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
+function mutate(::SubtreeMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
     mutate(g, rng)
 end
 
-function Arborist.mutate(::PointMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
+function mutate(::PointMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
     mutate(g, rng)
 end
 
-function Arborist.crossover(::SubtreeCrossover, g1::TreeGenome{T}, g2::TreeGenome{T},
+function crossover(::SubtreeCrossover, g1::TreeGenome{T}, g2::TreeGenome{T},
                            rng::AbstractRNG) where T
     crossover(g1, g2, rng)
 end
@@ -352,7 +340,7 @@ end
 Run genetic programming evolution with TreeGenome. Uses DynamicExpressions.jl
 for fast vectorized evaluation without `@eval`.
 """
-function Arborist.solve(problem::GPProblem{TreeGenome{T}, E},
+function solve(problem::GPProblem{TreeGenome{T}, E},
                        algorithm::GeneticProgramming;
                        verbose::Bool = false,
                        callback = nothing) where {T, E<:TreeFitnessEvaluator}
@@ -413,36 +401,12 @@ function Arborist.solve(problem::GPProblem{TreeGenome{T}, E},
 
         # Elitism.
         for i in 1:min(algorithm.elitism, pop_size)
-            next_genomes[i] = TreeGenome{T}(copy_node(genomes[i].tree), ops, n_feat)
+            next_genomes[i] = deepcopy(genomes[i])
             next_fitnesses[i] = fitnesses[i]
         end
 
-        t_size = algorithm.selection isa TournamentSelection ?
-                 algorithm.selection.tournament_size : algorithm.tournament_size
-
-        idx = algorithm.elitism + 1
-        while idx <= pop_size
-            r = rand(rng)
-            if r < algorithm.crossover_rate && idx + 1 <= pop_size
-                p1 = _tournament_select(selection_fitnesses, t_size, rng)
-                p2 = _tournament_select(selection_fitnesses, t_size, rng)
-                op = rand(rng, algorithm.crossover_ops)
-                (c1, c2) = crossover(op, genomes[p1], genomes[p2], rng)
-                next_genomes[idx] = c1
-                next_genomes[idx + 1] = c2
-                idx += 2
-            elseif r < algorithm.crossover_rate + algorithm.mutation_rate
-                p_idx = _tournament_select(selection_fitnesses, t_size, rng)
-                op = rand(rng, algorithm.mutation_ops)
-                child = mutate(op, genomes[p_idx], rng)
-                next_genomes[idx] = child
-                idx += 1
-            else
-                p_idx = _tournament_select(selection_fitnesses, t_size, rng)
-                next_genomes[idx] = TreeGenome{T}(copy_node(genomes[p_idx].tree), ops, n_feat)
-                idx += 1
-            end
-        end
+        _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
+                                 algorithm, rng, algorithm.elitism + 1)
 
         # Evaluate new individuals.
         for i in (algorithm.elitism + 1):pop_size
@@ -464,7 +428,7 @@ function Arborist.solve(problem::GPProblem{TreeGenome{T}, E},
         genomes[1], fitnesses[1], genomes,
         fitness_history, mean_history,
         algorithm.generations, wall_time,
-        fitnesses[1] < 1.0
+        fitnesses[1] < algorithm.convergence_threshold
     )
 end
 
@@ -679,4 +643,3 @@ Example output: +(*(x1, x1), *(3.0, x1))
 Respond with only the prefix expression and nothing else.
 """
 
-end # module DynExprExt

@@ -205,7 +205,6 @@ function create_random_assignment(s::GenState)
 		# Avoid self-assignment.
 		if v[1] != r
 			return :($(v[1]) = $r)
-			break
 		end
 	end
 end
@@ -225,6 +224,9 @@ function wrap_rvalue(s::GenState, value)
 		Expr(:call, f.name, value)
 	elseif length(f.args) == 2 && all(f.args .== T)
 		Expr(:call, f.name, value, create_random_rvalue(s, T))
+	else
+		# Arity 0 or > 2: cannot wrap, return value unchanged.
+		value
 	end
 end
 

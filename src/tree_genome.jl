@@ -289,7 +289,7 @@ function _subtree_crossover(g1::TreeGenome{T}, g2::TreeGenome{T}, rng::AbstractR
     end
 
     return (TreeGenome{T}(t1, g1.operators, g1.n_features),
-            TreeGenome{T}(t2, g1.operators, g1.n_features))
+            TreeGenome{T}(t2, g2.operators, g2.n_features))
 end
 
 """Replace the nth node (in pre-order traversal) with replacement."""
@@ -442,7 +442,7 @@ end
 Parse a prefix-notation string like `+(x1, *(2.0, x2))` into a Node{T}.
 Returns nothing on any parse error.
 """
-function _parse_prefix_expr(s::String, operators::OperatorEnum,
+function _parse_prefix_expr(s::AbstractString, operators::OperatorEnum,
                              n_features::Int, ::Type{T}) where T
     try
         tokens = _tokenize_prefix(s)
@@ -455,7 +455,7 @@ function _parse_prefix_expr(s::String, operators::OperatorEnum,
     end
 end
 
-function _tokenize_prefix(s::String)
+function _tokenize_prefix(s::AbstractString)
     tokens = String[]
     i = 1
     while i <= length(s)

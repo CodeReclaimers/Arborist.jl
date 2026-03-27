@@ -319,7 +319,7 @@ function _is_valid_call(expr::Expr, state::GenState)::Bool
     fn = expr.args[1]
     fn isa Symbol || return false
     # Check against the function set.
-    for fd in state.fset.functions
+    for fd in state.funcs.funcs
         if fd.name == fn
             return true
         end

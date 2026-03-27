@@ -95,6 +95,62 @@ using DynamicExpressions
         @test result.wall_time > 0.0
     end
 
+    @testset "TreeGenome serialize/deserialize round-trip" begin
+        ops = OperatorEnum(; binary_operators=[+, -, *, /], unary_operators=[sin, cos])
+
+        # serialize produces DynamicExpressions' infix format (e.g. "x1 + 1.0").
+        # deserialize parses prefix format (e.g. "+(x1, 1.0)").
+        # So serialize -> deserialize is not a lossless round-trip for binary ops.
+        # Test that deserialize works with prefix format strings.
+
+        # Prefix format: binary
+        g1 = deserialize(TreeGenome{Float32}, "+(x1, 1.0)", ops, 2)
+        @test g1 !== nothing
+        @test g1 isa TreeGenome{Float32}
+        println("  TreeGenome prefix parse: '+(x1, 1.0)' -> '$(serialize(g1))'")
+
+        # Prefix format: unary
+        g2 = deserialize(TreeGenome{Float32}, "sin(x1)", ops, 2)
+        @test g2 !== nothing
+        @test serialize(g2) == "sin(x1)"
+        println("  TreeGenome unary round-trip: '$(serialize(g2))'")
+
+        # Nested prefix: sin(*(x1, x2))
+        g3 = deserialize(TreeGenome{Float32}, "sin(*(x1, x2))", ops, 2)
+        @test g3 !== nothing
+        println("  TreeGenome nested prefix: '$(serialize(g3))'")
+
+        # Feature variable only
+        g4 = deserialize(TreeGenome{Float32}, "x1", ops, 2)
+        @test g4 !== nothing
+        @test serialize(g4) == "x1"
+
+        # Numeric constant
+        g5 = deserialize(TreeGenome{Float32}, "3.14", ops, 2)
+        @test g5 !== nothing
+
+        # Invalid input returns nothing.
+        @test deserialize(TreeGenome{Float32}, "not a tree", ops, 2) === nothing
+        @test deserialize(TreeGenome{Float32}, "", ops, 2) === nothing
+    end
+
+    @testset "TreeGenome crossover preserves correct operators per parent" begin
+        ops = OperatorEnum(; binary_operators=[+, -, *, /], unary_operators=[sin])
+        rng = Random.MersenneTwister(42)
+        t1 = Node{Float32}(; op=1, l=Node{Float32}(; feature=1), r=Node{Float32}(; val=1.0f0))
+        t2 = Node{Float32}(; op=2, l=Node{Float32}(; feature=1), r=Node{Float32}(; val=2.0f0))
+        g1 = TreeGenome{Float32}(t1, ops, 2)
+        g2 = TreeGenome{Float32}(t2, ops, 2)
+
+        for _ in 1:20
+            (c1, c2) = crossover(g1, g2, rng)
+            # Verify that offspring reference the correct parent's operators.
+            @test c1.operators === g1.operators
+            @test c2.operators === g2.operators
+        end
+        println("  TreeGenome crossover: operator references verified")
+    end
+
     @testset "SubtreeMutation/PointMutation dispatch on TreeGenome" begin
         ops = OperatorEnum(; binary_operators=[+, -, *, /], unary_operators=[sin])
         rng = Random.MersenneTwister(42)

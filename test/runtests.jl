@@ -35,6 +35,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
         include("benchmarks/ant_trail.jl")
         include("benchmarks/speedup_benchmark.jl")
         include("benchmarks/xor_neat.jl")
+        include("benchmarks/lorenz_recovery.jl")
     else
         @info "Skipping benchmarks (set ARBORIST_RUN_BENCHMARKS=true to run)"
     end

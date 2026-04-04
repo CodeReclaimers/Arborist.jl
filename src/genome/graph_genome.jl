@@ -217,7 +217,8 @@ end
 function _mutate_weights!(g::GraphGenome, rng::AbstractRNG)
     # Perturb each enabled weight independently with 90% probability.
     # Standard NEAT: each weight has an independent chance of perturbation.
-    for c in values(g.connections)
+    # Sort by innovation number for deterministic RNG consumption order.
+    for c in sort!(collect(values(g.connections)), by=c -> c.innovation)
         if c.enabled && rand(rng) < 0.9
             c.weight += randn(rng) * 0.3
         end
@@ -225,14 +226,14 @@ function _mutate_weights!(g::GraphGenome, rng::AbstractRNG)
 end
 
 function _mutate_weight_replace!(g::GraphGenome, rng::AbstractRNG)
-    conns = collect(values(g.connections))
+    conns = sort!(collect(values(g.connections)), by=c -> c.innovation)
     isempty(conns) && return
     c = rand(rng, conns)
     c.weight = randn(rng) * 2.0
 end
 
 function _mutate_add_connection!(g::GraphGenome, rng::AbstractRNG)
-    node_ids = collect(keys(g.nodes))
+    node_ids = sort!(collect(keys(g.nodes)))
     length(node_ids) < 2 && return
 
     # Try up to 20 times to find a valid new connection
@@ -260,7 +261,7 @@ function _mutate_add_connection!(g::GraphGenome, rng::AbstractRNG)
 end
 
 function _mutate_add_node!(g::GraphGenome, rng::AbstractRNG)
-    enabled_conns = [c for c in values(g.connections) if c.enabled]
+    enabled_conns = sort!([c for c in values(g.connections) if c.enabled], by=c -> c.innovation)
     isempty(enabled_conns) && return
 
     old_conn = rand(rng, enabled_conns)
@@ -281,7 +282,7 @@ function _mutate_add_node!(g::GraphGenome, rng::AbstractRNG)
 end
 
 function _mutate_toggle_connection!(g::GraphGenome, rng::AbstractRNG)
-    conns = collect(values(g.connections))
+    conns = sort!(collect(values(g.connections)), by=c -> c.innovation)
     isempty(conns) && return
     c = rand(rng, conns)
     c.enabled = !c.enabled
@@ -296,8 +297,8 @@ function _neat_crossover(fitter::GraphGenome, other::GraphGenome,
     child_nodes = Dict{Int, NodeGene}()
     child_connections = Dict{Int, ConnectionGene}()
 
-    # All innovation numbers from both parents
-    all_innovations = union(keys(fitter.connections), keys(other.connections))
+    # All innovation numbers from both parents, sorted for deterministic RNG order.
+    all_innovations = sort!(collect(union(keys(fitter.connections), keys(other.connections))))
 
     for inn in all_innovations
         has_f = haskey(fitter.connections, inn)

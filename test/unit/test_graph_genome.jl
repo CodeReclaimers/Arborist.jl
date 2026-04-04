@@ -89,6 +89,70 @@
         @test length(result.fitness_history) == 10
     end
 
+    @testset "mutation determinism (sorted Dict iteration)" begin
+        # Verify that GraphGenome mutations produce identical results
+        # when run with the same seed, regardless of Dict iteration order.
+        # This tests the fix for non-deterministic Dict iteration in
+        # _mutate_weights!, _mutate_weight_replace!, _mutate_add_connection!,
+        # _mutate_add_node!, _mutate_toggle_connection!, and _neat_crossover.
+        for trial in 1:5
+            reset_innovation_counter!()
+            rng1 = Random.MersenneTwister(trial)
+            g1 = initialize(GraphGenome, 3, 2, rng1)
+            # Run 50 mutations to exercise all mutation types
+            for _ in 1:50
+                g1 = mutate(g1, rng1)
+            end
+            weights1 = sort([c.weight for c in values(g1.connections)])
+
+            reset_innovation_counter!()
+            rng2 = Random.MersenneTwister(trial)
+            g2 = initialize(GraphGenome, 3, 2, rng2)
+            for _ in 1:50
+                g2 = mutate(g2, rng2)
+            end
+            weights2 = sort([c.weight for c in values(g2.connections)])
+
+            @test length(weights1) == length(weights2)
+            @test weights1 ≈ weights2
+            println("  GraphGenome determinism trial $trial: $(length(weights1)) connections, weights match")
+            flush(stdout)
+        end
+    end
+
+    @testset "crossover determinism (sorted Set iteration)" begin
+        for trial in 1:5
+            reset_innovation_counter!()
+            rng1 = Random.MersenneTwister(100 + trial)
+            g1 = initialize(GraphGenome, 2, 1, rng1)
+            g2 = initialize(GraphGenome, 2, 1, rng1)
+            # Mutate to create structural differences
+            for _ in 1:10
+                g1 = mutate(g1, rng1)
+                g2 = mutate(g2, rng1)
+            end
+            g1.fitness = 0.5; g2.fitness = 1.0
+            c1a, c2a = crossover(g1, g2, rng1)
+
+            reset_innovation_counter!()
+            rng2 = Random.MersenneTwister(100 + trial)
+            g3 = initialize(GraphGenome, 2, 1, rng2)
+            g4 = initialize(GraphGenome, 2, 1, rng2)
+            for _ in 1:10
+                g3 = mutate(g3, rng2)
+                g4 = mutate(g4, rng2)
+            end
+            g3.fitness = 0.5; g4.fitness = 1.0
+            c1b, c2b = crossover(g3, g4, rng2)
+
+            w1a = sort([c.weight for c in values(c1a.connections)])
+            w1b = sort([c.weight for c in values(c1b.connections)])
+            @test w1a ≈ w1b
+            println("  GraphGenome crossover determinism trial $trial: match")
+            flush(stdout)
+        end
+    end
+
     @testset "topological sort detects cycles" begin
         # Create a genome with a cycle
         nodes = Dict(

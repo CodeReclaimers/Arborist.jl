@@ -3,6 +3,43 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
 
 @testset "LLMMutationOperator integration" begin
 
+    @testset "JSON escape handles control characters" begin
+        @test Arborist._json_escape("hello\nworld") == "hello\\nworld"
+        @test Arborist._json_escape("tab\there") == "tab\\there"
+        @test Arborist._json_escape("quote\"mark") == "quote\\\"mark"
+        @test Arborist._json_escape("back\\slash") == "back\\\\slash"
+        @test Arborist._json_escape("bs\b") == "bs\\b"
+        @test Arborist._json_escape("ff\f") == "ff\\f"
+        @test Arborist._json_escape("cr\r") == "cr\\r"
+        println("  _json_escape: all control characters escaped correctly")
+        flush(stdout)
+    end
+
+    @testset "JSON unescape order is correct" begin
+        # The key test: a literal backslash followed by 'n' should NOT become a newline.
+        # In JSON this is encoded as "\\n" (escaped backslash + n).
+        # After regex extraction, the raw captured string contains: \\n
+        # This should unescape to: \n (literal backslash + n), NOT a newline.
+        json = """{"text": "line1\\\\nline2"}"""
+        result = Arborist._find_last_json_string(json, "text")
+        @test result == "line1\\nline2"  # literal \n, not newline
+        @test !contains(result, "\n")     # should NOT contain actual newline
+
+        # A real newline is encoded as \n in JSON:
+        json2 = """{"text": "line1\\nline2"}"""
+        result2 = Arborist._find_last_json_string(json2, "text")
+        @test result2 == "line1\nline2"  # actual newline
+
+        # Additional escapes
+        json3 = """{"text": "a\\tb\\bc\\/d"}"""
+        result3 = Arborist._find_last_json_string(json3, "text")
+        @test result3 == "a\tb\bc/d"
+
+        println("  JSON unescape order: backslash-n vs newline correctly distinguished")
+        flush(stdout)
+    end
+
+
     # Helper: create a simple test problem and genome.
     function make_llm_test_setup()
         fset = FunctionSet(Set{FunctionDetails}())

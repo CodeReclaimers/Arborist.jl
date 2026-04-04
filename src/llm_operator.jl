@@ -221,13 +221,15 @@ function _build_request_body(op::LLMMutationOperator, source::String, is_anthrop
     end
 end
 
-"""Escape a string for embedding in a JSON string value."""
+"""Escape a string for embedding in a JSON string value (RFC 8259)."""
 function _json_escape(s::String)
     s = replace(s, "\\" => "\\\\")
     s = replace(s, "\"" => "\\\"")
     s = replace(s, "\n" => "\\n")
     s = replace(s, "\r" => "\\r")
     s = replace(s, "\t" => "\\t")
+    s = replace(s, "\b" => "\\b")
+    s = replace(s, "\f" => "\\f")
     return s
 end
 
@@ -251,10 +253,17 @@ function _find_last_json_string(json::String, key::String)
     end
     last_match === nothing && return nothing
     raw = last_match.captures[1]
-    # Unescape basic JSON string escapes.
+    # Unescape JSON string escapes. The \\\\ -> \\ replacement MUST come
+    # first to avoid double-unescaping (e.g., "\\\\n" should become "\\n",
+    # not a newline).
+    raw = replace(raw, "\\\\" => "\x00BACKSLASH\x00")  # placeholder to avoid interference
     raw = replace(raw, "\\n" => "\n")
     raw = replace(raw, "\\t" => "\t")
+    raw = replace(raw, "\\r" => "\r")
+    raw = replace(raw, "\\b" => "\b")
+    raw = replace(raw, "\\f" => "\f")
     raw = replace(raw, "\\\"" => "\"")
-    raw = replace(raw, "\\\\" => "\\")
+    raw = replace(raw, "\\/" => "/")
+    raw = replace(raw, "\x00BACKSLASH\x00" => "\\")
     return raw
 end

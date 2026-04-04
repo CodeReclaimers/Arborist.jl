@@ -349,6 +349,16 @@ end
 # NEAT distance
 # =============================================================================
 
+"""
+    _neat_distance(g1, g2; c1=1.0, c2=1.0, c3=0.4) -> Float64
+
+NEAT compatibility distance: `δ = c1 * E / N + c2 * D / N + c3 * W`
+where E = excess genes (beyond the other genome's max innovation),
+D = disjoint genes (within range but not matching), W = mean weight
+difference of matching genes, N = max genome size (1.0 if < 20).
+
+Matches the formula from Stanley & Miikkulainen (2002).
+"""
 function _neat_distance(g1::GraphGenome, g2::GraphGenome;
                         c1::Float64=1.0, c2::Float64=1.0, c3::Float64=0.4)
     inns1 = Set(keys(g1.connections))
@@ -359,7 +369,22 @@ function _neat_distance(g1::GraphGenome, g2::GraphGenome;
     end
 
     matching = intersect(inns1, inns2)
-    disjoint_excess = length(symdiff(inns1, inns2))
+
+    # Separate disjoint (within range) from excess (beyond range) genes.
+    max1 = isempty(inns1) ? 0 : maximum(inns1)
+    max2 = isempty(inns2) ? 0 : maximum(inns2)
+    non_matching = symdiff(inns1, inns2)
+    n_excess = 0
+    n_disjoint = 0
+    for inn in non_matching
+        if inn in inns1
+            # Gene in g1 but not g2: excess if beyond g2's max
+            inn > max2 ? (n_excess += 1) : (n_disjoint += 1)
+        else
+            # Gene in g2 but not g1: excess if beyond g1's max
+            inn > max1 ? (n_excess += 1) : (n_disjoint += 1)
+        end
+    end
 
     # Mean weight difference of matching genes
     W = 0.0
@@ -373,7 +398,7 @@ function _neat_distance(g1::GraphGenome, g2::GraphGenome;
     N = max(length(inns1), length(inns2))
     N = N < 20 ? 1.0 : Float64(N)
 
-    return (c1 + c2) * disjoint_excess / N + c3 * W
+    return c1 * n_excess / N + c2 * n_disjoint / N + c3 * W
 end
 
 # =============================================================================

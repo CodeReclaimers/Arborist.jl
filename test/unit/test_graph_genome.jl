@@ -44,6 +44,48 @@
         @test d >= 0.0
     end
 
+    @testset "NEAT distance separates disjoint and excess" begin
+        # Genome A: innovations 1,2,3,5 (max=5)
+        # Genome B: innovations 1,2,4,6,7 (max=7)
+        # Matching: {1,2}
+        # Disjoint (within range of both): 3 (in A, <=7), 4 (in B, <=5), 5 (in A, <=7) = 3
+        # Excess (beyond other's max): 6 (in B, >5), 7 (in B, >5) = 2
+        nodes_a = Dict(1 => NodeGene(1, :input, :identity),
+                       2 => NodeGene(2, :output, :sigmoid))
+        conns_a = Dict(
+            1 => ConnectionGene(1, 2, 0.5, true, 1),
+            2 => ConnectionGene(1, 2, 0.5, true, 2),
+            3 => ConnectionGene(1, 2, 0.5, true, 3),
+            5 => ConnectionGene(1, 2, 0.5, true, 5),
+        )
+        ga = GraphGenome(nodes_a, conns_a, 1, 1, Inf)
+
+        nodes_b = Dict(1 => NodeGene(1, :input, :identity),
+                       2 => NodeGene(2, :output, :sigmoid))
+        conns_b = Dict(
+            1 => ConnectionGene(1, 2, 0.5, true, 1),
+            2 => ConnectionGene(1, 2, 0.5, true, 2),
+            4 => ConnectionGene(1, 2, 0.5, true, 4),
+            6 => ConnectionGene(1, 2, 0.5, true, 6),
+            7 => ConnectionGene(1, 2, 0.5, true, 7),
+        )
+        gb = GraphGenome(nodes_b, conns_b, 1, 1, Inf)
+
+        # With c1=1, c2=1, c3=0: distance = E/N + D/N = 2/5 + 3/5 = 1.0
+        # (N = max(4,5) = 5, below 20 threshold so N=1.0 is NOT used)
+        # Wait: N < 20 → N = 1.0. So distance = 2*1.0 + 3*1.0 = 5.0
+        d = Arborist._neat_distance(ga, gb; c1=1.0, c2=1.0, c3=0.0)
+        # E=2 excess, D=3 disjoint, N=1.0 (both genomes < 20 connections)
+        @test d ≈ 2.0 * 1.0 + 3.0 * 1.0  # c1*E/N + c2*D/N = 2+3 = 5.0
+        println("  NEAT distance disjoint/excess: E=2, D=3, d=$d")
+
+        # With different c1/c2, excess and disjoint are weighted differently
+        d2 = Arborist._neat_distance(ga, gb; c1=2.0, c2=0.5, c3=0.0)
+        @test d2 ≈ 2.0 * 2.0 + 0.5 * 3.0  # 4.0 + 1.5 = 5.5
+        println("  NEAT distance with c1=2, c2=0.5: d=$d2")
+        flush(stdout)
+    end
+
     @testset "complexity and serialize" begin
         rng = Random.MersenneTwister(42)
         reset_innovation_counter!()

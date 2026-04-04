@@ -4,7 +4,7 @@ Generic, extensible genetic programming framework for Julia. Problem/Algorithm/S
 
 ## Project Status
 
-All 1579 tests pass. Fast tier: ~52s. Full benchmarks: ~83s.
+All 1621 tests pass. Fast tier: ~48s. Full benchmarks: ~83s.
 
 **Core framework** (Phases 1-6): Complete. ExprGenome, TreeGenome, AntGenome, GraphGenome. LLM mutation operator. Island model (sequential, sync distributed, async distributed). Speciation (threshold, behavioral). AST sanitizer.
 
@@ -79,7 +79,7 @@ src/
 ## Running Tests
 
 ```bash
-julia --project=. -e 'using Pkg; Pkg.test()'                              # fast (~52s)
+julia --project=. -e 'using Pkg; Pkg.test()'                              # fast (~48s)
 ARBORIST_RUN_BENCHMARKS=true julia --project=. -e 'using Pkg; Pkg.test()'  # full (~83s)
 ```
 

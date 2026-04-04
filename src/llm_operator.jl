@@ -177,17 +177,27 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
         return mutate(op.fallback_op, g, rng)
     end
 
-    # 6. Deserialize the response into an ExprGenome.
-    result = deserialize(ExprGenome, text, g.state)
-
-    if result === nothing
-        @warn "LLMMutationOperator: deserialize returned nothing, falling back"
-        return mutate(op.fallback_op, g, rng)
+    # 6. Deserialize and sanitize — wrapped in try/catch so that any
+    #    unexpected exception (e.g. StackOverflowError from deeply nested
+    #    LLM output) falls back gracefully rather than crashing the loop.
+    result = try
+        r = deserialize(ExprGenome, text, g.state)
+        if r === nothing
+            @warn "LLMMutationOperator: deserialize returned nothing, falling back"
+            nothing
+        elseif !sanitize(ASTSanitizer(), r.body)
+            @warn "LLMMutationOperator: sanitizer rejected LLM output, falling back"
+            nothing
+        else
+            r
+        end
+    catch e
+        e isa InterruptException && rethrow()
+        @warn "LLMMutationOperator: deserialize/sanitize threw, falling back" exception=e
+        nothing
     end
 
-    # 7. Sanitize the deserialized AST against the function call whitelist.
-    if !sanitize(ASTSanitizer(), result.body)
-        @warn "LLMMutationOperator: sanitizer rejected LLM output, falling back"
+    if result === nothing
         return mutate(op.fallback_op, g, rng)
     end
 

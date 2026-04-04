@@ -85,4 +85,28 @@
         @test result isa GPResult{ExprGenome}
         @test length(result.population) == 20  # 2 islands × 10
     end
+
+    @testset "_naturalize_migrant rebinds ExprGenome state" begin
+        rng1 = Random.MersenneTwister(1)
+        rng2 = Random.MersenneTwister(2)
+        fset = FunctionSet(Set{FunctionDetails}())
+        add!(fset, :+, 2, Float32, Float32)
+        add!(fset, :>, 2, Float32, Bool)
+        inputs = Dict(:x => Float32)
+        outputs = Dict(:y => Float32)
+        state1 = GenState(rng1, fset, inputs, outputs, 2)
+        state2 = GenState(rng2, fset, inputs, outputs, 2)
+
+        body = [:(y = x + Float32(1.0))]
+        genome = ExprGenome(body, state1)
+        @test genome.state === state1
+        @test genome.state.rng === rng1
+
+        naturalized = Arborist._naturalize_migrant(genome, state2)
+        @test naturalized.state === state2
+        @test naturalized.state.rng === rng2
+        @test naturalized.body == body
+        println("  _naturalize_migrant: ExprGenome state rebound to destination")
+        flush(stdout)
+    end
 end

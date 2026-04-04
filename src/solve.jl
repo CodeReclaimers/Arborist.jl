@@ -372,7 +372,8 @@ function solve(problem::GPProblem{G,E},
 
         # Migration: ring topology, every migration_interval generations.
         if gen % algorithm.migration_interval == 0
-            _migrate!(island_genomes, island_fitnesses, algorithm, rng)
+            _migrate!(island_genomes, island_fitnesses, algorithm, rng;
+                      island_states=island_states)
         end
     end
 
@@ -398,13 +399,31 @@ function solve(problem::GPProblem{G,E},
 end
 
 """
-    _migrate!(island_genomes, island_fitnesses, algorithm, rng)
+    _naturalize_migrant(genome, dest_state)
+
+Rebind a migrant genome's GenState to the destination island's shared
+GenState. This ensures all genomes on an island share the same RNG,
+preventing dual-RNG mutation when the migrant's source-island RNG
+diverges from the destination's.
+
+No-op for genome types that don't carry a GenState (e.g., AntGenome,
+GraphGenome, TreeGenome).
+"""
+_naturalize_migrant(genome, dest_state) = genome
+_naturalize_migrant(genome::ExprGenome, dest_state::GenState) = ExprGenome(genome.body, dest_state)
+
+"""
+    _migrate!(island_genomes, island_fitnesses, algorithm, rng; island_states=nothing)
 
 Perform migration using the algorithm's topology. Sends the top
 `migration_size` individuals from each island to its topology-determined
 destinations, replacing the worst individuals on those destinations.
+
+When `island_states` is provided, migrant genomes are re-bound to the
+destination island's GenState to prevent RNG contamination.
 """
-function _migrate!(island_genomes, island_fitnesses, algorithm::IslandModel, rng::AbstractRNG)
+function _migrate!(island_genomes, island_fitnesses, algorithm::IslandModel, rng::AbstractRNG;
+                   island_states=nothing)
     n = algorithm.n_islands
     ms = algorithm.migration_size
 
@@ -428,7 +447,11 @@ function _migrate!(island_genomes, island_fitnesses, algorithm::IslandModel, rng
             for (k, genome) in enumerate(incoming)
                 if k <= length(order)
                     worst_idx = order[k]
-                    island_genomes[dest][worst_idx] = genome
+                    if island_states !== nothing
+                        island_genomes[dest][worst_idx] = _naturalize_migrant(genome, island_states[dest])
+                    else
+                        island_genomes[dest][worst_idx] = genome
+                    end
                     island_fitnesses[dest][worst_idx] = emigrant_fitnesses[i][k]
                 end
             end

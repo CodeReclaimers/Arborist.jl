@@ -171,12 +171,15 @@ end
 function crossover(g1::GraphGenome, g2::GraphGenome, rng::AbstractRNG)
     # NEAT crossover: disjoint/excess genes come from the fitter parent.
     # Use cached fitness to determine which parent is fitter (lower = better).
+    # Standard NEAT produces one child; the framework needs two.
+    # The second child swaps parent order so that disjoint/excess genes
+    # from the less-fit parent are also preserved in the population.
     if g1.fitness <= g2.fitness
         child1 = _neat_crossover(g1, g2, rng)
-        child2 = _neat_crossover(g1, g2, rng)
+        child2 = _neat_crossover(g2, g1, rng)
     else
         child1 = _neat_crossover(g2, g1, rng)
-        child2 = _neat_crossover(g2, g1, rng)
+        child2 = _neat_crossover(g1, g2, rng)
     end
     return (child1, child2)
 end

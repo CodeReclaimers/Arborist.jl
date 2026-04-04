@@ -120,6 +120,31 @@
         end
     end
 
+    @testset "crossover produces distinct children" begin
+        # With swapped parent order for second child, the two children
+        # should differ when parents have disjoint innovations.
+        reset_innovation_counter!()
+        rng = Random.MersenneTwister(42)
+        g1 = initialize(GraphGenome, 2, 1, rng)
+        g2 = initialize(GraphGenome, 2, 1, rng)
+        # Mutate to create structural differences (disjoint innovations)
+        for _ in 1:15
+            g1 = mutate(g1, rng)
+        end
+        for _ in 1:15
+            g2 = mutate(g2, rng)
+        end
+        g1.fitness = 0.3; g2.fitness = 0.9
+        c1, c2 = crossover(g1, g2, rng)
+        # Children should have different connection sets because
+        # c1 gets fitter parent's disjoint/excess, c2 gets other parent's
+        inns1 = Set(keys(c1.connections))
+        inns2 = Set(keys(c2.connections))
+        @test inns1 != inns2
+        println("  Crossover distinct children: $(length(inns1)) vs $(length(inns2)) innovations")
+        flush(stdout)
+    end
+
     @testset "crossover determinism (sorted Set iteration)" begin
         for trial in 1:5
             reset_innovation_counter!()

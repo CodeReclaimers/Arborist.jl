@@ -10,7 +10,6 @@ via keyword arguments with sensible defaults.
 - `mutation_rate::Float64`: probability of mutation per offspring (default: 0.3)
 - `crossover_rate::Float64`: probability of crossover per offspring pair (default: 0.3)
 - `elitism::Int`: number of top individuals carried forward unchanged (default: 2)
-- `max_depth::Int`: maximum depth of generated expression trees (default: 8)
 - `bloat_penalty::Float64`: coefficient on `complexity(g)` added to fitness (default: 0.0)
 - `parallel::Bool`: enable threaded population evaluation (default: true)
 - `speciation::AbstractSpeciation`: speciation strategy (default: `NoSpeciation()`)
@@ -25,7 +24,6 @@ struct GeneticProgramming <: AbstractEvolutionaryAlgorithm
     mutation_rate::Float64
     crossover_rate::Float64
     elitism::Int
-    max_depth::Int
     bloat_penalty::Float64
     parallel::Bool
     speciation::AbstractSpeciation
@@ -46,7 +44,6 @@ function GeneticProgramming(;
     mutation_rate::Float64 = 0.3,
     crossover_rate::Float64 = 0.3,
     elitism::Int = 2,
-    max_depth::Int = 8,
     bloat_penalty::Float64 = 0.0,
     parallel::Bool = true,
     speciation::AbstractSpeciation = NoSpeciation(),
@@ -63,7 +60,7 @@ function GeneticProgramming(;
     end
     GeneticProgramming(
         pop_size, generations, mutation_rate, crossover_rate,
-        elitism, max_depth, bloat_penalty,
+        elitism, bloat_penalty,
         parallel, speciation,
         convert(Vector{AbstractMutationOperator}, mutation_ops),
         convert(Vector{AbstractCrossoverOperator}, crossover_ops),

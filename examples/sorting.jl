@@ -720,7 +720,6 @@ function run_sorting(;
         crossover_rate::Float64 = 0.3,
         elitism::Int = 5,
         tournament_size::Int = 5,
-        max_depth::Int = 12,
         bloat_penalty::Float64 = 0.0005,
         seed::Int = 42,
         start_length::Int = 3,
@@ -738,7 +737,7 @@ function run_sorting(;
     println("  pop_size=$pop_size, generations=$generations")
     println("  mutation_rate=$mutation_rate, crossover_rate=$crossover_rate")
     println("  elitism=$elitism, tournament_size=$tournament_size")
-    println("  max_depth=$max_depth, bloat_penalty=$bloat_penalty")
+    println("  bloat_penalty=$bloat_penalty")
     println("  seed=$seed")
     println("  curriculum: start_length=$start_length -> target_length=$target_length")
     println("  n_episodes=$n_episodes, upgrade_threshold=$upgrade_threshold")
@@ -772,7 +771,6 @@ function run_sorting(;
         crossover_rate  = crossover_rate,
         elitism         = elitism,
         selection       = Arborist.TournamentSelection(tournament_size),
-        max_depth       = max_depth,
         bloat_penalty   = bloat_penalty,
         mutation_ops    = [Arborist.SubtreeMutation(), Arborist.PointMutation(),
                            Arborist.HoistMutation(), Arborist.ExpansionMutation()],
@@ -964,7 +962,7 @@ function main()
             key = Symbol(m.captures[1])
             val_str = m.captures[2]
             if key in (:pop_size, :generations, :elitism, :tournament_size,
-                       :max_depth, :seed, :start_length, :target_length,
+                       :seed, :start_length, :target_length,
                        :n_episodes, :max_seed_type)
                 kwargs[key] = parse(Int, val_str)
             elseif key in (:mutation_rate, :crossover_rate, :bloat_penalty,

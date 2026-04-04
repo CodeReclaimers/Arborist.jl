@@ -49,7 +49,7 @@ function run_comparison(; n_islands::Int=2, seed::Int=42, verbose::Bool=true)
     island_alg = GeneticProgramming(
         pop_size=POP_SIZE, generations=GENERATIONS,
         mutation_rate=0.4, crossover_rate=0.3,
-        elitism=2, selection=TournamentSelection(4), max_depth=10,
+        elitism=2, selection=TournamentSelection(4),
         bloat_penalty=0.0005, parallel=false
     )
 

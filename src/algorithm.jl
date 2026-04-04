@@ -55,6 +55,12 @@ function GeneticProgramming(;
     selection::AbstractSelectionStrategy = TournamentSelection(3),
     convergence_threshold::Float64 = Inf
 )
+    if crossover_rate + mutation_rate > 1.0
+        throw(ArgumentError(
+            "crossover_rate ($crossover_rate) + mutation_rate ($mutation_rate) = " *
+            "$(crossover_rate + mutation_rate) exceeds 1.0. " *
+            "These rates partition [0, 1): crossover, mutation, and reproduction (the remainder)."))
+    end
     GeneticProgramming(
         pop_size, generations, mutation_rate, crossover_rate,
         elitism, max_depth, bloat_penalty,

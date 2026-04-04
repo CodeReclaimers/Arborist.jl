@@ -3,6 +3,40 @@
 @testset "Coverage gap tests" begin
 
     # =========================================================================
+    # Operator rate validation
+    # =========================================================================
+
+    @testset "GeneticProgramming rejects rates summing > 1.0" begin
+        @test_throws ArgumentError GeneticProgramming(crossover_rate=0.8, mutation_rate=0.5)
+        @test_throws ArgumentError GeneticProgramming(crossover_rate=0.6, mutation_rate=0.6)
+        @test_throws ArgumentError GeneticProgramming(crossover_rate=1.0, mutation_rate=0.01)
+        # Boundary: exactly 1.0 is allowed (no reproduction, but valid)
+        alg = GeneticProgramming(crossover_rate=0.7, mutation_rate=0.3)
+        @test alg.crossover_rate == 0.7
+        @test alg.mutation_rate == 0.3
+        # Default rates are valid
+        alg2 = GeneticProgramming()
+        @test alg2.crossover_rate + alg2.mutation_rate <= 1.0
+        println("  Operator rate validation: invalid rates rejected, valid rates accepted")
+        flush(stdout)
+    end
+
+    @testset "evolve! rejects rates summing > 1.0" begin
+        input_cols = Dict(:x => Float32)
+        output_cols = Dict(:y => Float32)
+        xs = Float32[-1.0, 0.0, 1.0]
+        input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
+        output_rows = [Dict{Symbol,Any}(:y => v^2) for v in xs]
+        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows)
+        pop = Population(Random.MersenneTwister(42), fe, 10, 3, 4)
+        @test_throws ArgumentError evolve!(pop, 1; crossover_rate=0.8, mutation_rate=0.5)
+        # Valid rates should work
+        evolve!(pop, 1; crossover_rate=0.3, mutation_rate=0.3)
+        println("  evolve! rate validation: invalid rejected, valid accepted")
+        flush(stdout)
+    end
+
+    # =========================================================================
     # Callback mechanism
     # =========================================================================
 

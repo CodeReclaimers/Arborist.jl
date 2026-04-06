@@ -29,27 +29,19 @@ The Koza symbolic regression suite is a canonical example of the first.
 
 ## Accessing TreeGenome
 
-TreeGenome lives in a package extension that loads when DynamicExpressions.jl
-is available:
+`TreeGenome` and `TreeFitnessEvaluator` are exported directly from `Arborist`.
+DynamicExpressions.jl is a hard dependency of Arborist, so no extension dance
+is needed — just `using` both packages:
 
 ```julia
 using Arborist
 using DynamicExpressions
-
-# Access extension types
-const DynExt = Base.get_extension(Arborist, :DynExprExt)
-const TreeGenome = DynExt.TreeGenome
-const TreeFitnessEvaluator = DynExt.TreeFitnessEvaluator
 ```
 
 ## Quick-Start Example
 
 ```julia
 using Arborist, DynamicExpressions
-
-const DynExt = Base.get_extension(Arborist, :DynExprExt)
-const TreeGenome = DynExt.TreeGenome
-const TreeFitnessEvaluator = DynExt.TreeFitnessEvaluator
 
 # Define operators
 operators = OperatorEnum(;

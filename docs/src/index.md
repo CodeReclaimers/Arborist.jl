@@ -2,7 +2,7 @@
 
 **Generic genetic programming for Julia.**
 
-Arborist.jl is an extensible GP framework built on the Problem/Algorithm/Solve pattern from the SciML ecosystem. It provides four genome types, composable genetic operators, LLM-as-mutation-operator support, and NEAT-style speciation — all with explicit RNG seeding for reproducible research.
+Arborist.jl is an extensible GP framework built on the Problem/Algorithm/Solve pattern from the SciML ecosystem. It provides four genome types, composable genetic operators, LLM-as-mutation-operator support, NEAT-style and behavioral speciation, NSGA-II multi-objective optimization, and a sequential/sync/async distributed island model — all with explicit RNG seeding for reproducible research.
 
 ## Who is this for?
 

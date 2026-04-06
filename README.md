@@ -26,15 +26,14 @@ Pkg.add("DynamicExpressions")
 
 ```julia
 using Arborist, DynamicExpressions
-const DynExt = Base.get_extension(Arborist, :DynExprExt)
 
-evaluator = DynExt.SymbolicRegressionEvaluator(
+evaluator = SymbolicRegressionEvaluator(
     x -> x^4 + x^3 + x^2 + x,
     domain=(-1f0, 1f0), points=20
 )
 
 result = solve(
-    GPProblem(evaluator, DynExt.TreeGenome{Float32}; seed=42),
+    GPProblem(evaluator, TreeGenome{Float32}; seed=42),
     GeneticProgramming(pop_size=100, generations=200)
 )
 println("Best fitness: ", result.best_fitness)
@@ -62,25 +61,53 @@ result = solve(
 println("Best fitness: ", result.best_fitness)
 ```
 
-### LLM-Enhanced GP
+### Multi-Objective GP (NSGA-II)
 
 ```julia
-using Arborist, DynamicExpressions, HTTP
-const DynExt = Base.get_extension(Arborist, :DynExprExt)
-const LLMExt = Base.get_extension(Arborist, :LLMOperatorExt)
+using Arborist, DynamicExpressions
 
-evaluator = DynExt.SymbolicRegressionEvaluator(
-    x -> sin(x) * x, domain=(-3f0, 3f0), points=30
+# Wrap any single-objective evaluator into (fitness, complexity).
+inner = SymbolicRegressionEvaluator(
+    x -> x^2 + x, domain=(-2f0, 2f0), points=30
 )
-llm_op = LLMExt.LLMMutationOperator(api_key_env="ANTHROPIC_API_KEY")
+evaluator = ParsimonyEvaluator(inner)
 
 result = solve(
-    GPProblem(evaluator, DynExt.TreeGenome{Float32}; seed=42),
-    GeneticProgramming(
-        mutation_ops = [llm_op, SubtreeMutation(), PointMutation()]
-    )
+    GPProblem(evaluator, TreeGenome{Float32}; seed=42),
+    NSGAII(pop_size=200, generations=100)
+)
+
+println("Pareto front size: ", length(result.pareto_front))
+for (g, f) in zip(result.pareto_front, result.pareto_fitnesses)
+    println("  mse=", f[1], "  complexity=", f[2], "  ", serialize(g))
+end
+```
+
+### LLM-Enhanced GP
+
+`LLMMutationOperator` plugs into the regular `mutation_ops` vector as a peer of
+`SubtreeMutation`/`PointMutation`. It currently dispatches on `ExprGenome` only
+(serialize → prompt → deserialize → type-check, with silent fallback to a
+classical operator on any failure):
+
+```julia
+using Arborist
+
+llm_op = LLMMutationOperator(
+    endpoint    = "http://localhost:11434/v1/chat/completions",
+    model       = "qwen2.5-coder:7b",
+    api_key_env = "",   # local Ollama: no Authorization header
+)
+
+algorithm = GeneticProgramming(
+    pop_size     = 100,
+    generations  = 50,
+    mutation_ops = [llm_op, SubtreeMutation(), PointMutation()],
 )
 ```
+
+See `examples/bin_packing.jl` for a complete end-to-end run that uses the LLM
+operator on `ExprGenome` with a custom evaluator and function set.
 
 ## Features
 
@@ -90,7 +117,9 @@ Four genome types cover different problem classes. **TreeGenome** uses DynamicEx
 
 The **LLM mutation operator** implements the FunSearch/AlphaEvolve pattern: serialize a genome to source, prompt an LLM (Anthropic, OpenAI, or local Ollama) to produce a semantically meaningful variation, parse and validate the response. All failures fall back silently to classical operators — the evolutionary loop is robust to 100% LLM failure rate.
 
-An **island model** with ring-topology migration supports population diversity. **NEAT-style speciation** with fitness sharing protects structural innovations. Explicit **RNG seeding** ensures reproducible runs. An **AST sanitizer** provides defense-in-depth security for `@eval`-based genomes.
+**Multi-objective optimization** is provided via `NSGAII`, a full implementation of non-dominated sorting and crowding distance with (μ+λ) survivor selection. The included `ParsimonyEvaluator` wraps any single-objective evaluator into a two-objective (fitness, complexity) problem so the standard "accuracy vs. bloat" tradeoff is recovered as a real Pareto front instead of a single bloat-penalty compromise. Returned `NSGAIIResult` records the Pareto front, per-front rankings, crowding distances, and per-generation hypervolume.
+
+An **island model** with ring/complete/random migration topologies supports population diversity, with three execution backends: sequential (single-process), synchronous distributed, and asynchronous distributed (`Distributed.jl` workers). **Speciation** is available in two flavors: `ThresholdSpeciation` (NEAT-style genomic-distance speciation with fitness sharing) protects structural innovations, while `BehavioralSpeciation` (probe-based fingerprints) groups syntactically distinct programs that make the same decisions — empirically the most reliable variant on the bin packing benchmark. Explicit **RNG seeding** ensures reproducible runs. An **AST sanitizer** with a configurable function-call whitelist provides defense-in-depth security for `@eval`-based genomes.
 
 ## Benchmarks
 

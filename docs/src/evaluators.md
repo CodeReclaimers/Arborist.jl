@@ -6,28 +6,38 @@ Evaluates ExprGenome programs against a table of input/output examples. Fitness 
 
 ## TreeFitnessEvaluator
 
-Evaluates TreeGenome expression trees directly over a data matrix. No `@eval` needed. Dramatically faster than TableFitnessEvaluator for large datasets.
+Evaluates `TreeGenome` expression trees directly over a data matrix. No `@eval` needed. Dramatically faster than `TableFitnessEvaluator` for large datasets.
 
-Available via the DynamicExpressions extension:
 ```julia
-using DynamicExpressions
-const DynExt = Base.get_extension(Arborist, :DynExprExt)
-evaluator = DynExt.TreeFitnessEvaluator(X, y, operators)
+using Arborist, DynamicExpressions
+evaluator = TreeFitnessEvaluator(X, y, operators)
 ```
 
 ## SymbolicRegressionEvaluator
 
-Convenience wrapper that generates a TreeFitnessEvaluator from a function and domain:
+Convenience wrapper that generates a `TreeFitnessEvaluator` from a function and domain:
 ```julia
-evaluator = DynExt.SymbolicRegressionEvaluator(
+using Arborist, DynamicExpressions
+evaluator = SymbolicRegressionEvaluator(
     x -> x^2 + x, domain=(-1f0, 1f0), points=20
 )
 ```
 
+## ParsimonyEvaluator
+
+Wraps any `AbstractEvaluator` into a two-objective evaluator with `["fitness", "complexity"]`. Used together with the `NSGAII` algorithm to recover the accuracy/complexity tradeoff as a real Pareto front instead of a single bloat-penalty compromise.
+
+```julia
+inner = SymbolicRegressionEvaluator(x -> x^2 + x, domain=(-1f0, 1f0), points=20)
+evaluator = ParsimonyEvaluator(inner)
+result = solve(GPProblem(evaluator, TreeGenome{Float32}; seed=42),
+               NSGAII(pop_size=200, generations=100))
+```
+
 ## GraphEvaluator
 
-Evaluates GraphGenome neural networks by forward propagation over input data.
+Evaluates `GraphGenome` neural networks by forward propagation over input data.
 
 ## AntEvaluator
 
-Evaluates AntGenome programs by running an ant simulation. Fitness is the number of uneaten food pellets.
+Evaluates `AntGenome` programs by running an ant simulation. Fitness is the number of uneaten food pellets.

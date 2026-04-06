@@ -12,13 +12,12 @@ Arborist.jl provides four genome types for different problem classes.
 | Side effects | No | Yes | Yes | N/A |
 | Variables | Feature indices | Typed vars | Primitives | Weights |
 | Best for | Symbolic regression | Program synthesis | Agent control | Neural topology |
-| Extension? | Yes (weakdep) | Core | Core | Core |
 
 ## TreeGenome
 
 `TreeGenome{T}` wraps a `DynamicExpressions.Node{T}` expression tree. Evaluation is vectorized over data matrices without any `@eval` compilation, making it 8–10x faster than ExprGenome for symbolic regression. Use this for pure function approximation problems.
 
-Requires: `using DynamicExpressions`
+DynamicExpressions.jl is a hard dependency of Arborist, so `TreeGenome` and `TreeFitnessEvaluator` are exported directly from the `Arborist` module — no extension lookup required.
 
 ## ExprGenome
 

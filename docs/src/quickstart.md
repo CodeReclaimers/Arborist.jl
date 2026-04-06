@@ -6,10 +6,8 @@ The simplest way to use Arborist.jl for symbolic regression:
 
 ```julia
 using Arborist, DynamicExpressions
-const DynExt = Base.get_extension(Arborist, :DynExprExt)
-const TreeGenome = DynExt.TreeGenome
 
-evaluator = DynExt.SymbolicRegressionEvaluator(
+evaluator = SymbolicRegressionEvaluator(
     x -> x^4 + x^3 + x^2 + x,
     domain=(-1f0, 1f0), points=20
 )
@@ -27,9 +25,10 @@ println("Best expression: ", serialize(result.best_genome))
 
 ```julia
 using Arborist
+reset_innovation_counter!()
 
-input_data = Float64[0 0 1 1; 0 1 0 1]
-output_data = Float64[0 1 1 0]
+input_data  = Float64[0 0 1 1; 0 1 0 1]
+output_data = reshape(Float64[0, 1, 1, 0], 1, 4)
 
 result = solve(
     GPProblem(GraphEvaluator(input_data, output_data), GraphGenome; seed=42),

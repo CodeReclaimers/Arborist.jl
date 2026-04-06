@@ -56,17 +56,17 @@ evolutionary loop samples from them uniformly.
 
 ## Quick-Start Example
 
+`LLMMutationOperator` is exported directly from `Arborist`. It uses
+`Downloads.jl` (a Julia stdlib) for HTTP, so no extra HTTP package is required.
+The operator currently dispatches on `ExprGenome` only.
+
 ### With Anthropic API
 
 ```julia
 using Arborist
-using HTTP  # triggers LLMOperatorExt loading
-
-# Get the extension module
-LLMExt = Base.get_extension(Arborist, :LLMOperatorExt)
 
 # Create the LLM operator (uses ANTHROPIC_API_KEY env var)
-llm_op = LLMExt.LLMMutationOperator(
+llm_op = LLMMutationOperator(
     model = "claude-sonnet-4-20250514",
     temperature = 0.8,
 )
@@ -91,12 +91,9 @@ result = solve(problem, algorithm; verbose=true)
 
 ```julia
 using Arborist
-using HTTP
-
-LLMExt = Base.get_extension(Arborist, :LLMOperatorExt)
 
 # Ollama: no API key needed, local endpoint
-llm_op = LLMExt.LLMMutationOperator(
+llm_op = LLMMutationOperator(
     endpoint = "http://localhost:11434/v1/chat/completions",
     model = "codellama:13b",
     api_key_env = "",          # empty = no Authorization header
@@ -111,9 +108,7 @@ algorithm = GeneticProgramming(
 ### With OpenAI API
 
 ```julia
-LLMExt = Base.get_extension(Arborist, :LLMOperatorExt)
-
-llm_op = LLMExt.LLMMutationOperator(
+llm_op = LLMMutationOperator(
     endpoint = "https://api.openai.com/v1/chat/completions",
     model = "gpt-4o",
     api_key_env = "OPENAI_API_KEY",
@@ -142,7 +137,7 @@ gracefully.
 
 ## Testing Without Network Access
 
-The extension provides a `_http_post` hook (`Ref{Function}`) that tests
-can replace with a mock function. See `test/mocks/mock_http.jl` for the
-mock infrastructure and `test/integration/test_llm_operator.jl` for
-complete examples of testing all failure modes without network access.
+`Arborist` provides a `_http_post` hook (`Ref{Function}`) that tests can
+replace with a mock function. See `test/mocks/mock_http.jl` for the mock
+infrastructure and `test/integration/test_llm_operator.jl` for complete
+examples of testing all failure modes without network access.

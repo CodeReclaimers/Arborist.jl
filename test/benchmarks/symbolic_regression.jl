@@ -23,7 +23,7 @@
         add!(fset, op, 2, Float32, Bool)
     end
 
-    problem = GPProblem(fe, ExprGenome; function_set=fset, num_temps=4, seed=23)
+    problem = GPProblem(fe, ExprGenome; function_set=fset, num_temps=4, seed=456)
     algorithm = GeneticProgramming(
         pop_size=100,
         generations=200,

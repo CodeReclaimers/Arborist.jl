@@ -4,9 +4,11 @@ Generic, extensible genetic programming framework for Julia. Problem/Algorithm/S
 
 ## Project Status
 
-All 1621 tests pass. Fast tier: ~48s. Full benchmarks: ~83s.
+All 3065 tests pass. Fast tier: ~51s. Full benchmarks: ~83s.
 
 **Core framework** (Phases 1-6): Complete. ExprGenome, TreeGenome, AntGenome, GraphGenome. LLM mutation operator. Island model (sequential, sync distributed, async distributed). Speciation (threshold, behavioral). AST sanitizer.
+
+**NSGA-II multi-objective GP**: `NSGAII` algorithm with non-dominated sorting, crowding distance, and (mu+lambda) survivor selection. `ParsimonyEvaluator` wraps any single-objective evaluator into 2 objectives (fitness + complexity). Returns `NSGAIIResult` with Pareto front and hypervolume history. Example: `examples/nsga2_regression.jl`.
 
 **Bin packing experiments** (2026-03-23 to 2026-03-24): Comprehensive experiments via `--experiment=` flags in `examples/bin_packing.jl`. Full results in `examples/bin_packing_overnight_results.md`.
 - **LLM operator** (Qwen3-Coder 30B via Ollama): 99.9% parse success, provides 2x sample efficiency in generation count but 4x wall-time overhead. Classical GP matches LLM results given 3-4x more generations.
@@ -55,6 +57,7 @@ src/
   distributed_island.jl    # Distributed.jl island model (sync + async)
   llm_operator.jl          # LLMMutationOperator (uses Downloads.jl stdlib)
   tree_genome.jl           # TreeGenome, TreeFitnessEvaluator, SymbolicRegressionEvaluator (DynamicExpressions.jl)
+  nsga2.jl                 # NSGAII, ParsimonyEvaluator, NSGAIIResult, non-dominated sorting
 ```
 
 ## Key Conventions

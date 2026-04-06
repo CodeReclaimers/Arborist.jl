@@ -82,6 +82,9 @@ include("llm_operator.jl")
 # --- TreeGenome (DynamicExpressions.jl) ---
 include("tree_genome.jl")
 
+# --- NSGA-II multi-objective optimization ---
+include("nsga2.jl")
+
 # --- Public API exports ---
 export
     # Abstract types
@@ -108,6 +111,12 @@ export
     # Concrete types — algorithms
     GeneticProgramming,
     IslandModel,
+    NSGAII,
+
+    # Multi-objective types
+    AbstractMultiObjectiveEvaluator,
+    ParsimonyEvaluator,
+    NSGAIIResult,
 
     # Topology types
     AbstractTopology,
@@ -165,6 +174,8 @@ export
     solve,
     evaluate,
     evaluate_genome,
+    evaluate_multi,
+    objective_names,
     input_signature,
     output_signature,
     initialize,

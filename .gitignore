@@ -3,3 +3,19 @@ examples/.feynman_cache/
 # Julia environment lock files — libraries should not commit Manifest.toml
 Manifest.toml
 docs/Manifest.toml
+
+# Per-experiment bin packing run artifacts; tier-A synthesis files are tracked
+examples/bin_packing_results.md
+examples/bin_packing_results_a*.md
+examples/bin_packing_results_b*.md
+examples/bin_packing_results_g*.md
+examples/bin_packing_results_bimodal.md
+examples/bin_packing_results_extended_*.md
+examples/bin_packing_results_llm.md
+examples/bin_packing_results_timenorm.md
+examples/bin_packing_results_multiseed*.md
+
+# Run logs and TSV training histories
+examples/*.log
+examples/logs/
+examples/data/

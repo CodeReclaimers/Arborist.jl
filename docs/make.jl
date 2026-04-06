@@ -4,6 +4,7 @@ makedocs(
     sitename = "Arborist.jl",
     authors  = "CodeReclaimers LLC",
     modules  = [Arborist],
+    checkdocs = :exports,
     format   = Documenter.HTML(
         prettyurls = get(ENV, "CI", nothing) == "true"
     ),

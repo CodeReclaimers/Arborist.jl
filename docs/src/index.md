@@ -26,4 +26,4 @@ Arborist.jl is an extensible GP framework built on the Problem/Algorithm/Solve p
 | XOR (NEAT) | GraphGenome | 150 | 150 | 4/5 seeds |
 | Max Ones | ExprGenome | 100 | 100 | 5/5 seeds |
 
-Get started with the [Quick Start guide](@ref).
+Get started with the [Quick Start](@ref).

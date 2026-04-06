@@ -4,6 +4,9 @@ examples/.feynman_cache/
 Manifest.toml
 docs/Manifest.toml
 
+# Documenter.jl build output
+docs/build/
+
 # Per-experiment bin packing run artifacts; tier-A synthesis files are tracked
 examples/bin_packing_results.md
 examples/bin_packing_results_a*.md

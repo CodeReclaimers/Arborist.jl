@@ -1,5 +1,11 @@
 # API Reference
 
+## Module
+
+```@docs
+Arborist
+```
+
 ## Core Types
 
 ```@autodocs
@@ -12,4 +18,13 @@ Order = [:type]
 ```@autodocs
 Modules = [Arborist]
 Order = [:function]
+Filter = t -> !startswith(string(nameof(t)), "_")
+```
+
+## Constants
+
+```@autodocs
+Modules = [Arborist]
+Order = [:constant]
+Filter = t -> !startswith(string(t), "_")
 ```

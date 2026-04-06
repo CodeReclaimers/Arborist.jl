@@ -11,7 +11,11 @@ DynamicExpressions = "a40a106e-89c9-4ca8-8020-a735e8728b6b"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [compat]
+Distributed = "1"
+Downloads = "1"
 DynamicExpressions = "2"
+Random = "1"
+Test = "1"
 julia = "1.10"
 
 [extras]

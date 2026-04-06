@@ -4,7 +4,7 @@ Generic, extensible genetic programming framework for Julia. Problem/Algorithm/S
 
 ## Project Status
 
-All 3065 tests pass. Fast tier: ~51s. Full benchmarks: ~83s.
+All tests pass. Fast tier: 3065 tests, ~51s. Full benchmarks: 3087 tests, ~8m33s. The single "broken" reported in the test summary is `@test_skip "ANTHROPIC_API_KEY not set"` in `test/integration/test_llm_operator.jl` — `@test_skip` is reported in the same column as `@test_broken`.
 
 **Core framework** (Phases 1-6): Complete. ExprGenome, TreeGenome, AntGenome, GraphGenome. LLM mutation operator. Island model (sequential, sync distributed, async distributed). Speciation (threshold, behavioral). AST sanitizer.
 

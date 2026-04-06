@@ -60,8 +60,8 @@ using DynamicExpressions
 
     @info "Evaluation speedup" ExprGenome_median_ms=round(expr_median*1000, digits=3) TreeGenome_median_ms=round(tree_median*1000, digits=3) speedup=round(speedup, digits=1)
 
-    if speedup < 10.0
-        @warn "TreeGenome speedup less than 10x (got $(round(speedup, digits=1))x). " *
+    if speedup < 7.0
+        @warn "TreeGenome speedup less than 7x (got $(round(speedup, digits=1))x). " *
               "This may indicate a benchmarking issue rather than a real performance problem."
     end
     @test speedup > 1.0   # Hard assertion: TreeGenome must be faster

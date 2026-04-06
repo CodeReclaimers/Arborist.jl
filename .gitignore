@@ -1,1 +1,5 @@
 examples/.feynman_cache/
+
+# Julia environment lock files — libraries should not commit Manifest.toml
+Manifest.toml
+docs/Manifest.toml

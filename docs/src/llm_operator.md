@@ -124,8 +124,8 @@ the Authorization header.
 Model selection for code generation tasks is model-dependent. Models that
 have been observed to follow structured system prompts reliably for code
 generation include `codellama`, `deepseek-coder`, and `qwen2.5-coder`.
-However, adherence to the "return only assignment statements" instruction
-varies significantly across models and sizes. We recommend testing any
+However, adherence to the "return only the function body, no fences or
+explanations" instruction varies significantly across models and sizes. We recommend testing any
 new model with the mock infrastructure (see `test/mocks/mock_http.jl`)
 before using it in production runs.
 

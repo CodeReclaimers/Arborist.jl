@@ -450,8 +450,9 @@ function _check_ollama()
 end
 
 function _make_tracked_llm()
-    llm_ext = Base.get_extension(Arborist, :LLMOperatorExt)
-    llm_op = llm_ext.LLMMutationOperator(
+    # LLMMutationOperator was migrated from a weakdep extension into the
+    # core module when HTTP.jl was replaced by Downloads.jl (stdlib).
+    llm_op = Arborist.LLMMutationOperator(
         endpoint    = "http://localhost:11434/v1/chat/completions",
         model       = "qwen3-coder:30b",
         api_key_env = "",
@@ -1208,8 +1209,7 @@ function run_experiment_a(; generations::Int=100, pop_size::Int=200)
         println("\n>>> Variant A2: Classical + Qwen3-Coder LLM (20% weight)")
         flush(stdout)
 
-        llm_ext = Base.get_extension(Arborist, :LLMOperatorExt)
-        llm_op = llm_ext.LLMMutationOperator(
+        llm_op = Arborist.LLMMutationOperator(
             endpoint    = "http://localhost:11434/v1/chat/completions",
             model       = "qwen3-coder:30b",
             api_key_env = "",

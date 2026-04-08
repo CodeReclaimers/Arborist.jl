@@ -41,20 +41,29 @@ const _http_post = Ref{Function}(_default_http_post)
 # =============================================================================
 
 const DEFAULT_GP_SYSTEM_PROMPT = """
-You are a genetic programming mutation operator. You will be given a
-Julia program body as a list of assignment statements. Your task is to
-produce a meaningfully modified variant that might better approximate
-the target function.
+You are a genetic programming mutation operator. You will be given the
+body of a Julia function — a sequence of statements that may include
+assignments, `while` loops, `if`/`elseif`/`else` branches, `for` loops,
+`break`, `continue`, and standalone calls to the available primitives.
+Your task is to produce a meaningfully modified variant that might
+better approximate the target function or score higher on the objective.
 
 Rules:
-- Return ONLY Julia assignment statements, one per line
-- Use only the variable names present in the original (do not invent new ones)
-- Preserve the types of all variables (Float32, Int32, Bool)
-- You may change operators, constants, or structure
-- Do not add imports, function definitions, or comments
-- Do not explain your changes
+- Return ONLY the body of the function: statements at the top level,
+  with control flow nested as needed. Do not wrap your answer in
+  `function ... end`, `begin ... end`, or a code fence.
+- Use only the variable names present in the original (do not invent
+  new ones). `for`-loop iterator variables are the one exception and
+  may be introduced locally.
+- Preserve the types of all existing variables (e.g. Float32, Int32,
+  Bool). Conditions of `while` and `if` must evaluate to `Bool`.
+- Only call functions that already appear in the original body — do not
+  invent new function names.
+- You may change operators, constants, structure, and control flow.
+- Do not add imports, function definitions, type declarations, macros,
+  or comments. Do not explain your changes.
 
-Respond with only the modified statements and nothing else.
+Respond with only the modified function body and nothing else.
 """
 
 

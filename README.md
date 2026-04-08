@@ -4,6 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/CodeReclaimers/Arborist.jl/actions"><img src="https://github.com/CodeReclaimers/Arborist.jl/workflows/CI/badge.svg" alt="CI"></a>
+  <a href="https://codereclaimers.github.io/Arborist.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg" alt="Documentation"></a>
   <a href="https://julialang.org"><img src="https://img.shields.io/badge/Julia-1.10+-blue.svg" alt="Julia"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
@@ -15,17 +16,15 @@ using Pkg
 Pkg.add("Arborist")
 ```
 
-For symbolic regression (recommended), also install DynamicExpressions.jl:
-```julia
-Pkg.add("DynamicExpressions")
-```
+`DynamicExpressions.jl` is a direct dependency and is installed automatically —
+it backs `TreeGenome` and the symbolic regression evaluator.
 
 ## Quick Start
 
 ### Symbolic Regression
 
 ```julia
-using Arborist, DynamicExpressions
+using Arborist
 
 evaluator = SymbolicRegressionEvaluator(
     x -> x^4 + x^3 + x^2 + x,
@@ -64,7 +63,7 @@ println("Best fitness: ", result.best_fitness)
 ### Multi-Objective GP (NSGA-II)
 
 ```julia
-using Arborist, DynamicExpressions
+using Arborist
 
 # Wrap any single-objective evaluator into (fitness, complexity).
 inner = SymbolicRegressionEvaluator(
@@ -133,6 +132,20 @@ An **island model** with ring/complete/random migration topologies supports popu
 | 4-bit Even Parity | TreeGenome | 500 | 200 | 1/5 seeds |
 
 TreeGenome evaluates 8.4x faster than ExprGenome on the Koza suite (1000-point dataset).
+
+## Documentation
+
+Full documentation — quick start, user guide, API reference, and the security
+model — is built with Documenter.jl and published at
+[codereclaimers.github.io/Arborist.jl](https://codereclaimers.github.io/Arborist.jl/dev/).
+
+End-to-end runnable scripts live in [`examples/`](examples/), including:
+
+- `nsga2_regression.jl` — multi-objective symbolic regression
+- `bin_packing.jl` — classical and LLM-driven heuristic discovery (see
+  `bin_packing_overnight_results.md` for the experimental write-up)
+- `sorting.jl` / `sorting_distributed.jl` — sorting-network evolution
+- `feynman_regression.jl`, `lorenz_recovery.jl` — physics-flavored benchmarks
 
 ## Related Work
 

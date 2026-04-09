@@ -2073,8 +2073,9 @@ function main()
         elseif experiment == "combine_results"
             run_combine_results()
         elseif experiment == "ablation_enrichment"
+            v = get(kwargs, :variant, nothing)
             run_ablation_enrichment(;
-                variant=get(kwargs, :variant, nothing))
+                variant=v === nothing ? nothing : String(v))
         else
             error("Unknown experiment: $experiment")
         end

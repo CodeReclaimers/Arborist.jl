@@ -194,7 +194,7 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
         if r === nothing
             @warn "LLMMutationOperator: deserialize returned nothing, falling back"
             nothing
-        elseif !sanitize(ASTSanitizer(), r.body)
+        elseif !sanitize(_build_sanitizer(g.state), r.body)
             @warn "LLMMutationOperator: sanitizer rejected LLM output, falling back"
             nothing
         else
@@ -217,6 +217,21 @@ end
 # =============================================================================
 # Internal helpers
 # =============================================================================
+
+"""
+Build an ASTSanitizer whose whitelist includes both DEFAULT_SAFE_CALLS and
+the domain-specific function names from the genome's GenState. Without this,
+LLM output containing calls to problem-specific primitives (e.g. bp_n_bins,
+bp_place_in_bin) would be rejected by the sanitizer even though the
+deserializer's _is_valid_call already validated them against the function set.
+"""
+function _build_sanitizer(state::GenState)::ASTSanitizer
+    allowed = copy(DEFAULT_SAFE_CALLS)
+    for fd in state.funcs.funcs
+        push!(allowed, fd.name)
+    end
+    return ASTSanitizer(allowed_calls=allowed)
+end
 
 """Build JSON request body for the LLM API (no JSON library dependency)."""
 function _build_request_body(op::LLMMutationOperator, source::String, is_anthropic::Bool)

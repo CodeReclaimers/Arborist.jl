@@ -10,10 +10,10 @@ All tests pass. Fast tier: 3065 tests, ~51s. Full benchmarks: 3087 tests, ~8m33s
 
 **NSGA-II multi-objective GP**: `NSGAII` algorithm with non-dominated sorting, crowding distance, and (mu+lambda) survivor selection. `ParsimonyEvaluator` wraps any single-objective evaluator into 2 objectives (fitness + complexity). Returns `NSGAIIResult` with Pareto front and hypervolume history. Example: `examples/nsga2_regression.jl`.
 
-**Bin packing experiments** (2026-03-23 to 2026-03-24): Comprehensive experiments via `--experiment=` flags in `examples/bin_packing.jl`. Full results in `examples/bin_packing_overnight_results.md`.
-- **LLM operator** (Qwen3-Coder 30B via Ollama): 99.9% parse success, provides 2x sample efficiency in generation count but 4x wall-time overhead. Classical GP matches LLM results given 3-4x more generations.
+**Bin packing experiments** (2026-03-23 to 2026-03-24, LLM rerun 2026-04-09): Comprehensive experiments via `--experiment=` flags in `examples/bin_packing.jl`. Full results in `examples/bin_packing_overnight_results.md`.
+- **LLM operator** (Qwen3-Coder 30B via Ollama): ~3x sample efficiency in generation count, ~12x wall-time overhead. Multi-seed mean test 1.0664 ± 0.0084 vs classical 1.0717 ± 0.0112. 3/5 seeds beat Best Fit (vs classical 2/5). Original 2026-03-24 LLM data was invalidated by parser + sanitizer bugs that silently fell back to classical ~99% of the time; corrected 2026-04-09.
 - **Behavioral speciation**: Lowest variance across seeds (std 0.0027 vs 0.0112 classical). Most reliable but doesn't beat pure best-fit.
-- **Best result**: seed 1337 classical GP, test 1.0527 (3.4% better than Best Fit). Extended runs (300-800 gen) reach 1.0623.
+- **Best result**: seed 1337 classical GP, test 1.0527 (3.4% better than Best Fit); seed 1337 LLM, test 1.0531 (4.5% better than BF). Extended classical runs (300-800 gen) reach 1.0623.
 - Experiment modes: `llm`, `bimodal`, `extended_classical`, `extended_llm`, `multiseed_classical`, `multiseed_behavioral`, `multiseed_llm`, `template_baseline`, `timenorm_classical`, `combine_results`.
 
 ## Post-Registration Manual Steps

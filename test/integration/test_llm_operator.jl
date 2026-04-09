@@ -379,4 +379,117 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
             @test_skip "ANTHROPIC_API_KEY not set"
         end
     end
+
+    # =========================================================================
+    # Prompt enrichment integration tests
+    # =========================================================================
+
+    @testset "Prompt enrichment appears in request body" begin
+        genome, state, rng = make_llm_test_setup()
+
+        op = LLMMutationOperator(
+            endpoint="http://localhost:11434/v1/chat/completions",
+            model="test",
+            api_key_env="",
+            sections=[FitnessSection(), GenerationSection()],
+        )
+
+        # Manually set context (normally done by solve loop).
+        op.context = MutationContext(
+            50, 100,
+            [0.5, 0.8, 1.0],
+            ["elite_prog_1", "elite_prog_2"],
+            0.8, 2
+        )
+
+        clear_mock_responses!()
+        register_mock_response!("localhost", mock_openai_response("y = x * Float32(3.0)"))
+        install_mock_http!()
+
+        try
+            result = mutate(op, genome, rng)
+            body = LAST_REQUEST_BODY[]
+
+            # Enrichment sections should appear in the request body.
+            @test occursin("Fitness Context", body)
+            @test occursin("Generation Progress", body)
+            @test occursin("50/100", body)
+            @test occursin("Program to mutate", body)
+
+            # The serialized genome should also be present.
+            source = serialize(genome)
+            @test occursin(Arborist._json_escape(source), body)
+
+            println("  Enrichment present in request body: fitness + generation + genome")
+        finally
+            restore_http!()
+        end
+    end
+
+    @testset "No enrichment when sections empty" begin
+        genome, state, rng = make_llm_test_setup()
+
+        op = LLMMutationOperator(
+            endpoint="http://localhost:11434/v1/chat/completions",
+            model="test",
+            api_key_env="",
+        )
+
+        clear_mock_responses!()
+        register_mock_response!("localhost", mock_openai_response("y = x * Float32(3.0)"))
+        install_mock_http!()
+
+        try
+            result = mutate(op, genome, rng)
+            body = LAST_REQUEST_BODY[]
+
+            # No enrichment prefix.
+            @test !occursin("Fitness Context", body)
+            @test !occursin("Program to mutate", body)
+
+            # Genome source should be present directly.
+            source = serialize(genome)
+            @test occursin(Arborist._json_escape(source), body)
+
+            println("  No enrichment: body contains only genome source")
+        finally
+            restore_http!()
+        end
+    end
+
+    @testset "ElitesSection in request body" begin
+        genome, state, rng = make_llm_test_setup()
+
+        op = LLMMutationOperator(
+            endpoint="http://localhost:11434/v1/chat/completions",
+            model="test",
+            api_key_env="",
+            sections=[ElitesSection(2)],
+        )
+
+        op.context = MutationContext(
+            10, 100,
+            [0.1, 0.5, 1.0],
+            ["elite_alpha", "elite_beta", "elite_gamma"],
+            0.5, 2
+        )
+
+        clear_mock_responses!()
+        register_mock_response!("localhost", mock_openai_response("y = x * Float32(3.0)"))
+        install_mock_http!()
+
+        try
+            result = mutate(op, genome, rng)
+            body = LAST_REQUEST_BODY[]
+
+            @test occursin("Top 2 Programs", body)
+            @test occursin("elite_alpha", body)
+            @test occursin("elite_beta", body)
+            @test !occursin("elite_gamma", body)  # k=2, third excluded
+
+            println("  ElitesSection(2): top 2 elites in body, 3rd excluded")
+        finally
+            restore_http!()
+        end
+    end
 end

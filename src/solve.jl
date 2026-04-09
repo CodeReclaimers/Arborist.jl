@@ -97,6 +97,7 @@ function _breed_next_generation!(next_genomes::Vector{G},
         elseif r < alg.crossover_rate + alg.mutation_rate
             p_idx = _tournament_select(selection_fitnesses, t_size, rng)
             op = rand(rng, alg.mutation_ops)
+            _set_parent_context!(alg.mutation_ops, p_idx, selection_fitnesses)
             next_genomes[idx] = mutate(op, genomes[p_idx], rng)
             idx += 1
         else
@@ -192,6 +193,10 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
         # Apply speciation and compute selection fitnesses (fitness sharing).
         selection_fitnesses = _apply_speciation!(genomes, fitnesses,
                                                   algorithm.speciation, species_state, rng)
+
+        # Update LLM operator contexts with current population state.
+        _update_llm_contexts!(algorithm.mutation_ops, gen, algorithm.generations,
+                               fitnesses, genomes)
 
         # Build next generation.
         next_genomes = Vector{G}(undef, pop_size)
@@ -321,6 +326,10 @@ function solve(problem::GPProblem{G,E},
             # Apply speciation.
             selection_fitnesses = _apply_speciation!(genomes, fitnesses,
                                                       alg.speciation, species_st, state.rng)
+
+            # Update LLM operator contexts with this island's population state.
+            _update_llm_contexts!(alg.mutation_ops, gen, alg.generations,
+                                   fitnesses, genomes)
 
             # Build next generation.
             next_genomes = Vector{G}(undef, pop_size)

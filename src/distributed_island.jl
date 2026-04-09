@@ -91,6 +91,10 @@ function _evolve_one_gen_local!(id::Int)
     selection_fitnesses = _apply_speciation!(genomes, fitnesses,
                                               alg.speciation, island.species_state, rng)
 
+    # Update LLM operator contexts with this island's population state.
+    _update_llm_contexts!(alg.mutation_ops, island.generation, alg.generations,
+                           fitnesses, genomes)
+
     # Build next generation
     G = eltype(genomes)
     next_genomes = Vector{G}(undef, pop_size)

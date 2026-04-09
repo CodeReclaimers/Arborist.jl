@@ -93,8 +93,12 @@ loop is never interrupted by LLM failures.
 - `max_tokens::Int`: maximum response tokens
 - `timeout_seconds::Float64`: HTTP request timeout
 - `fallback_op::AbstractMutationOperator`: operator to use on any failure
+- `sections::Vector{AbstractPromptSection}`: prompt enrichment sections
+  (default: empty — no enrichment, identical to pre-enrichment behavior)
+- `context::Union{MutationContext, Nothing}`: populated by the solve loop
+  each generation; `nothing` until the first generation runs
 """
-struct LLMMutationOperator <: AbstractMutationOperator
+mutable struct LLMMutationOperator <: AbstractMutationOperator
     endpoint::String
     model::String
     api_key_env::String
@@ -103,6 +107,8 @@ struct LLMMutationOperator <: AbstractMutationOperator
     max_tokens::Int
     timeout_seconds::Float64
     fallback_op::AbstractMutationOperator
+    sections::Vector{AbstractPromptSection}
+    context::Union{MutationContext, Nothing}
 end
 
 """
@@ -121,10 +127,13 @@ function LLMMutationOperator(;
     temperature::Float64 = 0.8,
     max_tokens::Int = 512,
     timeout_seconds::Float64 = 30.0,
-    fallback_op::AbstractMutationOperator = SubtreeMutation()
+    fallback_op::AbstractMutationOperator = SubtreeMutation(),
+    sections::Vector{<:AbstractPromptSection} = AbstractPromptSection[]
 )
     LLMMutationOperator(endpoint, model, api_key_env, system_prompt,
-                        temperature, max_tokens, timeout_seconds, fallback_op)
+                        temperature, max_tokens, timeout_seconds, fallback_op,
+                        convert(Vector{AbstractPromptSection}, sections),
+                        nothing)
 end
 
 
@@ -235,13 +244,26 @@ end
 
 """Build JSON request body for the LLM API (no JSON library dependency)."""
 function _build_request_body(op::LLMMutationOperator, source::String, is_anthropic::Bool)
+    # Build enrichment from prompt sections + context.
+    enrichment = ""
+    if !isempty(op.sections) && op.context !== nothing
+        enrichment = render_enrichment(op.sections, op.context)
+    end
+
+    # Combine: enrichment first (context), then genome source (the thing to mutate).
+    user_content = if isempty(enrichment)
+        source
+    else
+        enrichment * "\n\n--- Program to mutate ---\n" * source
+    end
+
     escaped_system = _json_escape(op.system_prompt)
-    escaped_source = _json_escape(source)
+    escaped_user = _json_escape(user_content)
 
     if is_anthropic
-        return """{"model":"$(op.model)","max_tokens":$(op.max_tokens),"temperature":$(op.temperature),"system":"$escaped_system","messages":[{"role":"user","content":"$escaped_source"}]}"""
+        return """{"model":"$(op.model)","max_tokens":$(op.max_tokens),"temperature":$(op.temperature),"system":"$escaped_system","messages":[{"role":"user","content":"$escaped_user"}]}"""
     else
-        return """{"model":"$(op.model)","max_tokens":$(op.max_tokens),"temperature":$(op.temperature),"messages":[{"role":"system","content":"$escaped_system"},{"role":"user","content":"$escaped_source"}]}"""
+        return """{"model":"$(op.model)","max_tokens":$(op.max_tokens),"temperature":$(op.temperature),"messages":[{"role":"system","content":"$escaped_system"},{"role":"user","content":"$escaped_user"}]}"""
     end
 end
 

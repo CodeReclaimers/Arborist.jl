@@ -732,6 +732,10 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
         selection_fitnesses = Arborist._apply_speciation!(genomes, fitnesses,
                                                            algorithm.speciation, species_state, rng)
 
+        # Update LLM operator contexts with current population state.
+        Arborist._update_llm_contexts!(algorithm.mutation_ops, gen, algorithm.generations,
+                                        fitnesses, genomes)
+
         elapsed = round(time() - t0, digits=1)
         if verbose
             n_species = species_state isa Vector ? length(species_state) : 0
@@ -775,6 +779,7 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
             elseif r < algorithm.crossover_rate + algorithm.mutation_rate
                 p_idx = Arborist._tournament_select(selection_fitnesses, t_size, rng)
                 op = rand(rng, algorithm.mutation_ops)
+                Arborist._set_parent_context!(algorithm.mutation_ops, p_idx, selection_fitnesses)
                 child = Arborist.mutate(op, genomes[p_idx], rng)
                 next_genomes[idx] = child
                 idx += 1
@@ -1873,6 +1878,130 @@ function run_combine_results()
 end
 
 # =============================================================================
+# Prompt enrichment ablation experiment
+# =============================================================================
+
+const ABLATION_VARIANTS = Dict{String, Vector{Arborist.AbstractPromptSection}}(
+    "baseline"     => Arborist.AbstractPromptSection[],
+    "fitness_only" => Arborist.AbstractPromptSection[Arborist.FitnessSection()],
+    "elites_3"     => Arborist.AbstractPromptSection[Arborist.ElitesSection(3)],
+    "full"         => Arborist.AbstractPromptSection[
+        Arborist.FitnessSection(), Arborist.ElitesSection(3), Arborist.GenerationSection()],
+)
+
+function _make_ablation_llm(sections::Vector{Arborist.AbstractPromptSection})
+    llm_op = Arborist.LLMMutationOperator(
+        endpoint    = "http://localhost:11434/v1/chat/completions",
+        model       = "qwen3-coder:30b",
+        api_key_env = "",
+        system_prompt = BP_LLM_SYSTEM_PROMPT,
+        temperature = 0.7,
+        max_tokens  = 256,
+        timeout_seconds = 60.0,
+        fallback_op = Arborist.SubtreeMutation(),
+        sections    = sections,
+    )
+    return TrackedMutation(llm_op)
+end
+
+"""
+Run prompt enrichment ablation: 4 variants × 5 seeds.
+Pass `--variant=<name>` to run a single variant, or omit to run all.
+"""
+function run_ablation_enrichment(; variant::Union{String,Nothing}=nothing)
+    println("=" ^ 70)
+    println("Prompt Enrichment Ablation Experiment")
+    println("=" ^ 70)
+    flush(stdout)
+
+    if !_check_ollama()
+        println("ERROR: Ollama not reachable. Aborting ablation.")
+        return
+    end
+
+    variants = if variant !== nothing
+        if !haskey(ABLATION_VARIANTS, variant)
+            error("Unknown variant: $variant. Available: $(join(keys(ABLATION_VARIANTS), ", "))")
+        end
+        [variant]
+    else
+        sort(collect(keys(ABLATION_VARIANTS)))
+    end
+
+    all_rows = NamedTuple[]
+    data_dir = _ensure_data_dir()
+
+    for vname in variants
+        sections = ABLATION_VARIANTS[vname]
+        println("\n" * "=" ^ 70)
+        println("Variant: $vname ($(length(sections)) sections)")
+        println("=" ^ 70)
+        flush(stdout)
+
+        for (i, seed) in enumerate(OVERNIGHT_SEEDS)
+            println("\n--- $vname: Seed $seed ($i/$(length(OVERNIGHT_SEEDS))) ---")
+            flush(stdout)
+
+            tracked = _make_ablation_llm(sections)
+            ops = [tracked, Arborist.SubtreeMutation(), Arborist.PointMutation(),
+                   Arborist.HoistMutation(), Arborist.ExpansionMutation()]
+
+            r = run_bin_packing(; _common_kwargs(seed=seed, generations=100, pop_size=200)...,
+                mutation_ops=ops,
+                output_file="bin_packing_results_ablation_$(vname)_seed$(seed).md",
+            )
+
+            push!(all_rows, (
+                variant=vname,
+                seed=seed,
+                train=r.result.best_fitness,
+                test=r.evolved_test,
+                wall_time=r.wall_time,
+                ff_test=r.ff_test,
+                bf_test=r.bf_test,
+                llm_calls=tracked.n_calls,
+                llm_ok=tracked.n_slow,
+                llm_latency=tracked.total_latency,
+            ))
+        end
+    end
+
+    # Write combined TSV
+    tsv_path = joinpath(data_dir, "ablation_enrichment.tsv")
+    open(tsv_path, "a") do io  # append so multi-variant runs accumulate
+        for r in all_rows
+            println(io, join([r.variant, r.seed, round(r.train, digits=6),
+                              round(r.test, digits=6), round(r.wall_time, digits=1),
+                              round(r.ff_test, digits=6), round(r.bf_test, digits=6),
+                              r.llm_calls, r.llm_ok,
+                              round(r.llm_latency, digits=1)], "\t"))
+        end
+    end
+    println("\nData appended to: $tsv_path")
+
+    # Print summary table
+    println("\n" * "=" ^ 70)
+    println("Ablation Results Summary")
+    println("=" ^ 70)
+    println("| Variant | Mean test | Std | Min | Max | BF beat | Seeds |")
+    println("|---------|-----------|-----|-----|-----|---------|-------|")
+    for vname in sort(collect(Set(r.variant for r in all_rows)))
+        vrows = filter(r -> r.variant == vname, all_rows)
+        tests = [r.test for r in vrows]
+        bfs = [r.bf_test for r in vrows]
+        n_beat = count(t < b for (t, b) in zip(tests, bfs))
+        mu = sum(tests) / length(tests)
+        sd = length(tests) > 1 ?
+            sqrt(sum((t - mu)^2 for t in tests) / (length(tests) - 1)) : 0.0
+        println("| $vname | $(round(mu, digits=4)) | $(round(sd, digits=4)) | " *
+                "$(round(minimum(tests), digits=4)) | $(round(maximum(tests), digits=4)) | " *
+                "$n_beat/$(length(tests)) | $(length(tests)) |")
+    end
+    flush(stdout)
+end
+
+
+# =============================================================================
 # Main entry point
 # =============================================================================
 
@@ -1896,6 +2025,8 @@ function main()
                 kwargs[key] = parse(Float32, val_str)
             elseif key == :item_dist
                 kwargs[key] = Symbol(val_str)
+            elseif key == :variant
+                kwargs[key] = val_str
             elseif key == :verbose
                 kwargs[key] = parse(Bool, val_str)
             elseif key == :speciation
@@ -1941,6 +2072,9 @@ function main()
             run_timenorm_classical(; filter(p -> p.first == :pop_size, exp_kwargs)...)
         elseif experiment == "combine_results"
             run_combine_results()
+        elseif experiment == "ablation_enrichment"
+            run_ablation_enrichment(;
+                variant=get(kwargs, :variant, nothing))
         else
             error("Unknown experiment: $experiment")
         end

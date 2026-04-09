@@ -5,6 +5,9 @@
 # against the endpoint URL.
 const MOCK_RESPONSES = Dict{String, Any}()
 
+# Captured request body from the last HTTP call (for prompt inspection tests).
+const LAST_REQUEST_BODY = Ref{String}("")
+
 function register_mock_response!(pattern::String, response)
     MOCK_RESPONSES[pattern] = response
 end
@@ -16,6 +19,7 @@ end
 # Install the mock into the module-level hook.
 function install_mock_http!()
     Arborist._http_post[] = function(endpoint, headers, body, timeout)
+        LAST_REQUEST_BODY[] = body
         for (pattern, response) in MOCK_RESPONSES
             if occursin(pattern, endpoint)
                 response isa Exception && throw(response)

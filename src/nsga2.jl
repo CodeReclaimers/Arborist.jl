@@ -627,6 +627,12 @@ function solve(problem::GPProblem{G, E},
             callback(gen, front1_size, hv)
         end
 
+        # Update LLM operator contexts — use first objective as scalar fitness proxy.
+        _scalar_fits = Float64[f[1] for f in fitnesses]
+        _scalar_order = sortperm(_scalar_fits)
+        _update_llm_contexts!(algorithm.mutation_ops, gen, algorithm.generations,
+                               _scalar_fits[_scalar_order], genomes[_scalar_order])
+
         # Create offspring population via NSGA-II tournament selection.
         offspring = Vector{G}(undef, pop_size)
         _nsga2_breed!(offspring, genomes, ranks, crowding, algorithm, rng, 1)

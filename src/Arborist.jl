@@ -76,6 +76,9 @@ include("migration.jl")
 # --- Distributed island support ---
 include("distributed_island.jl")
 
+# --- Prompt enrichment context for LLM operators ---
+include("prompt_context.jl")
+
 # --- LLM mutation operator (uses Downloads.jl stdlib) ---
 include("llm_operator.jl")
 
@@ -203,6 +206,14 @@ export
 
     # LLM mutation operator
     LLMMutationOperator,
+
+    # Prompt enrichment
+    MutationContext,
+    AbstractPromptSection,
+    FitnessSection,
+    ElitesSection,
+    GenerationSection,
+    render_enrichment,
 
     # Legacy API (from evolution.jl)
     Individual,

@@ -2002,6 +2002,159 @@ end
 
 
 # =============================================================================
+# Model scaling experiment (elites_3 across model families and sizes)
+# =============================================================================
+
+# Each entry: (label, endpoint, model_id, api_key_env, temperature)
+# Gemma4 best practices recommend temperature=1.0, top_p=0.95.
+# Anthropic and Qwen use temperature=0.7 (matching prior experiments).
+const MODEL_SCALING_CONFIGS = [
+    ("gemma4_e2b",   "http://localhost:11434/v1/chat/completions", "gemma4:e2b",   "",                    1.0),
+    ("gemma4_e4b",   "http://localhost:11434/v1/chat/completions", "gemma4:e4b",   "",                    1.0),
+    ("gemma4_26b",   "http://localhost:11434/v1/chat/completions", "gemma4:26b",   "",                    1.0),
+    ("gemma4_31b",   "http://localhost:11434/v1/chat/completions", "gemma4:31b",   "",                    1.0),
+    ("qwen3_30b",    "http://localhost:11434/v1/chat/completions", "qwen3-coder:30b", "",                 0.7),
+    ("haiku_4_5",    "https://api.anthropic.com/v1/messages",      "claude-haiku-4-5-20251001", "ANTHROPIC_API_KEY", 0.7),
+    ("sonnet_4_6",   "https://api.anthropic.com/v1/messages",      "claude-sonnet-4-6",         "ANTHROPIC_API_KEY", 0.7),
+]
+
+function _make_scaling_llm(endpoint, model, api_key_env, temperature)
+    llm_op = Arborist.LLMMutationOperator(
+        endpoint    = endpoint,
+        model       = model,
+        api_key_env = api_key_env,
+        system_prompt = BP_LLM_SYSTEM_PROMPT,
+        temperature = temperature,
+        max_tokens  = 256,
+        timeout_seconds = 90.0,
+        fallback_op = Arborist.SubtreeMutation(),
+        sections    = Arborist.AbstractPromptSection[Arborist.ElitesSection(3)],
+    )
+    return TrackedMutation(llm_op)
+end
+
+"""
+Run model scaling experiment: each model × 5 seeds with elites_3 enrichment.
+Pass `--variant=<label>` to run a single model, or omit to run all sequentially.
+"""
+function run_model_scaling(; variant::Union{String,Nothing}=nothing)
+    println("=" ^ 70)
+    println("Model Scaling Experiment (elites_3 enrichment)")
+    println("=" ^ 70)
+    flush(stdout)
+
+    configs = if variant !== nothing
+        matching = filter(c -> c[1] == variant, MODEL_SCALING_CONFIGS)
+        isempty(matching) && error("Unknown model variant: $variant. Available: $(join([c[1] for c in MODEL_SCALING_CONFIGS], ", "))")
+        matching
+    else
+        MODEL_SCALING_CONFIGS
+    end
+
+    all_rows = NamedTuple[]
+    data_dir = _ensure_data_dir()
+
+    for (label, endpoint, model, api_key_env, temperature) in configs
+        # Check connectivity for this model.
+        is_local = occursin("localhost", endpoint)
+        if is_local
+            println("\nChecking Ollama for $model...")
+            flush(stdout)
+            try
+                output = IOBuffer()
+                Downloads.request("http://localhost:11434/v1/chat/completions";
+                    method="POST",
+                    headers=["Content-Type" => "application/json"],
+                    input=IOBuffer("""{"model":"$model","messages":[{"role":"user","content":"Reply OK"}],"max_tokens":5}"""),
+                    output=output,
+                    timeout=30)
+                println("  $model: OK")
+            catch e
+                println("  ERROR: $model not reachable: $e")
+                println("  Skipping $label.")
+                flush(stdout)
+                continue
+            end
+        elseif !isempty(api_key_env) && !haskey(ENV, api_key_env)
+            println("\nSkipping $label: $api_key_env not set")
+            flush(stdout)
+            continue
+        end
+
+        println("\n" * "=" ^ 70)
+        println("Model: $label ($model, temp=$temperature)")
+        println("=" ^ 70)
+        flush(stdout)
+
+        for (i, seed) in enumerate(OVERNIGHT_SEEDS)
+            println("\n--- $label: Seed $seed ($i/$(length(OVERNIGHT_SEEDS))) ---")
+            flush(stdout)
+
+            tracked = _make_scaling_llm(endpoint, model, api_key_env, temperature)
+            ops = [tracked, Arborist.SubtreeMutation(), Arborist.PointMutation(),
+                   Arborist.HoistMutation(), Arborist.ExpansionMutation()]
+
+            r = run_bin_packing(; _common_kwargs(seed=seed, generations=100, pop_size=200)...,
+                mutation_ops=ops,
+                output_file="bin_packing_results_scaling_$(label)_seed$(seed).md",
+            )
+
+            push!(all_rows, (
+                model=label,
+                seed=seed,
+                train=r.result.best_fitness,
+                test=r.evolved_test,
+                wall_time=r.wall_time,
+                ff_test=r.ff_test,
+                bf_test=r.bf_test,
+                llm_calls=tracked.n_calls,
+                llm_ok=tracked.n_slow,
+                llm_latency=tracked.total_latency,
+            ))
+        end
+    end
+
+    # Write combined TSV
+    tsv_path = joinpath(data_dir, "model_scaling.tsv")
+    open(tsv_path, "a") do io
+        for r in all_rows
+            println(io, join([r.model, r.seed, round(r.train, digits=6),
+                              round(r.test, digits=6), round(r.wall_time, digits=1),
+                              round(r.ff_test, digits=6), round(r.bf_test, digits=6),
+                              r.llm_calls, r.llm_ok,
+                              round(r.llm_latency, digits=1)], "\t"))
+        end
+    end
+    println("\nData appended to: $tsv_path")
+
+    # Print summary table
+    println("\n" * "=" ^ 70)
+    println("Model Scaling Results Summary")
+    println("=" ^ 70)
+    println("| Model | Mean test | Std | Min | Max | BF beat | Mean wall | LLM ok% |")
+    println("|-------|-----------|-----|-----|-----|---------|-----------|---------|")
+    for label in [c[1] for c in MODEL_SCALING_CONFIGS]
+        vrows = filter(r -> r.model == label, all_rows)
+        isempty(vrows) && continue
+        tests = [r.test for r in vrows]
+        bfs = [r.bf_test for r in vrows]
+        n_beat = count(t < b for (t, b) in zip(tests, bfs))
+        mu = sum(tests) / length(tests)
+        sd = length(tests) > 1 ?
+            sqrt(sum((t - mu)^2 for t in tests) / (length(tests) - 1)) : 0.0
+        wall = sum(r.wall_time for r in vrows) / length(vrows)
+        total_calls = sum(r.llm_calls for r in vrows)
+        total_ok = sum(r.llm_ok for r in vrows)
+        ok_pct = total_calls > 0 ? round(100 * total_ok / total_calls, digits=1) : 0.0
+        println("| $label | $(round(mu, digits=4)) | $(round(sd, digits=4)) | " *
+                "$(round(minimum(tests), digits=4)) | $(round(maximum(tests), digits=4)) | " *
+                "$n_beat/$(length(tests)) | $(round(wall, digits=0))s | $(ok_pct)% |")
+    end
+    flush(stdout)
+end
+
+
+# =============================================================================
 # Main entry point
 # =============================================================================
 
@@ -2075,6 +2228,10 @@ function main()
         elseif experiment == "ablation_enrichment"
             v = get(kwargs, :variant, nothing)
             run_ablation_enrichment(;
+                variant=v === nothing ? nothing : String(v))
+        elseif experiment == "model_scaling"
+            v = get(kwargs, :variant, nothing)
+            run_model_scaling(;
                 variant=v === nothing ? nothing : String(v))
         else
             error("Unknown experiment: $experiment")

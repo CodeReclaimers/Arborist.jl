@@ -36,11 +36,15 @@ algorithm = IslandModel(
 
 !!! note "Genome support in 0.1.0"
     `IslandModel` (sequential, synchronous distributed, and asynchronous
-    distributed) currently dispatches on `ExprGenome` only — the shared
-    `_initialize_population` path constructs `ExprGenome` instances from a
-    `GenState`. `TreeGenome`, `AntGenome`, and `GraphGenome` must use the
-    single-population `GeneticProgramming` solver for now. Extending
-    `IslandModel` to the other genome types is planned for a future release.
+    distributed) dispatches on `ExprGenome` and `TreeGenome`. For
+    `TreeGenome`, the evaluator must be a `TreeFitnessEvaluator`;
+    migration transports `Node{T}` directly across workers so the op
+    indices remain valid against every island's shared `OperatorEnum`.
+    `AntGenome` and `GraphGenome` must use the single-population
+    `GeneticProgramming` solver for now — the former is blocked by a
+    thread-unsafe simulator, the latter by the process-local NEAT
+    innovation counter. Extending `IslandModel` to those genome types
+    is planned for a future release.
 
 ## NSGAII
 

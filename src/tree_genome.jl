@@ -32,6 +32,24 @@ struct TreeGenome{T} <: AbstractGenome
     n_features::Int
 end
 
+"""
+    TreeGenomeContext{T}
+
+Per-island state carrier for `TreeGenome` under `IslandModel`. Parallels
+`GenState` for `ExprGenome`: both carry `.rng` so that island-loop sites
+reading `state.rng` work uniformly, and both are the second element of
+the tuple returned from `_initialize_population`.
+
+The extra `operators` and `n_features` fields let `from_migrant`
+reconstruct a `TreeGenome{T}` by invoking `deserialize` with the
+destination island's operator enum.
+"""
+struct TreeGenomeContext{T}
+    rng::AbstractRNG
+    operators::OperatorEnum
+    n_features::Int
+end
+
 # =============================================================================
 # TreeFitnessEvaluator
 # =============================================================================
@@ -430,6 +448,74 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
         algorithm.generations, wall_time,
         fitnesses[1] < algorithm.convergence_threshold
     )
+end
+
+# =============================================================================
+# IslandModel integration
+# =============================================================================
+
+# Extend the solve.jl helper with a TreeGenome method so IslandModel
+# (sequential, sync distributed, async distributed) can initialize
+# TreeGenome populations. The second element of the returned tuple is a
+# TreeGenomeContext whose .rng field parallels GenState.rng for uniform
+# use by the island loop.
+function _initialize_population(problem::GPProblem{TreeGenome{T}, E},
+                                 algorithm::GeneticProgramming,
+                                 rng::AbstractRNG) where {T, E}
+    evaluator = problem.evaluator
+    evaluator isa TreeFitnessEvaluator || error(
+        "IslandModel with TreeGenome requires a TreeFitnessEvaluator " *
+        "(got $(typeof(evaluator)))")
+
+    ops = evaluator.operators
+    n_feat = size(evaluator.X, 1)
+    pop_size = algorithm.pop_size
+
+    genomes = Vector{TreeGenome{T}}(undef, pop_size)
+    for i in 1:pop_size
+        method = i <= pop_size ÷ 2 ? :full : :grow
+        depth = 2 + (i % 3)  # depths 2, 3, 4
+        tree = _random_tree(rng, ops, n_feat, T, depth, method)
+        genomes[i] = TreeGenome{T}(tree, ops, n_feat)
+    end
+
+    return (genomes, TreeGenomeContext{T}(rng, ops, n_feat))
+end
+
+# =============================================================================
+# TreeGenome migration
+# =============================================================================
+
+"""
+    to_migrant(g::TreeGenome{T}, fitness::Float64) -> MigrantGenome
+
+Pack a TreeGenome's `Node{T}` into a `MigrantGenome` for cross-island
+(and cross-process) migration. The `Node{T}` is carried directly rather
+than going through the string-based `serialize`/`deserialize` path,
+because those two are format-mismatched for binary operators
+(infix vs. prefix — see CLAUDE.md known limitations). Julia's
+Distributed serializer handles `Node{T}` natively.
+
+The destination island's `OperatorEnum` is reattached in `from_migrant`.
+Op indices stored in `Node{T}` are stable across islands because every
+island holds the same `OperatorEnum` built from the problem.
+"""
+function to_migrant(g::TreeGenome{T}, fitness::Float64) where T
+    MigrantGenome(deepcopy(g.tree), fitness, :TreeGenome)
+end
+
+"""
+    from_migrant(m::MigrantGenome, ctx::TreeGenomeContext{T}) -> TreeGenome{T}
+
+Reconstruct a `TreeGenome{T}` from a `MigrantGenome` by wrapping the
+transported `Node{T}` with the destination island's `operators` and
+`n_features` from `ctx`.
+"""
+function from_migrant(m::MigrantGenome, ctx::TreeGenomeContext{T}) where T
+    m.genome_type === :TreeGenome || throw(ArgumentError(
+        "Expected TreeGenome migrant, got $(m.genome_type)"))
+    tree = m.data::Node{T}
+    return TreeGenome{T}(deepcopy(tree), ctx.operators, ctx.n_features)
 end
 
 # =============================================================================

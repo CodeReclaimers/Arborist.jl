@@ -22,11 +22,19 @@
 
 Mutable state for a single island running on a worker process.
 Holds everything needed to evolve one generation independently.
+
+The `state` field carries the per-island state object returned by
+`_initialize_population` — a `GenState` for `ExprGenome`, or a
+`TreeGenomeContext` for `TreeGenome`. It is typed `Any` rather than a
+Union because (a) the island hot loop reads only `state.rng` and never
+the state field directly, and (b) `_inject_migrants_local!` dispatches
+`from_migrant(m, state)` on the runtime type without needing a static
+narrowing.
 """
 mutable struct IslandState{G<:AbstractGenome}
     genomes::Vector{G}
     fitnesses::Vector{Float64}
-    state::GenState
+    state::Any
     species_state::Any
     evaluator::AbstractEvaluator
     algorithm::GeneticProgramming

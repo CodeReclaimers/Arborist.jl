@@ -28,6 +28,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
     include("integration/test_llm_operator.jl")
     include("integration/test_tree_genome.jl")
     include("integration/test_distributed_islands.jl")
+    include("integration/test_island_tree_genome.jl")
 
     if RUN_BENCHMARKS
         @info "Running full benchmark suite (ARBORIST_RUN_BENCHMARKS=true)"

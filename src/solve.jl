@@ -26,26 +26,39 @@ function solve(problem::GPProblem{G,E},
 end
 
 """
-    _initialize_population(problem, algorithm, rng) -> Tuple{Vector{G}, GenState}
+    _initialize_population(problem, algorithm, rng) -> Tuple{Vector{G}, state}
 
-Create the initial population of genomes. Internal function.
+Create the initial population of genomes. Internal function. Dispatches
+on the genome type. The second tuple element is a per-island state
+carrier that exposes `.rng` (e.g. `GenState` for `ExprGenome`,
+`TreeGenomeContext` for `TreeGenome`); the IslandModel loop reads
+`state.rng` uniformly across genome types.
 """
-function _initialize_population(problem::GPProblem{G,E}, algorithm::GeneticProgramming, rng::AbstractRNG) where {G,E}
-    if G !== ExprGenome
-        error("_initialize_population only supports ExprGenome. " *
-              "$(G) requires a specialized solve method (see AntGenome, GraphGenome).")
-    end
+function _initialize_population(problem::GPProblem{ExprGenome, E},
+                                 algorithm::GeneticProgramming,
+                                 rng::AbstractRNG) where {E}
     inputs = input_signature(problem.evaluator)
     outputs = output_signature(problem.evaluator)
     state = GenState(rng, problem.function_set, inputs, outputs, problem.num_temps)
 
-    genomes = Vector{G}(undef, algorithm.pop_size)
+    genomes = Vector{ExprGenome}(undef, algorithm.pop_size)
     for i in 1:algorithm.pop_size
         body = [create_random_assignment(state) for _ in 1:3]
         genomes[i] = ExprGenome(body, state)
     end
 
     return (genomes, state)
+end
+
+# Fallback for genome types that do not yet support IslandModel.
+# TreeGenome has its own method defined in tree_genome.jl.
+function _initialize_population(problem::GPProblem{G,E},
+                                 algorithm::GeneticProgramming,
+                                 rng::AbstractRNG) where {G,E}
+    error("_initialize_population does not support $(G). " *
+          "IslandModel currently supports ExprGenome and TreeGenome; " *
+          "other genome types (AntGenome, GraphGenome) require a " *
+          "specialized solve method.")
 end
 
 """
@@ -280,9 +293,13 @@ function solve(problem::GPProblem{G,E},
     pop_size = alg.pop_size
     bp = alg.bloat_penalty
 
-    # Initialize n independent islands, each with its own RNG-seeded GenState.
+    # Initialize n independent islands, each with its own per-island state
+    # (GenState for ExprGenome, TreeGenomeContext for TreeGenome, ...).
+    # Both state types expose `.rng` so the island loop can read state.rng
+    # uniformly. Typed Vector{Any} to allow heterogeneous state without
+    # coupling the IslandModel path to one genome's state representation.
     island_genomes = Vector{Vector{G}}(undef, n)
-    island_states = Vector{GenState}(undef, n)
+    island_states = Vector{Any}(undef, n)
     island_fitnesses = Vector{Vector{Float64}}(undef, n)
     island_species = Vector{Any}(undef, n)
 

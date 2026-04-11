@@ -190,6 +190,9 @@ export
     gp_nand,
     gp_nor,
 
+    # Initialization strategies
+    behavioral_initialize,
+
     # Utility functions
     add!,
     create_random_assignment,

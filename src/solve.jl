@@ -254,6 +254,200 @@ end
 
 
 # =============================================================================
+# Behavioral initialization (MAP-Elites-style diverse seeding)
+# =============================================================================
+
+"""
+    behavioral_initialize(state, evaluator, fingerprint_fn, distance_fn,
+                          target_size; kwargs...) -> Vector{ExprGenome}
+
+Generate a behaviorally diverse initial population using a MAP-Elites-style
+procedure:
+
+1. Generate `pool_size` random programs
+2. Evaluate each, discard crashed/timed-out programs (fitness == Inf)
+3. Compute behavioral fingerprints
+4. Greedily bin by fingerprint distance (threshold-based clustering)
+5. Select the best-fitness representative from each bin
+6. Return `target_size` genomes drawn from distinct bins
+
+This replaces the standard random initialization with a pool that
+guarantees behavioral diversity — programs that *do different things*,
+not just look different syntactically.
+
+# Arguments
+- `state::GenState`: the genome state (function set, variable types, RNG)
+- `evaluator::AbstractEvaluator`: for fitness evaluation
+- `fingerprint_fn`: `genome -> fingerprint` (any type; same as BehavioralSpeciation)
+- `distance_fn`: `(fp_a, fp_b) -> Float64` (same as BehavioralSpeciation)
+- `target_size::Int`: desired population size
+
+# Keyword Arguments
+- `pool_size::Int = target_size * 50`: number of random programs to generate
+- `bin_threshold::Float64 = 0.1`: distance below which two fingerprints
+  are considered the same behavior
+- `body_generator = nothing`: optional `(state) -> Vector{Expr}` for
+  custom random program generation. Default: 3-7 random statements via
+  `create_random_statement`.
+- `bloat_penalty::Float64 = 0.0`: bloat penalty for evaluation
+- `parallel::Bool = false`: use threads for evaluation
+- `verbose::Bool = false`: print progress
+
+# Returns
+A `Vector{ExprGenome}` of length `target_size` with diverse behaviors.
+If fewer than `target_size` distinct behaviors are found in the pool,
+remaining slots are filled with the best-fitness programs from the pool.
+"""
+function behavioral_initialize(
+    state::GenState,
+    evaluator::AbstractEvaluator,
+    fingerprint_fn,
+    distance_fn,
+    target_size::Int;
+    pool_size::Int = target_size * 50,
+    bin_threshold::Float64 = 0.1,
+    body_generator = nothing,
+    bloat_penalty::Float64 = 0.0,
+    parallel::Bool = false,
+    verbose::Bool = false
+)::Vector{ExprGenome}
+
+    # 1. Generate pool of random programs.
+    verbose && println("behavioral_initialize: generating $pool_size random programs...")
+    verbose && flush(stdout)
+    pool = Vector{ExprGenome}(undef, pool_size)
+    for i in 1:pool_size
+        body = if body_generator !== nothing
+            body_generator(state)
+        else
+            n_stmts = rand(state.rng, 3:7)
+            Expr[create_random_statement(state; depth=2) for _ in 1:n_stmts]
+        end
+        pool[i] = ExprGenome(body, state)
+    end
+
+    # 2. Evaluate all programs.
+    verbose && println("behavioral_initialize: evaluating pool...")
+    verbose && flush(stdout)
+    fitnesses = fill(Inf, pool_size)
+    _parallel_evaluate!(fitnesses, pool, evaluator, bloat_penalty,
+                        1:pool_size, parallel)
+
+    # Filter to programs that didn't crash (finite fitness).
+    valid_indices = [i for i in 1:pool_size if isfinite(fitnesses[i])]
+    verbose && println("behavioral_initialize: $(length(valid_indices))/$pool_size programs survived evaluation")
+    verbose && flush(stdout)
+
+    if isempty(valid_indices)
+        @warn "behavioral_initialize: no programs survived evaluation, falling back to random init"
+        return pool[1:min(target_size, pool_size)]
+    end
+
+    # 3. Compute fingerprints.
+    verbose && println("behavioral_initialize: computing fingerprints...")
+    verbose && flush(stdout)
+    fingerprints = Vector{Any}(undef, length(valid_indices))
+    for (j, i) in enumerate(valid_indices)
+        fingerprints[j] = try
+            fingerprint_fn(pool[i])
+        catch e
+            e isa InterruptException && rethrow()
+            nothing
+        end
+    end
+
+    # Filter out fingerprint failures.
+    fp_ok = [(valid_indices[j], fingerprints[j]) for j in 1:length(valid_indices)
+             if fingerprints[j] !== nothing]
+    verbose && println("behavioral_initialize: $(length(fp_ok)) programs fingerprinted successfully")
+    verbose && flush(stdout)
+
+    if isempty(fp_ok)
+        @warn "behavioral_initialize: all fingerprints failed, falling back to best-fitness selection"
+        order = sortperm(fitnesses)
+        return pool[order[1:min(target_size, pool_size)]]
+    end
+
+    # 4. Greedy binning by fingerprint distance.
+    # Each bin stores (genome_index, fingerprint, fitness).
+    bins = Vector{Vector{Tuple{Int, Any, Float64}}}()
+
+    # Shuffle to avoid ordering bias.
+    shuffled = fp_ok[sortperm(rand(state.rng, length(fp_ok)))]
+
+    for (idx, fp) in shuffled
+        fit = fitnesses[idx]
+        placed = false
+        for bin in bins
+            rep_fp = bin[1][2]  # fingerprint of first member (representative)
+            d = try
+                distance_fn(fp, rep_fp)
+            catch e
+                e isa InterruptException && rethrow()
+                Inf
+            end
+            if d < bin_threshold
+                push!(bin, (idx, fp, fit))
+                placed = true
+                break
+            end
+        end
+        if !placed
+            push!(bins, [(idx, fp, fit)])
+        end
+    end
+
+    verbose && println("behavioral_initialize: $(length(bins)) distinct behavior bins found")
+    verbose && flush(stdout)
+
+    # 5. Select best-fitness representative from each bin.
+    representatives = Tuple{Int, Float64}[]  # (genome_index, fitness)
+    for bin in bins
+        best_in_bin = argmin(entry -> entry[3], bin)
+        push!(representatives, (best_in_bin[1], best_in_bin[3]))
+    end
+
+    # Sort by fitness (best first) so we keep the best bins if we have more than target_size.
+    sort!(representatives, by=r -> r[2])
+
+    # 6. Build output population.
+    result = Vector{ExprGenome}(undef, target_size)
+    n_from_bins = min(length(representatives), target_size)
+    for i in 1:n_from_bins
+        result[i] = deepcopy(pool[representatives[i][1]])
+    end
+
+    # Fill remaining slots with best-fitness programs from the pool (may duplicate behaviors).
+    if n_from_bins < target_size
+        remaining_order = sortperm(fitnesses)
+        fill_idx = n_from_bins + 1
+        for i in remaining_order
+            fill_idx > target_size && break
+            isfinite(fitnesses[i]) || continue
+            result[fill_idx] = deepcopy(pool[i])
+            fill_idx += 1
+        end
+        # If still not enough (very few valid programs), pad with random.
+        while fill_idx <= target_size
+            body = if body_generator !== nothing
+                body_generator(state)
+            else
+                Expr[create_random_statement(state; depth=2) for _ in 1:rand(state.rng, 3:7)]
+            end
+            result[fill_idx] = ExprGenome(body, state)
+            fill_idx += 1
+        end
+    end
+
+    verbose && println("behavioral_initialize: returning $target_size programs " *
+                       "($n_from_bins from distinct bins, $(target_size - n_from_bins) filled)")
+    verbose && flush(stdout)
+
+    return result
+end
+
+
+# =============================================================================
 # IslandModel solver
 # =============================================================================
 

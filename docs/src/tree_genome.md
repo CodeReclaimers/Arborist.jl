@@ -14,7 +14,8 @@ Appropriate for:
 
 TreeGenome evaluates expression trees directly via DynamicExpressions.jl's
 vectorized evaluation engine. No `@eval` compilation is needed, making
-evaluation 10-100x faster than ExprGenome for large datasets.
+evaluation roughly 8x faster than ExprGenome on the Koza symbolic regression
+suite (1000-point dataset); the gap widens further as dataset size grows.
 
 ### ExprGenome (@eval backed)
 

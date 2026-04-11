@@ -23,10 +23,6 @@ using Distributed
 # --- Abstract type hierarchy ---
 include("abstractions.jl")
 
-# Compatibility alias: the existing evolution.jl code references FitnessEvaluator,
-# which is now AbstractEvaluator under the new type hierarchy.
-const FitnessEvaluator = AbstractEvaluator
-
 # --- Core code generation infrastructure (verbatim from existing project) ---
 include("genome/codegen.jl")
 
@@ -68,7 +64,6 @@ include("solve.jl")
 # --- Additional genome types ---
 include("genome/ant_genome.jl")
 include("genome/graph_genome.jl")
-include("genome/linear_genome.jl")
 
 # --- Migration types (needs all genome types) ---
 include("migration.jl")

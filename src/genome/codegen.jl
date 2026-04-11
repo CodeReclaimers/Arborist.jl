@@ -15,6 +15,14 @@
 # - function calls
 # - assignment statements
 
+"""
+    FunctionDetails(name, args, return_type)
+
+Signature record for a single primitive available to evolved programs. `name` is
+the Julia `Symbol` the evolved code will call, `args` is the ordered vector of
+argument types, and `return_type` is the type produced by the call. `FunctionSet`
+collects these into the palette from which `create_random_rvalue` draws.
+"""
 struct FunctionDetails
 	name::Symbol
 	args::Vector{DataType}
@@ -31,10 +39,25 @@ function Base.hash(a::FunctionDetails, h::UInt64)
 	return hash(a.return_type, h)
 end
 
+"""
+    FunctionSet(funcs::Set{FunctionDetails})
+
+Container for the set of primitives that evolved expression-tree programs are
+permitted to call. Populated via `add!` or by constructing the `Set` directly,
+and passed into `GenState` / `GPProblem` to define the search space. See
+`default_function_set` and `boolean_function_set` for prebuilt palettes.
+"""
 struct FunctionSet
 	funcs::Set{FunctionDetails}
 end
 
+"""
+    add!(fset, f, nargs, input_type, return_type)
+
+Add a primitive `f` taking `nargs` arguments of `input_type` and returning
+`return_type` to `fset`. Shorthand for building homogeneous-signature entries;
+for mixed argument types, push a `FunctionDetails` directly into `fset.funcs`.
+"""
 function add!(fset::FunctionSet, f::Symbol, nargs::Int, input_type::DataType, return_type::DataType)
 	push!(fset.funcs, FunctionDetails(f, fill(input_type, nargs), return_type))
 end
@@ -49,6 +72,16 @@ _sorted_pairs(d) = sort!(collect(d), by=first)
 _sorted_types(types) = sort!(collect(types), by=string)
 
 
+"""
+    GenState(rng, fset, inputs, outputs, num_temps)
+
+Code-generation state shared across the construction and mutation of a single
+expression-tree genome. Holds the `rng` used for every random choice (no global
+state), the `FunctionSet` palette, the input/output/temp variable dictionaries
+typed by `Symbol => DataType`, the set of types in use, and a cached union of
+all addressable variables. All stochastic helpers in `codegen.jl` take a
+`GenState` and draw exclusively from `state.rng`, so seeded runs reproduce.
+"""
 struct GenState
 	rng::AbstractRNG
 	statement_types::Vector{Symbol}
@@ -198,6 +231,14 @@ end
 # Expression creation and mutation.
 ###################################################################################
 
+"""
+    create_random_assignment(s::GenState) -> Expr
+
+Generate a random `:(lhs = rhs)` expression, rejecting self-assignments like
+`x = x`. The lvalue is drawn from `get_lvalues(s)` and the rvalue is built by
+`create_random_rvalue` matched to the lvalue's type. Used as the leaf case of
+random program construction.
+"""
 function create_random_assignment(s::GenState)
 	while true
 		v = rand(s.rng, get_lvalues(s))

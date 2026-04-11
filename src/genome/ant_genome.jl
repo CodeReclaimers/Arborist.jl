@@ -42,7 +42,15 @@ function _ant_ahead(ant::AntSimulator)
 end
 
 # Primitives callable from @eval'd evolved programs
-"""Move the ant forward. Eats food if present."""
+"""
+    gp_ant_move(::Bool) -> Bool
+
+Advance the ant one cell in its current direction, consuming a move. Eats the
+food pellet in the destination cell if present. The `Bool` argument is a
+placeholder for the evolved program's type scheme and is ignored. Returns
+`true` if the move happened, `false` if the simulator is absent or the ant has
+exhausted its move budget.
+"""
 function gp_ant_move(::Bool)::Bool
     ant = _ant_sim_ref[]
     ant === nothing && return false
@@ -55,7 +63,14 @@ function gp_ant_move(::Bool)::Bool
     return true
 end
 
-"""Turn the ant left."""
+"""
+    gp_ant_left(::Bool) -> Bool
+
+Rotate the ant 90° counter-clockwise, consuming a move. The `Bool` argument is
+ignored (placeholder for the evolved program's type scheme). Returns `true` if
+the turn happened, `false` if the simulator is absent or the ant is out of
+moves.
+"""
 function gp_ant_left(::Bool)::Bool
     ant = _ant_sim_ref[]
     ant === nothing && return false
@@ -65,7 +80,13 @@ function gp_ant_left(::Bool)::Bool
     return true
 end
 
-"""Turn the ant right."""
+"""
+    gp_ant_right(::Bool) -> Bool
+
+Rotate the ant 90° clockwise, consuming a move. The `Bool` argument is ignored
+(placeholder for the evolved program's type scheme). Returns `true` if the
+turn happened, `false` if the simulator is absent or the ant is out of moves.
+"""
 function gp_ant_right(::Bool)::Bool
     ant = _ant_sim_ref[]
     ant === nothing && return false
@@ -75,7 +96,13 @@ function gp_ant_right(::Bool)::Bool
     return true
 end
 
-"""Check if food is ahead (sensor, does not consume a move)."""
+"""
+    gp_ant_food_ahead(::Bool) -> Bool
+
+Sensor primitive: return `true` if the cell directly ahead of the ant contains
+food, `false` otherwise. Does not consume a move or change the ant's pose. The
+`Bool` argument is ignored (placeholder for the evolved program's type scheme).
+"""
 function gp_ant_food_ahead(::Bool)::Bool
     ant = _ant_sim_ref[]
     ant === nothing && return false

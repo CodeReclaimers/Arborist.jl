@@ -90,6 +90,16 @@ end
 # Activation functions
 # =============================================================================
 
+"""
+    ACTIVATION_FNS
+
+Dictionary mapping activation `Symbol` names to their unary `Function`
+implementations, used by `GraphEvaluator` when propagating values through a
+`GraphGenome`. The default set is `:sigmoid` (NEAT-style steepened logistic),
+`:tanh`, `:relu`, and `:identity`. New activations can be added by assigning
+into this dict before solving; each `NodeGene` stores the activation as a
+`Symbol` and looks the function up here at evaluation time.
+"""
 const ACTIVATION_FNS = Dict{Symbol, Function}(
     :sigmoid  => x -> 1.0 / (1.0 + exp(-4.9 * x)),
     :tanh     => x -> tanh(x),

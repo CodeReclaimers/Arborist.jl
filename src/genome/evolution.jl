@@ -3,7 +3,7 @@
 # Modifications from original:
 # - Removed `include("codegen.jl")` (included separately by the module)
 # - Removed `abstract type FitnessEvaluator end` (replaced by AbstractEvaluator
-#   via the `const FitnessEvaluator = AbstractEvaluator` alias in the module)
+#   from abstractions.jl; Population/etc. now reference AbstractEvaluator directly)
 # - Removed TableFitnessEvaluator and related methods (migrated to evaluators.jl)
 # - All rand() calls now use explicit rng from GenState or passed parameters
 
@@ -138,7 +138,7 @@ evaluation and code generation.
 """
 mutable struct Population
     individuals::Vector{Individual}
-    evaluator::FitnessEvaluator
+    evaluator::AbstractEvaluator
     state::GenState
     generation::Int
 end
@@ -154,7 +154,7 @@ Create a new population of random individuals.
 - `initial_body_size`: number of random statements per individual
 - `num_temps`: number of temporary variables in the GenState
 """
-function Population(rng::AbstractRNG, evaluator::FitnessEvaluator, pop_size::Int,
+function Population(rng::AbstractRNG, evaluator::AbstractEvaluator, pop_size::Int,
                     initial_body_size::Int, num_temps::Int;
                     fset::Union{FunctionSet, Nothing}=nothing)
     inputs = input_signature(evaluator)
@@ -193,7 +193,7 @@ function Population(rng::AbstractRNG, evaluator::FitnessEvaluator, pop_size::Int
 end
 
 # Backward-compatible constructor using default RNG.
-function Population(evaluator::FitnessEvaluator, pop_size::Int,
+function Population(evaluator::AbstractEvaluator, pop_size::Int,
                     initial_body_size::Int, num_temps::Int;
                     fset::Union{FunctionSet, Nothing}=nothing)
     Population(Random.default_rng(), evaluator, pop_size, initial_body_size, num_temps; fset=fset)

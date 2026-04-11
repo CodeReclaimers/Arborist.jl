@@ -34,6 +34,14 @@ algorithm = IslandModel(
 )
 ```
 
+!!! note "Genome support in 0.1.0"
+    `IslandModel` (sequential, synchronous distributed, and asynchronous
+    distributed) currently dispatches on `ExprGenome` only — the shared
+    `_initialize_population` path constructs `ExprGenome` instances from a
+    `GenState`. `TreeGenome`, `AntGenome`, and `GraphGenome` must use the
+    single-population `GeneticProgramming` solver for now. Extending
+    `IslandModel` to the other genome types is planned for a future release.
+
 ## NSGAII
 
 Multi-objective GP using non-dominated sorting and crowding distance with
@@ -76,3 +84,10 @@ result = solve(GPProblem(evaluator, TreeGenome{Float32}; seed=42), algorithm)
 - `generations_run::Int`, `wall_time::Float64`, `objective_names::Vector{String}`
 
 See `examples/nsga2_regression.jl` for a complete runnable example.
+
+!!! note "Genome support in 0.1.0"
+    `NSGAII` dispatches on `ExprGenome` and `TreeGenome`. `AntGenome` and
+    `GraphGenome` are not yet supported — attempting to `solve` an NSGA-II
+    problem with those genome types raises a `MethodError` from
+    `_nsga2_init_population`. Extending NSGA-II to the remaining genome
+    types is planned for a future release.

@@ -3,15 +3,31 @@
 
 Base type for all genome representations in Arborist.
 
-Any concrete subtype `G <: AbstractGenome` must implement:
+A concrete subtype `G <: AbstractGenome` participates in evolution by
+providing the operations the solve path needs. At minimum:
 
-- `initialize(::Type{G}, problem::GPProblem) -> G`
-- `mutate(g::G, rng::AbstractRNG) -> G`
-- `crossover(g1::G, g2::G, rng::AbstractRNG) -> Tuple{G, G}`
-- `distance(g1::G, g2::G) -> Float64`
-- `complexity(g::G) -> Float64`
-- `serialize(g::G) -> String`
-- `deserialize(::Type{G}, s::String) -> Union{G, Nothing}`
+- `mutate(op, g::G, rng::AbstractRNG) -> G` for each mutation operator
+  that dispatches on `G` (or a direct `mutate(g::G, rng)` method for
+  genome types that use direct dispatch, e.g. `AntGenome`, `GraphGenome`).
+- `crossover(op, g1::G, g2::G, rng::AbstractRNG) -> Tuple{G, G}` (or a
+  direct `crossover(g1, g2, rng)` method for direct-dispatch genomes).
+- `distance(g1::G, g2::G) -> Float64` — used by `ThresholdSpeciation`.
+- `complexity(g::G) -> Real` — used by bloat penalty and
+  `ParsimonyEvaluator`.
+- `serialize(g::G) -> String` — used by the LLM operator and logging.
+
+Population initialization is genome-specific. Each genome type defines
+its own construction path invoked from the matching `solve` method; the
+signature is not fixed — `ExprGenome` uses a `GenState`, `TreeGenome`
+takes an `OperatorEnum` and feature count, `AntGenome` takes a primitive
+set, and `GraphGenome` takes input/output counts. See the per-genome
+`solve(::GPProblem{G,E}, ::GeneticProgramming)` methods.
+
+`deserialize(::Type{G}, s::String, ctx...)` is required only when using
+the LLM mutation operator on `G`; its extra arguments depend on `G`
+(e.g. `GenState` for `ExprGenome`, `(OperatorEnum, n_features)` for
+`TreeGenome`). `LLMMutationOperator` currently dispatches on `ExprGenome`
+only.
 """
 abstract type AbstractGenome end
 

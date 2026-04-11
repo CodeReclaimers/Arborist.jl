@@ -2,6 +2,7 @@ name = "Arborist"
 uuid = "226a4f77-d45f-40bb-908f-e1e2bc89957a"
 authors = ["CodeReclaimers LLC <github@codereclaimers.com>"]
 description = "Generic genetic programming for Julia: Problem/Algorithm/Solve API with ExprGenome, TreeGenome, GraphGenome, and LLM mutation operators."
+license = "MIT"
 version = "0.1.0"
 
 [deps]

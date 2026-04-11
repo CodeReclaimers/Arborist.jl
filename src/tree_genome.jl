@@ -190,9 +190,32 @@ function serialize(g::TreeGenome{T}) where T
     string_tree(g.tree, g.operators)
 end
 
-function deserialize(::Type{TreeGenome{T}}, s::String,
+"""
+    deserialize(::Type{TreeGenome{T}}, s, operators, n_features) -> Union{TreeGenome{T}, Nothing}
+
+Parse a string representation of an expression tree back into a
+`TreeGenome{T}`. Accepts both the infix form emitted by
+`serialize` / DynamicExpressions' `string_tree` (e.g. `x1 + 1.0`,
+`sin((x1 + 1.0) * x2)`) and the prefix s-expression form used by
+older code paths (e.g. `+(x1, 1.0)`, `sin(*(x1, x2))`). Both forms
+are accepted because `Meta.parse` normalizes them to the same
+`Expr(:call, ...)` structure that `_expr_to_node` walks.
+
+Returns `nothing` for unparseable input, unrecognized operators, or
+out-of-range feature indices. The caller is responsible for any
+fallback behavior.
+"""
+function deserialize(::Type{TreeGenome{T}}, s::AbstractString,
                              operators::OperatorEnum, n_features::Int) where T
-    tree = _parse_prefix_expr(strip(s), operators, n_features, T)
+    stripped = strip(s)
+    isempty(stripped) && return nothing
+    expr = try
+        Meta.parse(stripped)
+    catch e
+        e isa InterruptException && rethrow()
+        return nothing
+    end
+    tree = _expr_to_node(expr, operators, n_features, T)
     tree === nothing && return nothing
     return TreeGenome{T}(tree, operators, n_features)
 end
@@ -491,10 +514,11 @@ end
 
 Pack a TreeGenome's `Node{T}` into a `MigrantGenome` for cross-island
 (and cross-process) migration. The `Node{T}` is carried directly rather
-than going through the string-based `serialize`/`deserialize` path,
-because those two are format-mismatched for binary operators
-(infix vs. prefix — see CLAUDE.md known limitations). Julia's
-Distributed serializer handles `Node{T}` natively.
+than going through the string-based `serialize`/`deserialize` path:
+direct transport avoids any parse ambiguity, preserves exact bit
+patterns of `Float32` constants, and is independent of
+DynamicExpressions' `string_tree` output format. Julia's `Distributed`
+serializer handles `Node{T}` natively.
 
 The destination island's `OperatorEnum` is reattached in `from_migrant`.
 Op indices stored in `Node{T}` are stable across islands because every
@@ -519,127 +543,63 @@ function from_migrant(m::MigrantGenome, ctx::TreeGenomeContext{T}) where T
 end
 
 # =============================================================================
-# Prefix notation parser for LLM deserialization
+# Expression-tree walker for deserialize
 # =============================================================================
 
 """
-    _parse_prefix_expr(s, operators, n_features, T) -> Union{Node{T}, Nothing}
+    _expr_to_node(x, operators, n_features, T) -> Union{Node{T}, Nothing}
 
-Parse a prefix-notation string like `+(x1, *(2.0, x2))` into a Node{T}.
-Returns nothing on any parse error.
+Walk a `Meta.parse`d Julia expression and build a DynamicExpressions
+`Node{T}`. Accepts both infix (`x1 + 1.0`, what `string_tree` emits)
+and prefix (`+(x1, 1.0)`, what older callers used) because `Meta.parse`
+normalizes both forms to the same `Expr(:call, op, args...)` structure.
+Returns `nothing` on any unrecognized construct, unknown operator,
+or out-of-range feature index.
 """
-function _parse_prefix_expr(s::AbstractString, operators::OperatorEnum,
-                             n_features::Int, ::Type{T}) where T
-    try
-        tokens = _tokenize_prefix(s)
-        isempty(tokens) && return nothing
-        pos = Ref(1)
-        tree = _parse_prefix_token(tokens, pos, operators, n_features, T)
-        return tree
-    catch
-        return nothing
+function _expr_to_node(x, operators::OperatorEnum,
+                       n_features::Int, ::Type{T}) where T
+    # Numeric literal: widen to T (handles Int, Float32, Float64, ...).
+    if x isa Number
+        return Node{T}(; val=T(x))
     end
-end
 
-function _tokenize_prefix(s::AbstractString)
-    tokens = String[]
-    i = 1
-    while i <= length(s)
-        c = s[i]
-        if c in ('(', ')', ',')
-            push!(tokens, string(c))
-            i += 1
-        elseif isspace(c)
-            i += 1
-        else
-            j = i
-            while j <= length(s) && !(s[j] in ('(', ')', ',', ' ', '\t', '\n'))
-                j += 1
-            end
-            push!(tokens, s[i:j-1])
-            i = j
-        end
-    end
-    return tokens
-end
-
-function _parse_prefix_token(tokens, pos::Ref{Int}, operators::OperatorEnum,
-                              n_features::Int, ::Type{T}) where T
-    pos[] > length(tokens) && return nothing
-    tok = tokens[pos[]]
-
-    # Feature variable: x1, x2, ...
-    m = match(r"^x(\d+)$", tok)
-    if m !== nothing
+    # Feature variable: :x1, :x2, ...
+    if x isa Symbol
+        m = match(r"^x(\d+)$", String(x))
+        m === nothing && return nothing
         feat = parse(Int, m.captures[1])
         (feat < 1 || feat > n_features) && return nothing
-        pos[] += 1
         return Node{T}(; feature=UInt16(feat))
     end
 
-    # Numeric literal
-    num = tryparse(T, tok)
-    if num !== nothing
-        pos[] += 1
-        return Node{T}(; val=num)
-    end
+    # Everything else must be a call expression.
+    x isa Expr || return nothing
+    x.head === :call || return nothing
+    length(x.args) >= 2 || return nothing
 
-    # Also try Float64 then convert
-    num64 = tryparse(Float64, tok)
-    if num64 !== nothing
-        pos[] += 1
-        return Node{T}(; val=T(num64))
-    end
+    op_sym = x.args[1]
+    op_sym isa Symbol || return nothing
+    n_args = length(x.args) - 1
 
-    # Operator: check unary and binary
-    unary_ops = _get_unary_ops(operators)
-    binary_ops = _get_binary_ops(operators)
-
-    # Find operator by name
-    op_name = Symbol(tok)
-
-    # Check binary operators
-    for (bi, bop) in enumerate(binary_ops)
-        if Symbol(bop) == op_name || Symbol(nameof(bop)) == op_name
-            pos[] += 1
-            # Expect '('
-            pos[] > length(tokens) && return nothing
-            tokens[pos[]] == "(" || return nothing
-            pos[] += 1
-            # Parse first argument
-            arg1 = _parse_prefix_token(tokens, pos, operators, n_features, T)
-            arg1 === nothing && return nothing
-            # Expect ','
-            pos[] > length(tokens) && return nothing
-            tokens[pos[]] == "," || return nothing
-            pos[] += 1
-            # Parse second argument
-            arg2 = _parse_prefix_token(tokens, pos, operators, n_features, T)
-            arg2 === nothing && return nothing
-            # Expect ')'
-            pos[] > length(tokens) && return nothing
-            tokens[pos[]] == ")" || return nothing
-            pos[] += 1
-            return Node{T}(; op=UInt8(bi), l=arg1, r=arg2)
+    if n_args == 2
+        for (bi, bop) in enumerate(_get_binary_ops(operators))
+            if Symbol(bop) == op_sym || Symbol(nameof(bop)) == op_sym
+                l = _expr_to_node(x.args[2], operators, n_features, T)
+                r = _expr_to_node(x.args[3], operators, n_features, T)
+                (l === nothing || r === nothing) && return nothing
+                return Node{T}(; op=UInt8(bi), l=l, r=r)
+            end
         end
-    end
-
-    # Check unary operators
-    for (ui, uop) in enumerate(unary_ops)
-        if Symbol(uop) == op_name || Symbol(nameof(uop)) == op_name
-            pos[] += 1
-            # Expect '('
-            pos[] > length(tokens) && return nothing
-            tokens[pos[]] == "(" || return nothing
-            pos[] += 1
-            arg = _parse_prefix_token(tokens, pos, operators, n_features, T)
-            arg === nothing && return nothing
-            # Expect ')'
-            pos[] > length(tokens) && return nothing
-            tokens[pos[]] == ")" || return nothing
-            pos[] += 1
-            return Node{T}(; op=UInt8(ui), l=arg)
+        return nothing
+    elseif n_args == 1
+        for (ui, uop) in enumerate(_get_unary_ops(operators))
+            if Symbol(uop) == op_sym || Symbol(nameof(uop)) == op_sym
+                child = _expr_to_node(x.args[2], operators, n_features, T)
+                child === nothing && return nothing
+                return Node{T}(; op=UInt8(ui), l=child)
+            end
         end
+        return nothing
     end
 
     return nothing

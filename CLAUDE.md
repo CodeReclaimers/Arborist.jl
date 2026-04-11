@@ -4,7 +4,7 @@ Generic, extensible genetic programming framework for Julia. Problem/Algorithm/S
 
 ## Project Status
 
-All tests pass. Fast tier: 3065 tests, ~51s. Full benchmarks: 3087 tests, ~8m33s. The single "broken" reported in the test summary is `@test_skip "ANTHROPIC_API_KEY not set"` in `test/integration/test_llm_operator.jl` — `@test_skip` is reported in the same column as `@test_broken`.
+All tests pass. Fast tier: 3164 tests, ~1m08s. Full benchmarks: 3186 tests, ~8m53s. The single "broken" reported in the test summary is `@test_skip "ANTHROPIC_API_KEY not set"` in `test/integration/test_llm_operator.jl` — `@test_skip` is reported in the same column as `@test_broken`.
 
 **Core framework** (Phases 1-6): Complete. ExprGenome, TreeGenome, AntGenome, GraphGenome. LLM mutation operator. Island model (sequential, sync distributed, async distributed). Speciation (threshold, behavioral). AST sanitizer.
 
@@ -74,7 +74,6 @@ src/
 
 - **@eval method table growth**: Every ExprGenome evaluation adds a method to Julia's method table. Long runs accumulate thousands of methods. TreeGenome avoids this via DynamicExpressions' compiled evaluation.
 - **AntGenome not thread-safe**: Uses a module-level `Ref` for simulator state. Runtime error if `parallel=true`. Bin packing and sorting examples demonstrate the thread-local state workaround.
-- **TreeGenome serialize/deserialize format mismatch**: `serialize` outputs infix (`x1 + 1.0`), `deserialize` parses prefix (`+(x1, 1.0)`). Unary ops round-trip; binary ops do not.
 - **GraphGenome.deserialize not implemented**: Returns `nothing` with a warning. LLM mutation of GraphGenome is non-functional.
 - **Distributed NEAT innovation collisions**: Separate workers assign conflicting node IDs. Must be addressed before enabling GraphGenome with `distributed=true`.
 - **ExprGenome serialize round-trip is partial**: `repr()` produces `Float32(literal)` forms that fail type-checking (~80% round-trip success rate).

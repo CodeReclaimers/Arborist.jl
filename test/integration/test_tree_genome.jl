@@ -98,10 +98,12 @@ using DynamicExpressions
     @testset "TreeGenome serialize/deserialize round-trip" begin
         ops = OperatorEnum(; binary_operators=[+, -, *, /], unary_operators=[sin, cos])
 
-        # serialize produces DynamicExpressions' infix format (e.g. "x1 + 1.0").
-        # deserialize parses prefix format (e.g. "+(x1, 1.0)").
-        # So serialize -> deserialize is not a lossless round-trip for binary ops.
-        # Test that deserialize works with prefix format strings.
+        # `deserialize` accepts both the infix form emitted by `serialize` /
+        # DynamicExpressions' `string_tree` (e.g. "x1 + 1.0") and the
+        # prefix s-expression form used by older callers (e.g. "+(x1, 1.0)").
+        # `Meta.parse` normalizes both to the same `Expr(:call, ...)` shape,
+        # so the parser handles them with one walker. The prefix tests below
+        # remain as the regression guard for the old form.
 
         # Prefix format: binary
         g1 = deserialize(TreeGenome{Float32}, "+(x1, 1.0)", ops, 2)
@@ -132,6 +134,67 @@ using DynamicExpressions
         # Invalid input returns nothing.
         @test deserialize(TreeGenome{Float32}, "not a tree", ops, 2) === nothing
         @test deserialize(TreeGenome{Float32}, "", ops, 2) === nothing
+
+        # ---- Semantic round-trip via string_tree (the previously broken path) ----
+        # `serialize` emits DynamicExpressions' infix; `deserialize` must
+        # reconstruct a tree whose predictions are bit-identical to the source.
+        rt_ops = OperatorEnum(; binary_operators=[+, -, *, /],
+                                unary_operators=[sin, cos, abs])
+        rt_X = reshape(Float32.(range(-2, 2, length=25)), 1, :)
+
+        # `isequal` rather than `==`: random trees can hit `1/x1` at x1==0
+        # and produce `NaN`, which compares unequal to itself under `==`.
+        # `isequal` treats matching `NaN`s as equal, which is what we want
+        # for a bit-level round-trip check.
+        function round_trip_eq(g::TreeGenome{Float32})
+            s = serialize(g)
+            g2 = deserialize(TreeGenome{Float32}, s, g.operators, g.n_features)
+            g2 === nothing && return false
+            p1 = g.tree(rt_X, g.operators)
+            p2 = g2.tree(rt_X, g2.operators)
+            return isequal(p1, p2)
+        end
+
+        # Single terminal (feature and constant)
+        @test round_trip_eq(TreeGenome{Float32}(Node{Float32}(; feature=1), rt_ops, 1))
+        @test round_trip_eq(TreeGenome{Float32}(Node{Float32}(; val=2.5f0), rt_ops, 1))
+
+        # The historical failure case: x1 + 1.0
+        let
+            t = Node{Float32}(; op=1, l=Node{Float32}(; feature=1),
+                                 r=Node{Float32}(; val=1.0f0))
+            @test round_trip_eq(TreeGenome{Float32}(t, rt_ops, 1))
+        end
+
+        # All four binary ops in isolation
+        for bi in 1:4
+            t = Node{Float32}(; op=UInt8(bi),
+                                 l=Node{Float32}(; feature=1),
+                                 r=Node{Float32}(; val=2.0f0))
+            @test round_trip_eq(TreeGenome{Float32}(t, rt_ops, 1))
+        end
+
+        # All three unary ops in isolation
+        for ui in 1:3
+            t = Node{Float32}(; op=UInt8(ui), l=Node{Float32}(; feature=1))
+            @test round_trip_eq(TreeGenome{Float32}(t, rt_ops, 1))
+        end
+
+        # Nested: sin((x1 + 1) * x1)
+        let
+            inner = Node{Float32}(; op=1, l=Node{Float32}(; feature=1),
+                                     r=Node{Float32}(; val=1.0f0))
+            prod  = Node{Float32}(; op=3, l=inner, r=Node{Float32}(; feature=1))
+            top   = Node{Float32}(; op=1, l=prod)  # sin(...)
+            @test round_trip_eq(TreeGenome{Float32}(top, rt_ops, 1))
+        end
+
+        # Random trees from `_random_tree`
+        rt_rng = Random.MersenneTwister(42)
+        for _ in 1:10
+            tree = Arborist._random_tree(rt_rng, rt_ops, 1, Float32, 4, :grow)
+            @test round_trip_eq(TreeGenome{Float32}(tree, rt_ops, 1))
+        end
     end
 
     @testset "TreeGenome crossover preserves correct operators per parent" begin

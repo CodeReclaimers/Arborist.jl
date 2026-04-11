@@ -201,6 +201,7 @@ export
 
     # LLM mutation operator
     LLMMutationOperator,
+    LLMCallStats,
 
     # Prompt enrichment
     MutationContext,

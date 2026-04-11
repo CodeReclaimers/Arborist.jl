@@ -403,7 +403,7 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
         )
 
         clear_mock_responses!()
-        register_mock_response!("localhost", mock_openai_response("y = x * Float32(3.0)"))
+        register_mock_response!("localhost", mock_openai_response("y = x * x"))
         install_mock_http!()
 
         try
@@ -436,7 +436,7 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
         )
 
         clear_mock_responses!()
-        register_mock_response!("localhost", mock_openai_response("y = x * Float32(3.0)"))
+        register_mock_response!("localhost", mock_openai_response("y = x * x"))
         install_mock_http!()
 
         try
@@ -475,7 +475,7 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
         )
 
         clear_mock_responses!()
-        register_mock_response!("localhost", mock_openai_response("y = x * Float32(3.0)"))
+        register_mock_response!("localhost", mock_openai_response("y = x * x"))
         install_mock_http!()
 
         try
@@ -488,6 +488,143 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
             @test !occursin("elite_gamma", body)  # k=2, third excluded
 
             println("  ElitesSection(2): top 2 elites in body, 3rd excluded")
+        finally
+            restore_http!()
+        end
+    end
+
+    # =========================================================================
+    # Token extraction and LLMCallStats tests
+    # =========================================================================
+
+    @testset "_extract_usage Anthropic format" begin
+        resp = mock_anthropic_response("y = x"; input_tokens=150, output_tokens=42)
+        in_tok, out_tok = Arborist._extract_usage(resp, true)
+        @test in_tok == 150
+        @test out_tok == 42
+        println("  _extract_usage Anthropic: in=150, out=42")
+    end
+
+    @testset "_extract_usage OpenAI format" begin
+        resp = mock_openai_response("y = x"; prompt_tokens=200, completion_tokens=60)
+        in_tok, out_tok = Arborist._extract_usage(resp, false)
+        @test in_tok == 200
+        @test out_tok == 60
+        println("  _extract_usage OpenAI: in=200, out=60")
+    end
+
+    @testset "_extract_usage missing fields" begin
+        in_tok, out_tok = Arborist._extract_usage("{\"id\":\"test\"}", true)
+        @test in_tok == 0
+        @test out_tok == 0
+        println("  _extract_usage missing: in=0, out=0")
+    end
+
+    @testset "LLMCallStats accumulation on success" begin
+        genome, state, rng = make_llm_test_setup()
+
+        op = LLMMutationOperator(
+            endpoint="http://localhost:11434/v1/chat/completions",
+            model="test",
+            api_key_env="",
+        )
+
+        clear_mock_responses!()
+        register_mock_response!("localhost",
+            mock_openai_response("y = x * x";
+                                 prompt_tokens=120, completion_tokens=30))
+        install_mock_http!()
+
+        try
+            result = mutate(op, genome, rng)
+            s = op.stats
+            @test s.total_calls == 1
+            @test s.llm_successes == 1
+            @test s.llm_failures == 0
+            @test s.fallback_skips == 0
+            @test s.input_tokens == 120
+            @test s.output_tokens == 30
+            @test s.input_chars > 0
+            @test s.output_chars > 0
+            @test s.total_latency > 0.0
+            println("  Stats on success: calls=1, successes=1, in_tok=120, out_tok=30, " *
+                    "in_chars=$(s.input_chars), out_chars=$(s.output_chars)")
+        finally
+            restore_http!()
+        end
+    end
+
+    @testset "LLMCallStats accumulation on parse failure" begin
+        genome, state, rng = make_llm_test_setup()
+
+        op = LLMMutationOperator(
+            endpoint="http://localhost:11434/v1/chat/completions",
+            model="test",
+            api_key_env="",
+        )
+
+        clear_mock_responses!()
+        register_mock_response!("localhost",
+            mock_openai_response("this is not valid julia code at all!!!"))
+        install_mock_http!()
+
+        try
+            result = mutate(op, genome, rng)
+            s = op.stats
+            @test s.total_calls == 1
+            @test s.llm_successes == 0
+            @test s.llm_failures == 1
+            @test s.fallback_skips == 0
+            @test s.total_latency >= 0.0  # mock is instant; real calls take seconds
+            println("  Stats on parse failure: calls=1, failures=1")
+        finally
+            restore_http!()
+        end
+    end
+
+    @testset "LLMCallStats accumulation on API key skip" begin
+        genome, state, rng = make_llm_test_setup()
+
+        op = LLMMutationOperator(
+            endpoint="https://api.anthropic.com/v1/messages",
+            model="test",
+            api_key_env="GENPROG_TEST_NONEXISTENT_KEY_STATS",
+        )
+
+        result = mutate(op, genome, rng)
+        s = op.stats
+        @test s.total_calls == 1
+        @test s.llm_successes == 0
+        @test s.llm_failures == 0
+        @test s.fallback_skips == 1
+        println("  Stats on API key skip: calls=1, skips=1")
+    end
+
+    @testset "LLMCallStats accumulates across multiple calls" begin
+        genome, state, rng = make_llm_test_setup()
+
+        op = LLMMutationOperator(
+            endpoint="http://localhost:11434/v1/chat/completions",
+            model="test",
+            api_key_env="",
+        )
+
+        clear_mock_responses!()
+        register_mock_response!("localhost",
+            mock_openai_response("y = x * x";
+                                 prompt_tokens=100, completion_tokens=25))
+        install_mock_http!()
+
+        try
+            mutate(op, genome, rng)
+            mutate(op, genome, rng)
+            mutate(op, genome, rng)
+            s = op.stats
+            @test s.total_calls == 3
+            @test s.llm_successes == 3
+            @test s.input_tokens == 300   # 3 × 100
+            @test s.output_tokens == 75   # 3 × 25
+            println("  Stats accumulate: 3 calls, in_tok=300, out_tok=75")
         finally
             restore_http!()
         end

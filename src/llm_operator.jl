@@ -68,6 +68,38 @@ Respond with only the modified function body and nothing else.
 
 
 # =============================================================================
+# LLM call statistics
+# =============================================================================
+
+"""
+    LLMCallStats
+
+Mutable accumulator for LLM mutation call outcomes and token usage.
+Updated internally by `mutate(::LLMMutationOperator, ...)` — no
+external instrumentation needed.
+
+Token fields (`input_tokens`, `output_tokens`) are extracted from the
+API response `usage` object when available (Anthropic and OpenAI both
+provide this). Character-count fields (`input_chars`, `output_chars`)
+are always populated and can be used as a ~4 chars/token estimate when
+the API doesn't return exact counts (e.g. some Ollama versions).
+"""
+mutable struct LLMCallStats
+    total_calls::Int        # mutate() invocations that reached LLM dispatch
+    llm_successes::Int      # LLM output survived deserialize + sanitize
+    llm_failures::Int       # LLM called but output rejected (parse/sanitize)
+    fallback_skips::Int     # skipped LLM entirely (no API key, etc.)
+    input_tokens::Int       # cumulative, from API response usage field
+    output_tokens::Int      # cumulative, from API response usage field
+    input_chars::Int        # cumulative char count of user message sent
+    output_chars::Int       # cumulative char count of LLM response text
+    total_latency::Float64  # cumulative wall-time of HTTP calls (seconds)
+end
+
+LLMCallStats() = LLMCallStats(0, 0, 0, 0, 0, 0, 0, 0, 0.0)
+
+
+# =============================================================================
 # LLMMutationOperator struct
 # =============================================================================
 
@@ -97,6 +129,7 @@ loop is never interrupted by LLM failures.
   (default: empty — no enrichment, identical to pre-enrichment behavior)
 - `context::Union{MutationContext, Nothing}`: populated by the solve loop
   each generation; `nothing` until the first generation runs
+- `stats::LLMCallStats`: accumulated call outcomes and token usage
 """
 mutable struct LLMMutationOperator <: AbstractMutationOperator
     endpoint::String
@@ -109,6 +142,7 @@ mutable struct LLMMutationOperator <: AbstractMutationOperator
     fallback_op::AbstractMutationOperator
     sections::Vector{AbstractPromptSection}
     context::Union{MutationContext, Nothing}
+    stats::LLMCallStats
 end
 
 """
@@ -133,7 +167,7 @@ function LLMMutationOperator(;
     LLMMutationOperator(endpoint, model, api_key_env, system_prompt,
                         temperature, max_tokens, timeout_seconds, fallback_op,
                         convert(Vector{AbstractPromptSection}, sections),
-                        nothing)
+                        nothing, LLMCallStats())
 end
 
 
@@ -152,6 +186,8 @@ rethrows. The evolutionary loop is robust to 100% LLM failure rate.
 """
 function mutate(op::LLMMutationOperator, g::ExprGenome,
                 rng::AbstractRNG)::ExprGenome
+    stats = op.stats
+
     # 1. Serialize genome to source string.
     source = serialize(g)
 
@@ -162,6 +198,8 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
             api_key = ENV[op.api_key_env]
         else
             @warn "LLMMutationOperator: API key env var '$(op.api_key_env)' not set, falling back"
+            stats.total_calls += 1
+            stats.fallback_skips += 1
             return mutate(op.fallback_op, g, rng)
         end
     end
@@ -177,25 +215,42 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
         push!(headers, "Authorization" => "Bearer $api_key")
     end
 
-    body = _build_request_body(op, source, is_anthropic)
+    body, user_content_len = _build_request_body(op, source, is_anthropic)
 
     # 4. Make the HTTP call via the replaceable hook.
+    t0 = time()
     response_text = try
         _http_post[](op.endpoint, headers, body, op.timeout_seconds)
     catch e
+        dt = time() - t0
         @warn "LLMMutationOperator: HTTP request failed" exception=e
+        stats.total_calls += 1
+        stats.llm_failures += 1
+        stats.total_latency += dt
+        stats.input_chars += user_content_len
         return mutate(op.fallback_op, g, rng)
     end
+    dt = time() - t0
+    stats.total_latency += dt
+    stats.input_chars += user_content_len
 
-    # 5. Extract text from response.
+    # 5. Extract token usage from response (before discarding the JSON).
+    in_tok, out_tok = _extract_usage(response_text, is_anthropic)
+    stats.input_tokens += in_tok
+    stats.output_tokens += out_tok
+
+    # 6. Extract text from response.
     text = _extract_response_text(response_text, is_anthropic)
 
     if text === nothing
         @warn "LLMMutationOperator: failed to extract text from response"
+        stats.total_calls += 1
+        stats.llm_failures += 1
         return mutate(op.fallback_op, g, rng)
     end
+    stats.output_chars += length(text)
 
-    # 6. Deserialize and sanitize — wrapped in try/catch so that any
+    # 7. Deserialize and sanitize — wrapped in try/catch so that any
     #    unexpected exception (e.g. StackOverflowError from deeply nested
     #    LLM output) falls back gracefully rather than crashing the loop.
     result = try
@@ -215,10 +270,13 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
         nothing
     end
 
+    stats.total_calls += 1
     if result === nothing
+        stats.llm_failures += 1
         return mutate(op.fallback_op, g, rng)
     end
 
+    stats.llm_successes += 1
     return result
 end
 
@@ -242,7 +300,12 @@ function _build_sanitizer(state::GenState)::ASTSanitizer
     return ASTSanitizer(allowed_calls=allowed)
 end
 
-"""Build JSON request body for the LLM API (no JSON library dependency)."""
+"""
+Build JSON request body for the LLM API (no JSON library dependency).
+Returns `(body::String, user_content_length::Int)` — the second element
+is the character count of the user message before JSON escaping, used
+for approximate token accounting.
+"""
 function _build_request_body(op::LLMMutationOperator, source::String, is_anthropic::Bool)
     # Build enrichment from prompt sections + context.
     enrichment = ""
@@ -260,11 +323,34 @@ function _build_request_body(op::LLMMutationOperator, source::String, is_anthrop
     escaped_system = _json_escape(op.system_prompt)
     escaped_user = _json_escape(user_content)
 
-    if is_anthropic
-        return """{"model":"$(op.model)","max_tokens":$(op.max_tokens),"temperature":$(op.temperature),"system":"$escaped_system","messages":[{"role":"user","content":"$escaped_user"}]}"""
+    body = if is_anthropic
+        """{"model":"$(op.model)","max_tokens":$(op.max_tokens),"temperature":$(op.temperature),"system":"$escaped_system","messages":[{"role":"user","content":"$escaped_user"}]}"""
     else
-        return """{"model":"$(op.model)","max_tokens":$(op.max_tokens),"temperature":$(op.temperature),"messages":[{"role":"system","content":"$escaped_system"},{"role":"user","content":"$escaped_user"}]}"""
+        """{"model":"$(op.model)","max_tokens":$(op.max_tokens),"temperature":$(op.temperature),"messages":[{"role":"system","content":"$escaped_system"},{"role":"user","content":"$escaped_user"}]}"""
     end
+
+    return (body, length(user_content))
+end
+
+"""
+    _extract_usage(response_text, is_anthropic) -> (input_tokens::Int, output_tokens::Int)
+
+Extract token usage from the API response JSON. Returns `(0, 0)` if
+the usage fields are not found (e.g. some Ollama versions omit them).
+
+Anthropic format: `"usage": {"input_tokens": N, "output_tokens": N}`
+OpenAI format: `"usage": {"prompt_tokens": N, "completion_tokens": N}`
+"""
+function _extract_usage(response_text::String, is_anthropic::Bool)
+    in_key = is_anthropic ? "input_tokens" : "prompt_tokens"
+    out_key = is_anthropic ? "output_tokens" : "completion_tokens"
+    in_tok = 0
+    out_tok = 0
+    m_in = match(Regex("\"$in_key\"\\s*:\\s*(\\d+)"), response_text)
+    m_out = match(Regex("\"$out_key\"\\s*:\\s*(\\d+)"), response_text)
+    m_in !== nothing && (in_tok = parse(Int, m_in.captures[1]))
+    m_out !== nothing && (out_tok = parse(Int, m_out.captures[1]))
+    return (in_tok, out_tok)
 end
 
 """Escape a string for embedding in a JSON string value (RFC 8259)."""

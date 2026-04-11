@@ -37,17 +37,17 @@ end
 # --- Canned response builders ---
 
 """Build a mock Anthropic API JSON response body containing the given text."""
-function mock_anthropic_response(text::String)
+function mock_anthropic_response(text::String; input_tokens::Int=100, output_tokens::Int=50)
     escaped = replace(text, "\\" => "\\\\")
     escaped = replace(escaped, "\"" => "\\\"")
     escaped = replace(escaped, "\n" => "\\n")
-    return """{"id":"msg_mock","type":"message","role":"assistant","content":[{"type":"text","text":"$escaped"}],"model":"mock","stop_reason":"end_turn"}"""
+    return """{"id":"msg_mock","type":"message","role":"assistant","content":[{"type":"text","text":"$escaped"}],"model":"mock","stop_reason":"end_turn","usage":{"input_tokens":$input_tokens,"output_tokens":$output_tokens}}"""
 end
 
 """Build a mock OpenAI-compatible API JSON response body containing the given text."""
-function mock_openai_response(text::String)
+function mock_openai_response(text::String; prompt_tokens::Int=100, completion_tokens::Int=50)
     escaped = replace(text, "\\" => "\\\\")
     escaped = replace(escaped, "\"" => "\\\"")
     escaped = replace(escaped, "\n" => "\\n")
-    return """{"id":"chatcmpl-mock","choices":[{"index":0,"message":{"role":"assistant","content":"$escaped"},"finish_reason":"stop"}]}"""
+    return """{"id":"chatcmpl-mock","choices":[{"index":0,"message":{"role":"assistant","content":"$escaped"},"finish_reason":"stop"}],"usage":{"prompt_tokens":$prompt_tokens,"completion_tokens":$completion_tokens,"total_tokens":$(prompt_tokens + completion_tokens)}}"""
 end

@@ -349,28 +349,27 @@ function behavioral_distance(a::BinPackingFingerprint, b::BinPackingFingerprint)
 end
 
 # =============================================================================
-# TrackedMutation — wrapper for tracking LLM operator call metrics
+# TrackedMutation — thin wrapper that delegates to inner operator.
+# All metrics are tracked by the framework's LLMCallStats on the inner
+# LLMMutationOperator. This wrapper exists only so that experiment code
+# can find the LLM operator in the mutation_ops vector via `isa`.
 # =============================================================================
 
-mutable struct TrackedMutation <: Arborist.AbstractMutationOperator
+struct TrackedMutation <: Arborist.AbstractMutationOperator
     inner::Any          # the wrapped operator (e.g., LLMMutationOperator)
-    n_calls::Int        # total mutate() calls
-    n_slow::Int         # calls > 0.5s (likely successful LLM inference)
-    total_latency::Float64
 end
 
-TrackedMutation(inner) = TrackedMutation(inner, 0, 0, 0.0)
-
 function Arborist.mutate(op::TrackedMutation, genome::Arborist.ExprGenome, rng::AbstractRNG)
-    t0 = time()
-    result = Arborist.mutate(op.inner, genome, rng)
-    dt = time() - t0
-    op.n_calls += 1
-    op.total_latency += dt
-    if dt > 0.5  # LLM inference takes seconds; SubtreeMutation takes microseconds
-        op.n_slow += 1
-    end
-    return result
+    return Arborist.mutate(op.inner, genome, rng)
+end
+
+"""Get LLMCallStats from a TrackedMutation's inner operator, or nothing."""
+function _get_llm_stats(op::TrackedMutation)
+    inner = op.inner
+    hasproperty(inner, :stats) ? inner.stats : nothing
+end
+function _get_llm_stats(::Any)
+    nothing
 end
 
 # =============================================================================
@@ -743,8 +742,9 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
             # LLM tracking stats
             llm_str = ""
             for op in algorithm.mutation_ops
-                if op isa TrackedMutation
-                    llm_str = " | llm_calls=$(op.n_calls) llm_ok=$(op.n_slow)"
+                s = _get_llm_stats(op)
+                if s !== nothing
+                    llm_str = " | llm_calls=$(s.total_calls) llm_ok=$(s.llm_successes)"
                     break
                 end
             end
@@ -1259,10 +1259,9 @@ function run_experiment_a(; generations::Int=100, pop_size::Int=200)
         if r_a2 !== nothing && tracked_llm !== nothing
             vs_ff_a2 = round((r_a2.ff_test - r_a2.evolved_test) / r_a2.ff_test * 100, digits=2)
             vs_bf_a2 = round((r_a2.bf_test - r_a2.evolved_test) / r_a2.bf_test * 100, digits=2)
-            fallback_rate = tracked_llm.n_calls > 0 ?
-                round((tracked_llm.n_calls - tracked_llm.n_slow) / tracked_llm.n_calls * 100, digits=1) : 0.0
-            mean_latency = tracked_llm.n_calls > 0 ?
-                round(tracked_llm.total_latency / tracked_llm.n_calls, digits=2) : 0.0
+            s_a2 = _get_llm_stats(tracked_llm)
+            fallback_rate = s_a2 !== nothing && s_a2.total_calls > 0 ?
+                round(s_a2.llm_failures / s_a2.total_calls * 100, digits=1) : 0.0
             println(io, "| Classical + Qwen3-Coder (A2) | $(round(r_a2.result.best_fitness, digits=4)) | " *
                     "$(round(r_a2.evolved_test, digits=4)) | $(vs_ff_a2)% | $(vs_bf_a2)% | " *
                     "$(fallback_rate)% | $(round(r_a2.wall_time, digits=1))s |")
@@ -1274,18 +1273,23 @@ function run_experiment_a(; generations::Int=100, pop_size::Int=200)
         println(io, "- First Fit: $(round(r_a1.ff_test, digits=4))")
         println(io, "- Best Fit: $(round(r_a1.bf_test, digits=4))")
 
-        if tracked_llm !== nothing
+        s_llm = tracked_llm !== nothing ? _get_llm_stats(tracked_llm) : nothing
+        if s_llm !== nothing
             println(io, "\n## LLM Operator Metrics")
-            println(io, "- Total LLM calls: $(tracked_llm.n_calls)")
-            println(io, "- Successful parses (>0.5s): $(tracked_llm.n_slow)")
-            fallback_n = tracked_llm.n_calls - tracked_llm.n_slow
-            fallback_pct = tracked_llm.n_calls > 0 ?
-                round(fallback_n / tracked_llm.n_calls * 100, digits=1) : 0.0
-            println(io, "- Fallback count: $fallback_n ($fallback_pct%)")
-            mean_lat = tracked_llm.n_calls > 0 ?
-                round(tracked_llm.total_latency / tracked_llm.n_calls, digits=2) : 0.0
+            println(io, "- Total calls: $(s_llm.total_calls)")
+            println(io, "- Successful mutations: $(s_llm.llm_successes)")
+            println(io, "- Parse/sanitize failures: $(s_llm.llm_failures)")
+            fallback_pct = s_llm.total_calls > 0 ?
+                round(s_llm.llm_failures / s_llm.total_calls * 100, digits=1) : 0.0
+            println(io, "- Failure rate: $fallback_pct%")
+            mean_lat = s_llm.total_calls > 0 ?
+                round(s_llm.total_latency / s_llm.total_calls, digits=2) : 0.0
             println(io, "- Mean call latency: $(mean_lat)s")
-            println(io, "- Total LLM time: $(round(tracked_llm.total_latency, digits=1))s")
+            println(io, "- Total LLM time: $(round(s_llm.total_latency, digits=1))s")
+            if s_llm.input_tokens > 0
+                println(io, "- Input tokens: $(s_llm.input_tokens)")
+                println(io, "- Output tokens: $(s_llm.output_tokens)")
+            end
         end
 
         println(io, "\n## Best Evolved Programs")
@@ -1480,10 +1484,11 @@ function run_extended_llm(; generations::Int=300, pop_size::Int=200)
         end
     end
 
-    fallback_rate = tracked.n_calls > 0 ?
-        round((tracked.n_calls - tracked.n_slow) / tracked.n_calls * 100, digits=1) : 0.0
-    mean_lat = tracked.n_calls > 0 ?
-        round(tracked.total_latency / tracked.n_calls, digits=2) : 0.0
+    s = _get_llm_stats(tracked)
+    fallback_rate = s !== nothing && s.total_calls > 0 ?
+        round(s.llm_failures / s.total_calls * 100, digits=1) : 0.0
+    mean_lat = s !== nothing && s.total_calls > 0 ?
+        round(s.total_latency / s.total_calls, digits=2) : 0.0
 
     results_path = joinpath(@__DIR__, "bin_packing_results_extended_llm.md")
     open(results_path, "w") do io
@@ -1496,11 +1501,20 @@ function run_extended_llm(; generations::Int=300, pop_size::Int=200)
         println(io, "- vs Best Fit (test): $(vs_bf)%")
         println(io, "- Wall time: $(round(r.wall_time, digits=1))s\n")
         println(io, "## LLM Metrics")
-        println(io, "- Total calls: $(tracked.n_calls)")
-        println(io, "- Successful: $(tracked.n_slow) ($(round(100.0 - fallback_rate, digits=1))%)")
-        println(io, "- Fallback rate: $(fallback_rate)%")
-        println(io, "- Mean latency: $(mean_lat)s")
-        println(io, "- Total LLM time: $(round(tracked.total_latency, digits=1))s\n")
+        if s !== nothing
+            println(io, "- Total calls: $(s.total_calls)")
+            println(io, "- Successful mutations: $(s.llm_successes) ($(round(100.0 - fallback_rate, digits=1))%)")
+            println(io, "- Parse/sanitize failures: $(s.llm_failures)")
+            println(io, "- Fallback skips: $(s.fallback_skips)")
+            println(io, "- Fallback rate: $(fallback_rate)%")
+            println(io, "- Mean latency: $(mean_lat)s")
+            println(io, "- Total LLM time: $(round(s.total_latency, digits=1))s")
+            if s.input_tokens > 0
+                println(io, "- Input tokens: $(s.input_tokens)")
+                println(io, "- Output tokens: $(s.output_tokens)")
+            end
+        end
+        println(io)
         println(io, "## Fitness History (every 10 gens)")
         println(io, "| Gen | Best |")
         println(io, "|-----|------|")
@@ -1548,6 +1562,7 @@ function _run_multiseed(label::String;
             output_file="bin_packing_results_$(label)_seed$(seed).md",
         )
 
+        s = tracked === nothing ? nothing : _get_llm_stats(tracked)
         push!(rows, (
             seed=seed,
             train=r.result.best_fitness,
@@ -1555,9 +1570,9 @@ function _run_multiseed(label::String;
             wall_time=r.wall_time,
             ff_test=r.ff_test,
             bf_test=r.bf_test,
-            llm_calls=tracked === nothing ? 0 : tracked.n_calls,
-            llm_ok=tracked === nothing ? 0 : tracked.n_slow,
-            llm_latency=tracked === nothing ? 0.0 : tracked.total_latency,
+            llm_calls=s === nothing ? 0 : s.total_calls,
+            llm_ok=s === nothing ? 0 : s.llm_successes,
+            llm_latency=s === nothing ? 0.0 : s.total_latency,
             program=r.program_text,
         ))
     end
@@ -1959,9 +1974,9 @@ function run_ablation_enrichment(; variant::Union{String,Nothing}=nothing)
                 wall_time=r.wall_time,
                 ff_test=r.ff_test,
                 bf_test=r.bf_test,
-                llm_calls=tracked.n_calls,
-                llm_ok=tracked.n_slow,
-                llm_latency=tracked.total_latency,
+                llm_calls=tracked.inner.stats.total_calls,
+                llm_ok=tracked.inner.stats.llm_successes,
+                llm_latency=tracked.inner.stats.total_latency,
             ))
         end
     end
@@ -2107,9 +2122,9 @@ function run_model_scaling(; variant::Union{String,Nothing}=nothing)
                 wall_time=r.wall_time,
                 ff_test=r.ff_test,
                 bf_test=r.bf_test,
-                llm_calls=tracked.n_calls,
-                llm_ok=tracked.n_slow,
-                llm_latency=tracked.total_latency,
+                llm_calls=tracked.inner.stats.total_calls,
+                llm_ok=tracked.inner.stats.llm_successes,
+                llm_latency=tracked.inner.stats.total_latency,
             ))
         end
     end

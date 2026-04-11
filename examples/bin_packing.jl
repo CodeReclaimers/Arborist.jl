@@ -682,7 +682,8 @@ end
 function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
                         algorithm::Arborist.GeneticProgramming;
                         verbose::Bool = false,
-                        callback = nothing) where {E<:BinPackingEvaluator}
+                        callback = nothing,
+                        init_mode::Symbol = :seeded) where {E<:BinPackingEvaluator}
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
@@ -692,20 +693,32 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
     # Create custom GenState with explicit Int32/Float32 temps
     state = _bp_create_state(rng, problem.function_set)
 
-    # Initialize population: mix of seeded templates and random programs.
-    # Seeds provide useful starting points; random programs provide diversity.
-    genomes = Vector{Arborist.ExprGenome}(undef, pop_size)
-    n_seed_types = 4
-    seeds_per_type = max(1, pop_size ÷ 10)  # ~10% of population per seed type
-    n_seeded = min(seeds_per_type * n_seed_types, pop_size ÷ 2)
-    for i in 1:pop_size
-        if i <= n_seeded
-            seed_type = ((i - 1) % n_seed_types) + 1
-            body = _bp_seeded_body(state, seed_type)
-        else
-            body = _bp_random_initial_body(state)
+    # Initialize population based on init_mode.
+    if init_mode == :seeded
+        # Default: mix of seeded templates and random programs.
+        genomes = Vector{Arborist.ExprGenome}(undef, pop_size)
+        n_seed_types = 4
+        seeds_per_type = max(1, pop_size ÷ 10)
+        n_seeded = min(seeds_per_type * n_seed_types, pop_size ÷ 2)
+        for i in 1:pop_size
+            if i <= n_seeded
+                seed_type = ((i - 1) % n_seed_types) + 1
+                body = _bp_seeded_body(state, seed_type)
+            else
+                body = _bp_random_initial_body(state)
+            end
+            genomes[i] = Arborist.ExprGenome(body, state)
         end
-        genomes[i] = Arborist.ExprGenome(body, state)
+    elseif init_mode == :random
+        # Fully random: no seeded templates. Programs must discover
+        # control flow structure from scratch.
+        genomes = Vector{Arborist.ExprGenome}(undef, pop_size)
+        for i in 1:pop_size
+            body = _bp_random_initial_body(state)
+            genomes[i] = Arborist.ExprGenome(body, state)
+        end
+    else
+        error("Unknown init_mode: $init_mode. Use :seeded or :random.")
     end
     fitnesses = fill(Inf, pop_size)
 
@@ -978,6 +991,7 @@ function run_bin_packing(;
         rng_seed::Int = 42,
         num_temps::Int = 6,
         output_file::String = "bin_packing_results.md",
+        init_mode::Symbol = :seeded,
         verbose::Bool = true)
 
     _ensure_bp_states()
@@ -1035,7 +1049,7 @@ function run_bin_packing(;
     flush(stdout)
 
     t0 = time()
-    result = Arborist.solve(problem, algorithm; verbose=verbose)
+    result = Arborist.solve(problem, algorithm; verbose=verbose, init_mode=init_mode)
     wall_time = time() - t0
 
     println("-" ^ 70)
@@ -2170,6 +2184,137 @@ end
 
 
 # =============================================================================
+# Model scaling without Best Fit template seeding
+# =============================================================================
+
+# Subset of models for the unseeded experiment: local only, drop 31b (identical
+# to e2b on the seeded benchmark due to shared 50% fallback trajectory).
+const UNSEEDED_SCALING_CONFIGS = [
+    ("gemma4_e2b",   "http://localhost:11434/v1/chat/completions", "gemma4:e2b",      "",  1.0),
+    ("gemma4_e4b",   "http://localhost:11434/v1/chat/completions", "gemma4:e4b",      "",  1.0),
+    ("gemma4_26b",   "http://localhost:11434/v1/chat/completions", "gemma4:26b",      "",  1.0),
+    ("qwen3_30b",    "http://localhost:11434/v1/chat/completions", "qwen3-coder:30b", "",  0.7),
+]
+
+"""
+Run model scaling with fully random initialization (no Best Fit template seeding).
+200 generations to give programs time to discover control flow from scratch.
+Pass `--variant=<label>` to run a single model.
+"""
+function run_model_scaling_unseeded(; variant::Union{String,Nothing}=nothing,
+                                     generations::Int=200)
+    println("=" ^ 70)
+    println("Model Scaling — Unseeded (random init, $(generations) gen, elites_3)")
+    println("=" ^ 70)
+    flush(stdout)
+
+    configs = if variant !== nothing
+        matching = filter(c -> c[1] == variant, UNSEEDED_SCALING_CONFIGS)
+        isempty(matching) && error("Unknown variant: $variant. Available: $(join([c[1] for c in UNSEEDED_SCALING_CONFIGS], ", "))")
+        matching
+    else
+        UNSEEDED_SCALING_CONFIGS
+    end
+
+    all_rows = NamedTuple[]
+    data_dir = _ensure_data_dir()
+
+    for (label, endpoint, model, api_key_env, temperature) in configs
+        # Check connectivity.
+        println("\nChecking Ollama for $model...")
+        flush(stdout)
+        try
+            output = IOBuffer()
+            Downloads.request("http://localhost:11434/v1/chat/completions";
+                method="POST",
+                headers=["Content-Type" => "application/json"],
+                input=IOBuffer("""{"model":"$model","messages":[{"role":"user","content":"Reply OK"}],"max_tokens":5}"""),
+                output=output,
+                timeout=30)
+            println("  $model: OK")
+        catch e
+            println("  ERROR: $model not reachable: $e")
+            println("  Skipping $label.")
+            flush(stdout)
+            continue
+        end
+
+        println("\n" * "=" ^ 70)
+        println("Model: $label ($model, temp=$temperature, init=random)")
+        println("=" ^ 70)
+        flush(stdout)
+
+        for (i, seed) in enumerate(OVERNIGHT_SEEDS)
+            println("\n--- $label: Seed $seed ($i/$(length(OVERNIGHT_SEEDS))) ---")
+            flush(stdout)
+
+            tracked = _make_scaling_llm(endpoint, model, api_key_env, temperature)
+            ops = [tracked, Arborist.SubtreeMutation(), Arborist.PointMutation(),
+                   Arborist.HoistMutation(), Arborist.ExpansionMutation()]
+
+            r = run_bin_packing(; _common_kwargs(seed=seed, generations=generations, pop_size=200)...,
+                mutation_ops=ops,
+                init_mode=:random,
+                output_file="bin_packing_results_unseeded_$(label)_seed$(seed).md",
+            )
+
+            s = _get_llm_stats(tracked)
+            push!(all_rows, (
+                model=label,
+                seed=seed,
+                train=r.result.best_fitness,
+                test=r.evolved_test,
+                wall_time=r.wall_time,
+                ff_test=r.ff_test,
+                bf_test=r.bf_test,
+                llm_calls=s === nothing ? 0 : s.total_calls,
+                llm_ok=s === nothing ? 0 : s.llm_successes,
+                llm_latency=s === nothing ? 0.0 : s.total_latency,
+            ))
+        end
+    end
+
+    # Write combined TSV
+    tsv_path = joinpath(data_dir, "model_scaling_unseeded.tsv")
+    open(tsv_path, "a") do io
+        for r in all_rows
+            println(io, join([r.model, r.seed, round(r.train, digits=6),
+                              round(r.test, digits=6), round(r.wall_time, digits=1),
+                              round(r.ff_test, digits=6), round(r.bf_test, digits=6),
+                              r.llm_calls, r.llm_ok,
+                              round(r.llm_latency, digits=1)], "\t"))
+        end
+    end
+    println("\nData appended to: $tsv_path")
+
+    # Print summary table
+    println("\n" * "=" ^ 70)
+    println("Model Scaling (Unseeded) Results Summary")
+    println("=" ^ 70)
+    println("| Model | Mean test | Std | Min | Max | BF beat | Mean wall | LLM ok% |")
+    println("|-------|-----------|-----|-----|-----|---------|-----------|---------|")
+    for label in [c[1] for c in UNSEEDED_SCALING_CONFIGS]
+        vrows = filter(r -> r.model == label, all_rows)
+        isempty(vrows) && continue
+        tests = [r.test for r in vrows]
+        bfs = [r.bf_test for r in vrows]
+        n_beat = count(t < b for (t, b) in zip(tests, bfs))
+        mu = sum(tests) / length(tests)
+        sd = length(tests) > 1 ?
+            sqrt(sum((t - mu)^2 for t in tests) / (length(tests) - 1)) : 0.0
+        wall = sum(r.wall_time for r in vrows) / length(vrows)
+        total_calls = sum(r.llm_calls for r in vrows)
+        total_ok = sum(r.llm_ok for r in vrows)
+        ok_pct = total_calls > 0 ? round(100 * total_ok / total_calls, digits=1) : 0.0
+        println("| $label | $(round(mu, digits=4)) | $(round(sd, digits=4)) | " *
+                "$(round(minimum(tests), digits=4)) | $(round(maximum(tests), digits=4)) | " *
+                "$n_beat/$(length(tests)) | $(round(wall, digits=0))s | $(ok_pct)% |")
+    end
+    flush(stdout)
+end
+
+
+# =============================================================================
 # Main entry point
 # =============================================================================
 
@@ -2248,6 +2393,11 @@ function main()
             v = get(kwargs, :variant, nothing)
             run_model_scaling(;
                 variant=v === nothing ? nothing : String(v))
+        elseif experiment == "model_scaling_unseeded"
+            v = get(kwargs, :variant, nothing)
+            run_model_scaling_unseeded(;
+                variant=v === nothing ? nothing : String(v),
+                filter(p -> p.first == :generations, exp_kwargs)...)
         else
             error("Unknown experiment: $experiment")
         end

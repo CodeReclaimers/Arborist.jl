@@ -28,18 +28,24 @@ mutable struct BinPackingState
     capacity::Float32          # bin capacity (always 1.0f0)
     current_item::Float32      # size of the current item being placed
     placed::Bool               # whether current item was placed this step
-    failed_place_calls::Int    # bp_place_in_bin calls that returned false
+    # Auxiliary metrics for tournament tiebreaking
+    place_calls::Int           # total bp_place_in_bin invocations
+    place_successes::Int       # calls that resulted in s.placed = true
+    bins_queried::Int          # total bp_bin_remaining calls
+    unique_bins_queried::BitSet # distinct bin indices passed to bp_bin_remaining
 end
 
 # Thread-local state: one BinPackingState per thread for parallel evaluation.
 const _bp_states = BinPackingState[
-    BinPackingState(Float32[], Int32(0), Int32(0), 0.0f0, 1.0f0, 0.0f0, false, 0)
+    BinPackingState(Float32[], Int32(0), Int32(0), 0.0f0, 1.0f0, 0.0f0, false,
+                    0, 0, 0, BitSet())
 ]
 
 function _ensure_bp_states()
     n = Threads.nthreads()
     while length(_bp_states) < n
-        push!(_bp_states, BinPackingState(Float32[], Int32(0), Int32(0), 0.0f0, 1.0f0, 0.0f0, false, 0))
+        push!(_bp_states, BinPackingState(Float32[], Int32(0), Int32(0), 0.0f0, 1.0f0, 0.0f0, false,
+                                          0, 0, 0, BitSet()))
     end
 end
 
@@ -53,7 +59,10 @@ function reset_bp_state!(capacity::Float32=1.0f0)
     s.n_bins = Int32(0)
     s.items_placed = Int32(0)
     s.total_waste = 0.0f0
-    s.failed_place_calls = 0
+    s.place_calls = 0
+    s.place_successes = 0
+    s.bins_queried = 0
+    empty!(s.unique_bins_queried)
     s.capacity = capacity
     s.current_item = 0.0f0
     s.placed = false
@@ -73,6 +82,8 @@ end
 Returns 0.0f0 for invalid or out-of-range indices."""
 function bp_bin_remaining(i::Int32)::Float32
     s = _get_bp_state()
+    s.bins_queried += 1
+    push!(s.unique_bins_queried, Int(i))
     s.n_bins == Int32(0) && return 0.0f0
     idx = clamp(Int(i), 1, Int(s.n_bins))
     return s.bins[idx]
@@ -92,38 +103,27 @@ end
 If i > n_bins, opens new bins up to i. Returns false if item doesn't fit."""
 function bp_place_in_bin(i::Int32)::Bool
     s = _get_bp_state()
-    if s.placed
-        s.failed_place_calls += 1
-        return false  # already placed this step
-    end
+    s.place_calls += 1
+    s.placed && return false  # already placed this step
     idx = Int(i)
-    if idx < 1
-        s.failed_place_calls += 1
-        return false
-    end
+    idx < 1 && return false
 
-    # Allow placing in an existing bin (1..n_bins) or opening exactly one
-    # new bin (n_bins + 1). Indices > n_bins + 1 fail — this prevents
-    # programs from blindly spraying items across arbitrary bin indices.
-    if idx > Int(s.n_bins) + 1
-        s.failed_place_calls += 1
-        return false
-    end
-
-    # Open one new bin if placing at n_bins + 1
-    if idx == Int(s.n_bins) + 1
+    # Open new bins if needed (cap at n_bins + 1 to avoid runaway allocation)
+    target = min(idx, Int(s.n_bins) + 1)
+    while target > Int(s.n_bins)
         push!(s.bins, s.capacity)
         s.n_bins += Int32(1)
     end
+    idx = target
 
     # Check if item fits
     if s.bins[idx] >= s.current_item
         s.bins[idx] -= s.current_item
         s.items_placed += Int32(1)
         s.placed = true
+        s.place_successes += 1
         return true
     end
-    s.failed_place_calls += 1
     return false
 end
 
@@ -203,23 +203,103 @@ function Arborist.evaluate(e::BinPackingEvaluator, f::Function)
             end
         end
 
-        # Base score: ratio of bins used to lower bound (lower is better).
-        ratio = Float64(s.n_bins) / Float64(lb)
-        # Penalty for failed bp_place_in_bin calls: programs that attempt
-        # placement without checking capacity pay a cost per failure.
-        # This discourages flat "bp_place_in_bin(N)" strategies that
-        # succeed by accident and rewards programs that scan bins and
-        # verify capacity first. Analogous to Koza's ant trail penalty.
-        # 0.01 per failure: 199 failures (single blind guess) ≈ 2.0
-        # additional penalty, making blind placement score ~4.0 vs
-        # the ~2.0 fallback. Programs that check capacity first incur
-        # zero penalty.
-        ratio += 0.01 * s.failed_place_calls
-        total_ratio += ratio
+        total_ratio += Float64(s.n_bins) / Float64(lb)
     end
 
     return total_ratio / e.n_episodes  # mean ratio, lower is better
 end
+
+# =============================================================================
+# Auxiliary metrics for tournament tiebreaking
+# =============================================================================
+
+"""Auxiliary metrics derived from the evaluation trace."""
+struct BPAuxMetrics
+    fitness::Float64       # primary fitness (no penalty)
+    success_rate::Float64  # place_successes / max(1, place_calls)
+    coverage::Float64      # unique bins queried / max(1, n_bins)
+end
+
+const _EMPTY_AUX = BPAuxMetrics(Inf, 0.0, 0.0)
+
+"""Evaluate a compiled function and return (fitness, aux_metrics)."""
+function _bp_evaluate_with_aux(e::BinPackingEvaluator, f::Function)::Tuple{Float64, BPAuxMetrics}
+    total_ratio = 0.0
+    total_place_calls = 0
+    total_place_successes = 0
+    total_unique_bins = 0
+    total_n_bins = 0
+
+    for ep in 1:e.n_episodes
+        ep_rng = Random.MersenneTwister(e.rng_seed + ep)
+        items = generate_items(ep_rng, e.n_items, e.item_dist)
+        lb = lower_bound(items, e.capacity)
+        lb == 0 && continue
+
+        reset_bp_state!(e.capacity)
+        s = _get_bp_state()
+
+        for item in items
+            s.current_item = item
+            s.placed = false
+            try
+                Base.invokelatest(f)
+            catch
+            end
+            if !s.placed
+                push!(s.bins, s.capacity - item)
+                s.n_bins += Int32(1)
+                s.items_placed += Int32(1)
+            end
+        end
+
+        total_ratio += Float64(s.n_bins) / Float64(lb)
+        total_place_calls += s.place_calls
+        total_place_successes += s.place_successes
+        total_unique_bins += length(s.unique_bins_queried)
+        total_n_bins += Int(s.n_bins)
+    end
+
+    fitness = total_ratio / e.n_episodes
+    success_rate = Float64(total_place_successes) / max(1, total_place_calls)
+    coverage = Float64(total_unique_bins) / max(1, total_n_bins)
+    return (fitness, BPAuxMetrics(fitness, success_rate, coverage))
+end
+
+"""Lexicographic comparison: fitness > coverage > success_rate."""
+function _aux_better(fit, aux, a, b)
+    # Clear fitness winner (> 0.01 gap)
+    if fit[a] < fit[b] - 0.01
+        return true
+    elseif fit[b] < fit[a] - 0.01
+        return false
+    end
+    # Fitness tied: prefer higher coverage
+    if aux[a].coverage > aux[b].coverage + 0.01
+        return true
+    elseif aux[b].coverage > aux[a].coverage + 0.01
+        return false
+    end
+    # Coverage also tied: prefer higher success rate
+    return aux[a].success_rate > aux[b].success_rate
+end
+
+"""Tournament selection using primary fitness with auxiliary tiebreakers."""
+function _tournament_select_aux(fitnesses::Vector{Float64},
+                                 aux::Vector{BPAuxMetrics},
+                                 tournament_size::Int,
+                                 rng::AbstractRNG)
+    n = length(fitnesses)
+    best_idx = rand(rng, 1:n)
+    for _ in 2:tournament_size
+        idx = rand(rng, 1:n)
+        if _aux_better(fitnesses, aux, idx, best_idx)
+            best_idx = idx
+        end
+    end
+    return best_idx
+end
+
 
 # =============================================================================
 # ExprGenome integration: evaluate_genome override
@@ -255,7 +335,8 @@ function _bp_parallel_evaluate!(fitnesses::Vector{Float64},
                                 genomes::Vector{Arborist.ExprGenome},
                                 evaluator::BinPackingEvaluator,
                                 bp::Float64,
-                                indices)
+                                indices;
+                                aux::Union{Vector{BPAuxMetrics}, Nothing}=nothing)
     _ensure_bp_states()
 
     # Phase 1: compile sequentially (@eval is module-global)
@@ -269,15 +350,26 @@ function _bp_parallel_evaluate!(fitnesses::Vector{Float64},
         f = compiled[i]
         if f === nothing
             fitnesses[i] = Inf
+            aux !== nothing && (aux[i] = _EMPTY_AUX)
         else
             try
-                raw = Arborist.evaluate(evaluator, f)
-                if bp > 0.0 && isfinite(raw)
-                    raw += bp * Arborist.complexity(genomes[i])
+                if aux !== nothing
+                    raw, aux_result = _bp_evaluate_with_aux(evaluator, f)
+                    if bp > 0.0 && isfinite(raw)
+                        raw += bp * Arborist.complexity(genomes[i])
+                    end
+                    fitnesses[i] = raw
+                    aux[i] = aux_result
+                else
+                    raw = Arborist.evaluate(evaluator, f)
+                    if bp > 0.0 && isfinite(raw)
+                        raw += bp * Arborist.complexity(genomes[i])
+                    end
+                    fitnesses[i] = raw
                 end
-                fitnesses[i] = raw
             catch
                 fitnesses[i] = Inf
+                aux !== nothing && (aux[i] = _EMPTY_AUX)
             end
         end
     end
@@ -789,10 +881,11 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
         error("Unknown init_mode: $init_mode. Use :seeded, :random, or :behavioral.")
     end
     fitnesses = fill(Inf, pop_size)
+    aux = fill(_EMPTY_AUX, pop_size)
 
     bp = algorithm.bloat_penalty
 
-    _bp_parallel_evaluate!(fitnesses, genomes, evaluator, bp, 1:pop_size)
+    _bp_parallel_evaluate!(fitnesses, genomes, evaluator, bp, 1:pop_size; aux=aux)
 
     species_state = Arborist._init_species_state(algorithm.speciation)
     fitness_history = Float64[]
@@ -803,6 +896,7 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
         order = sortperm(fitnesses)
         genomes = genomes[order]
         fitnesses = fitnesses[order]
+        aux = aux[order]
 
         push!(fitness_history, fitnesses[1])
         finite_fits = filter(isfinite, fitnesses)
@@ -829,8 +923,11 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
                     break
                 end
             end
+            # Aux metrics for best individual
+            best_aux = aux[1]
+            aux_str = " | cov=$(round(best_aux.coverage, digits=3)) sr=$(round(best_aux.success_rate, digits=3))"
             println("Gen $gen/$(algorithm.generations) | best=$(round(fitnesses[1], digits=4)) | " *
-                    "mean=$(round(mean_fit, digits=4))$species_str$llm_str | elapsed=$(elapsed)s")
+                    "mean=$(round(mean_fit, digits=4))$species_str$llm_str$aux_str | elapsed=$(elapsed)s")
             flush(stdout)
         end
 
@@ -838,10 +935,12 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
 
         next_genomes = Vector{Arborist.ExprGenome}(undef, pop_size)
         next_fitnesses = fill(Inf, pop_size)
+        next_aux = fill(_EMPTY_AUX, pop_size)
 
         for i in 1:min(algorithm.elitism, pop_size)
             next_genomes[i] = deepcopy(genomes[i])
             next_fitnesses[i] = fitnesses[i]
+            next_aux[i] = aux[i]
         end
 
         t_size = algorithm.selection.tournament_size
@@ -850,32 +949,33 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
         while idx <= pop_size
             r = rand(rng)
             if r < algorithm.crossover_rate && idx + 1 <= pop_size
-                p1 = Arborist._tournament_select(selection_fitnesses, t_size, rng)
-                p2 = Arborist._tournament_select(selection_fitnesses, t_size, rng)
+                p1 = _tournament_select_aux(selection_fitnesses, aux, t_size, rng)
+                p2 = _tournament_select_aux(selection_fitnesses, aux, t_size, rng)
                 op = rand(rng, algorithm.crossover_ops)
                 (c1, c2) = Arborist.crossover(op, genomes[p1], genomes[p2], rng)
                 next_genomes[idx] = c1
                 next_genomes[idx + 1] = c2
                 idx += 2
             elseif r < algorithm.crossover_rate + algorithm.mutation_rate
-                p_idx = Arborist._tournament_select(selection_fitnesses, t_size, rng)
+                p_idx = _tournament_select_aux(selection_fitnesses, aux, t_size, rng)
                 op = rand(rng, algorithm.mutation_ops)
                 Arborist._set_parent_context!(algorithm.mutation_ops, p_idx, selection_fitnesses)
                 child = Arborist.mutate(op, genomes[p_idx], rng)
                 next_genomes[idx] = child
                 idx += 1
             else
-                p_idx = Arborist._tournament_select(selection_fitnesses, t_size, rng)
+                p_idx = _tournament_select_aux(selection_fitnesses, aux, t_size, rng)
                 next_genomes[idx] = deepcopy(genomes[p_idx])
                 idx += 1
             end
         end
 
         _bp_parallel_evaluate!(next_fitnesses, next_genomes, evaluator, bp,
-                               (algorithm.elitism + 1):pop_size)
+                               (algorithm.elitism + 1):pop_size; aux=next_aux)
 
         genomes = next_genomes
         fitnesses = next_fitnesses
+        aux = next_aux
     end
 
     order = sortperm(fitnesses)

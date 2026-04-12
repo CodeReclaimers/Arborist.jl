@@ -102,13 +102,19 @@ function bp_place_in_bin(i::Int32)::Bool
         return false
     end
 
-    # Open new bins if needed (cap at n_bins + 1 to avoid runaway allocation)
-    target = min(idx, Int(s.n_bins) + 1)
-    while target > Int(s.n_bins)
+    # Allow placing in an existing bin (1..n_bins) or opening exactly one
+    # new bin (n_bins + 1). Indices > n_bins + 1 fail — this prevents
+    # programs from blindly spraying items across arbitrary bin indices.
+    if idx > Int(s.n_bins) + 1
+        s.failed_place_calls += 1
+        return false
+    end
+
+    # Open one new bin if placing at n_bins + 1
+    if idx == Int(s.n_bins) + 1
         push!(s.bins, s.capacity)
         s.n_bins += Int32(1)
     end
-    idx = target
 
     # Check if item fits
     if s.bins[idx] >= s.current_item
@@ -200,12 +206,15 @@ function Arborist.evaluate(e::BinPackingEvaluator, f::Function)
         # Base score: ratio of bins used to lower bound (lower is better).
         ratio = Float64(s.n_bins) / Float64(lb)
         # Penalty for failed bp_place_in_bin calls: programs that attempt
-        # blind placement without checking capacity pay a cost per failure.
+        # placement without checking capacity pay a cost per failure.
         # This discourages flat "bp_place_in_bin(N)" strategies that
-        # succeed by accident (spraying items across hardcoded bin indices)
-        # and rewards programs that scan bins and verify capacity first.
-        # Analogous to Koza's ant trail penalty for moves that don't find food.
-        ratio += 0.001 * s.failed_place_calls
+        # succeed by accident and rewards programs that scan bins and
+        # verify capacity first. Analogous to Koza's ant trail penalty.
+        # 0.01 per failure: 199 failures (single blind guess) ≈ 2.0
+        # additional penalty, making blind placement score ~4.0 vs
+        # the ~2.0 fallback. Programs that check capacity first incur
+        # zero penalty.
+        ratio += 0.01 * s.failed_place_calls
         total_ratio += ratio
     end
 
@@ -424,9 +433,12 @@ wasted space).
 
   bp_place_in_bin(i::Int32)::Bool
     Places the current item in bin i. Returns true if successful
-    (item fits), false otherwise. If i > bp_n_bins(), a new bin is
-    opened. Each item can only be placed once; subsequent calls
-    after a successful placement return false.
+    (item fits), false otherwise. Only i in 1..bp_n_bins()+1 is
+    valid: existing bins 1..bp_n_bins(), or bp_n_bins()+1 to open
+    exactly one new bin. Indices outside this range return false.
+    Each item can only be placed once; subsequent calls after a
+    successful placement return false.
+    IMPORTANT: failed placement calls incur a fitness penalty.
 
 ## Variables
 All variables are pre-declared with fixed types. Use only these:

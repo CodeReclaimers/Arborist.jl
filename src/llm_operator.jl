@@ -431,5 +431,14 @@ function _find_last_json_string(json::String, key::String)
     raw = replace(raw, "\\\"" => "\"")
     raw = replace(raw, "\\/" => "/")
     raw = replace(raw, "\x00BACKSLASH\x00" => "\\")
+    # Unescape \uXXXX unicode escapes (RFC 8259 §7). Ollama commonly
+    # emits \u003c (<), \u003e (>), \u0026 (&) for HTML-sensitive chars.
+    # Without this, code containing <= or && is passed to Meta.parse as
+    # literal "\u003c=" which fails to parse, silently gutting while-loop
+    # conditions and boolean operators via partial recovery.
+    raw = replace(raw, r"\\u([0-9a-fA-F]{4})" => function(m)
+        hex = m[3:6]  # skip the \u prefix
+        String([Char(parse(UInt16, hex, base=16))])
+    end)
     return raw
 end

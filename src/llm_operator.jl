@@ -130,6 +130,9 @@ loop is never interrupted by LLM failures.
 - `context::Union{MutationContext, Nothing}`: populated by the solve loop
   each generation; `nothing` until the first generation runs
 - `stats::LLMCallStats`: accumulated call outcomes and token usage
+- `debug_log::Union{IO, Nothing}`: when set, writes the full user message,
+  raw LLM response, and outcome for each call. Set to `open("log.jsonl", "w")`
+  or `stdout` for debugging; `nothing` (default) disables logging.
 """
 mutable struct LLMMutationOperator <: AbstractMutationOperator
     endpoint::String
@@ -143,6 +146,7 @@ mutable struct LLMMutationOperator <: AbstractMutationOperator
     sections::Vector{AbstractPromptSection}
     context::Union{MutationContext, Nothing}
     stats::LLMCallStats
+    debug_log::Union{IO, Nothing}
 end
 
 """
@@ -167,7 +171,7 @@ function LLMMutationOperator(;
     LLMMutationOperator(endpoint, model, api_key_env, system_prompt,
                         temperature, max_tokens, timeout_seconds, fallback_op,
                         convert(Vector{AbstractPromptSection}, sections),
-                        nothing, LLMCallStats())
+                        nothing, LLMCallStats(), nothing)
 end
 
 
@@ -253,13 +257,16 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
     # 7. Deserialize and sanitize — wrapped in try/catch so that any
     #    unexpected exception (e.g. StackOverflowError from deeply nested
     #    LLM output) falls back gracefully rather than crashing the loop.
+    outcome = "success"
     result = try
         r = deserialize(ExprGenome, text, g.state)
         if r === nothing
             @warn "LLMMutationOperator: deserialize returned nothing, falling back"
+            outcome = "deserialize_nothing"
             nothing
         elseif !sanitize(_build_sanitizer(g.state), r.body)
             @warn "LLMMutationOperator: sanitizer rejected LLM output, falling back"
+            outcome = "sanitizer_rejected"
             nothing
         else
             r
@@ -267,16 +274,25 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
     catch e
         e isa InterruptException && rethrow()
         @warn "LLMMutationOperator: deserialize/sanitize threw, falling back" exception=e
+        outcome = "deserialize_threw"
         nothing
     end
 
     stats.total_calls += 1
     if result === nothing
         stats.llm_failures += 1
-        return mutate(op.fallback_op, g, rng)
+    else
+        stats.llm_successes += 1
     end
 
-    stats.llm_successes += 1
+    # Debug logging: write full context for each LLM call.
+    if op.debug_log !== nothing
+        _write_debug_entry(op.debug_log, source, text, outcome, stats.total_calls)
+    end
+
+    if result === nothing
+        return mutate(op.fallback_op, g, rng)
+    end
     return result
 end
 
@@ -351,6 +367,24 @@ function _extract_usage(response_text::String, is_anthropic::Bool)
     m_in !== nothing && (in_tok = parse(Int, m_in.captures[1]))
     m_out !== nothing && (out_tok = parse(Int, m_out.captures[1]))
     return (in_tok, out_tok)
+end
+
+"""
+Write a debug log entry for one LLM mutation call. Each entry is a
+self-contained block separated by a blank line, with the serialized
+parent genome (INPUT), the raw LLM response text (OUTPUT), and the
+pipeline outcome.
+"""
+function _write_debug_entry(io::IO, source::String, response::String,
+                            outcome::String, call_num::Int)
+    println(io, "===== CALL $call_num [$outcome] =====")
+    println(io, "--- INPUT (serialized parent) ---")
+    println(io, source)
+    println(io, "--- OUTPUT (raw LLM response) ---")
+    println(io, response)
+    println(io, "--- OUTCOME: $outcome ---")
+    println(io)
+    flush(io)
 end
 
 """Escape a string for embedding in a JSON string value (RFC 8259)."""

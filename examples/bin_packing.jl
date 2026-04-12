@@ -28,17 +28,18 @@ mutable struct BinPackingState
     capacity::Float32          # bin capacity (always 1.0f0)
     current_item::Float32      # size of the current item being placed
     placed::Bool               # whether current item was placed this step
+    failed_place_calls::Int    # bp_place_in_bin calls that returned false
 end
 
 # Thread-local state: one BinPackingState per thread for parallel evaluation.
 const _bp_states = BinPackingState[
-    BinPackingState(Float32[], Int32(0), Int32(0), 0.0f0, 1.0f0, 0.0f0, false)
+    BinPackingState(Float32[], Int32(0), Int32(0), 0.0f0, 1.0f0, 0.0f0, false, 0)
 ]
 
 function _ensure_bp_states()
     n = Threads.nthreads()
     while length(_bp_states) < n
-        push!(_bp_states, BinPackingState(Float32[], Int32(0), Int32(0), 0.0f0, 1.0f0, 0.0f0, false))
+        push!(_bp_states, BinPackingState(Float32[], Int32(0), Int32(0), 0.0f0, 1.0f0, 0.0f0, false, 0))
     end
 end
 
@@ -52,6 +53,7 @@ function reset_bp_state!(capacity::Float32=1.0f0)
     s.n_bins = Int32(0)
     s.items_placed = Int32(0)
     s.total_waste = 0.0f0
+    s.failed_place_calls = 0
     s.capacity = capacity
     s.current_item = 0.0f0
     s.placed = false
@@ -90,9 +92,15 @@ end
 If i > n_bins, opens new bins up to i. Returns false if item doesn't fit."""
 function bp_place_in_bin(i::Int32)::Bool
     s = _get_bp_state()
-    s.placed && return false  # already placed this step
+    if s.placed
+        s.failed_place_calls += 1
+        return false  # already placed this step
+    end
     idx = Int(i)
-    idx < 1 && return false
+    if idx < 1
+        s.failed_place_calls += 1
+        return false
+    end
 
     # Open new bins if needed (cap at n_bins + 1 to avoid runaway allocation)
     target = min(idx, Int(s.n_bins) + 1)
@@ -109,6 +117,7 @@ function bp_place_in_bin(i::Int32)::Bool
         s.placed = true
         return true
     end
+    s.failed_place_calls += 1
     return false
 end
 
@@ -188,7 +197,16 @@ function Arborist.evaluate(e::BinPackingEvaluator, f::Function)
             end
         end
 
-        total_ratio += Float64(s.n_bins) / Float64(lb)
+        # Base score: ratio of bins used to lower bound (lower is better).
+        ratio = Float64(s.n_bins) / Float64(lb)
+        # Penalty for failed bp_place_in_bin calls: programs that attempt
+        # blind placement without checking capacity pay a cost per failure.
+        # This discourages flat "bp_place_in_bin(N)" strategies that
+        # succeed by accident (spraying items across hardcoded bin indices)
+        # and rewards programs that scan bins and verify capacity first.
+        # Analogous to Koza's ant trail penalty for moves that don't find food.
+        ratio += 0.001 * s.failed_place_calls
+        total_ratio += ratio
     end
 
     return total_ratio / e.n_episodes  # mean ratio, lower is better
@@ -741,8 +759,22 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
             body = _bp_random_initial_body(state)
             genomes[i] = Arborist.ExprGenome(body, state)
         end
+    elseif init_mode == :behavioral
+        # MAP-Elites-style behavioral initialization. Generate a large
+        # pool, evaluate, fingerprint, bin by behavior, keep diverse subset.
+        _ensure_bp_states()
+        probe = BehavioralProbe(n_items=30, n_probe_bins=10)
+        fp_fn = g -> compute_bp_fingerprint(g, probe)
+        genomes = Arborist.behavioral_initialize(
+            state, evaluator, fp_fn, behavioral_distance, pop_size;
+            pool_size=10_000,
+            bin_threshold=0.15,
+            body_generator=s -> _bp_random_initial_body(s),
+            parallel=true,
+            verbose=verbose
+        )
     else
-        error("Unknown init_mode: $init_mode. Use :seeded or :random.")
+        error("Unknown init_mode: $init_mode. Use :seeded, :random, or :behavioral.")
     end
     fitnesses = fill(Inf, pop_size)
 

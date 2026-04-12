@@ -302,6 +302,68 @@ end
 
 
 # =============================================================================
+# Multi-objective evaluator for NSGA-II with auxiliary trace metrics
+# =============================================================================
+
+"""
+Wraps a BinPackingEvaluator to produce three objectives for NSGA-II:
+  1. Primary fitness (bin ratio, lower is better)
+  2. Negative coverage (lower is better, so -coverage — more coverage = better)
+  3. Negative success rate (lower is better, so -success_rate)
+
+NSGA-II minimizes all objectives, so we negate the "higher is better" metrics.
+The Pareto front naturally preserves programs that are good on *any* axis:
+a while-loop scanner with high coverage but poor fitness is non-dominated by
+a flat placer with low coverage but good fitness.
+"""
+struct BPMultiObjectiveEvaluator <: Arborist.AbstractMultiObjectiveEvaluator
+    inner::BinPackingEvaluator
+end
+
+function Arborist.evaluate_multi(e::BPMultiObjectiveEvaluator, genome::Arborist.ExprGenome)
+    f = _bp_compile(genome)
+    if f === nothing
+        return [Inf, 0.0, 0.0]  # worst fitness, no coverage, no success
+    end
+    try
+        _ensure_bp_states()
+        fitness, aux = _bp_evaluate_with_aux(e.inner, f)
+        return [fitness, -aux.coverage, -aux.success_rate]
+    catch
+        return [Inf, 0.0, 0.0]
+    end
+end
+
+Arborist.objective_names(::BPMultiObjectiveEvaluator) = ["fitness", "neg_coverage", "neg_success_rate"]
+Arborist.input_signature(e::BPMultiObjectiveEvaluator) = Arborist.input_signature(e.inner)
+Arborist.output_signature(e::BPMultiObjectiveEvaluator) = Arborist.output_signature(e.inner)
+
+"""Override NSGA-II population init: use behavioral_initialize for bin packing."""
+function Arborist._nsga2_init_population(
+    problem::Arborist.GPProblem{Arborist.ExprGenome, BPMultiObjectiveEvaluator},
+    algorithm::Arborist.NSGAII,
+    rng::AbstractRNG)
+
+    inner_eval = problem.evaluator.inner
+    fset = problem.function_set
+    state = _bp_create_state(rng, fset)
+
+    _ensure_bp_states()
+    probe = BehavioralProbe(n_items=30, n_probe_bins=10)
+    fp_fn = g -> compute_bp_fingerprint(g, probe)
+
+    return Arborist.behavioral_initialize(
+        state, inner_eval, fp_fn, behavioral_distance, algorithm.pop_size;
+        pool_size=10_000,
+        bin_threshold=0.15,
+        body_generator=s -> _bp_random_initial_body(s),
+        parallel=true,
+        verbose=true
+    )
+end
+
+
+# =============================================================================
 # ExprGenome integration: evaluate_genome override
 # =============================================================================
 

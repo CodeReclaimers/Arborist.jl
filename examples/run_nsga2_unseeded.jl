@@ -51,7 +51,7 @@ function main()
 
     println("=" ^ 70)
     println("NSGA-II Unseeded Bin Packing — 3 objectives + qwen3-coder")
-    println("  Objectives: fitness, coverage, success_rate")
+    println("  Objectives: fitness, success_rate")
     println("  Population: 200, Generations: 200")
     println("  Init: behavioral (10k pool)")
     println("  LLM: qwen3-coder:30b + ElitesSection(3)")
@@ -73,26 +73,26 @@ function main()
     # Show the Pareto front sorted by primary fitness
     sorted_idx = sortperm(result.pareto_fitnesses, by=f -> f[1])
     println("\nTop 10 by primary fitness:")
-    println("  # | fitness | coverage | success_rate | has_while | has_if")
-    println("  --|---------|----------|--------------|-----------|-------")
+    println("  # | fitness | success_rate | has_while | has_if")
+    println("  --|---------|--------------|-----------|-------")
     for (rank, i) in enumerate(sorted_idx[1:min(10, length(sorted_idx))])
         f = result.pareto_fitnesses[i]
         g = result.pareto_front[i]
         src = Arborist.serialize(g)
         hw = occursin("while", src) ? "yes" : "no"
         hi = occursin("if", src) ? "yes" : "no"
-        println("  $(rank) | $(round(f[1], digits=4)) | $(round(-f[2], digits=3)) | $(round(-f[3], digits=3)) | $hw | $hi")
+        println("  $(rank) | $(round(f[1], digits=4)) | $(round(-f[2], digits=3)) | $hw | $hi")
     end
 
-    # Show highest-coverage programs
-    cov_idx = sortperm(result.pareto_fitnesses, by=f -> f[2])  # most negative = highest coverage
-    println("\nTop 5 by coverage:")
-    for (rank, i) in enumerate(cov_idx[1:min(5, length(cov_idx))])
+    # Show highest-success-rate programs
+    sr_idx = sortperm(result.pareto_fitnesses, by=f -> f[2])  # most negative = highest success rate
+    println("\nTop 5 by success rate:")
+    for (rank, i) in enumerate(sr_idx[1:min(5, length(sr_idx))])
         f = result.pareto_fitnesses[i]
         g = result.pareto_front[i]
         src = Arborist.serialize(g)
         hw = occursin("while", src) ? "yes" : "no"
-        println("  $(rank) | fitness=$(round(f[1], digits=4)) cov=$(round(-f[2], digits=3)) sr=$(round(-f[3], digits=3)) | while=$hw")
+        println("  $(rank) | fitness=$(round(f[1], digits=4)) sr=$(round(-f[2], digits=3)) | while=$hw")
     end
 
     # Print best program by primary fitness
@@ -103,13 +103,13 @@ function main()
     harness = Arborist.create_harness(best.state, checked_body)
     println(harness)
 
-    # Print highest-coverage program
-    cov_best_i = cov_idx[1]
-    if cov_best_i != best_i
-        println("\nHighest-coverage program:")
-        cov_best = result.pareto_front[cov_best_i]
-        checked_body = Arborist.add_loop_checks(cov_best.body; limit=1000)
-        harness = Arborist.create_harness(cov_best.state, checked_body)
+    # Print highest-success-rate program
+    sr_best_i = sr_idx[1]
+    if sr_best_i != best_i
+        println("\nHighest-success-rate program:")
+        sr_best = result.pareto_front[sr_best_i]
+        checked_body = Arborist.add_loop_checks(sr_best.body; limit=1000)
+        harness = Arborist.create_harness(sr_best.state, checked_body)
         println(harness)
     end
 

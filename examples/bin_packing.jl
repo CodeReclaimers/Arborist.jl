@@ -306,15 +306,14 @@ end
 # =============================================================================
 
 """
-Wraps a BinPackingEvaluator to produce three objectives for NSGA-II:
+Wraps a BinPackingEvaluator to produce two objectives for NSGA-II:
   1. Primary fitness (bin ratio, lower is better)
-  2. Negative coverage (lower is better, so -coverage — more coverage = better)
-  3. Negative success rate (lower is better, so -success_rate)
+  2. Negative success rate (lower is better, so -success_rate)
 
-NSGA-II minimizes all objectives, so we negate the "higher is better" metrics.
-The Pareto front naturally preserves programs that are good on *any* axis:
-a while-loop scanner with high coverage but poor fitness is non-dominated by
-a flat placer with low coverage but good fitness.
+Success rate = place_successes / max(1, place_calls). A program that
+places more items via explicit bp_place_in_bin calls (rather than
+relying on the fallback) must be interacting with bin state correctly.
+This objective can't be gamed by calling irrelevant primitives.
 """
 struct BPMultiObjectiveEvaluator <: Arborist.AbstractMultiObjectiveEvaluator
     inner::BinPackingEvaluator
@@ -323,18 +322,18 @@ end
 function Arborist.evaluate_multi(e::BPMultiObjectiveEvaluator, genome::Arborist.ExprGenome)
     f = _bp_compile(genome)
     if f === nothing
-        return [Inf, 0.0, 0.0]  # worst fitness, no coverage, no success
+        return [Inf, 0.0]  # worst fitness, no successful placements
     end
     try
         _ensure_bp_states()
         fitness, aux = _bp_evaluate_with_aux(e.inner, f)
-        return [fitness, -aux.coverage, -aux.success_rate]
+        return [fitness, -aux.success_rate]
     catch
-        return [Inf, 0.0, 0.0]
+        return [Inf, 0.0]
     end
 end
 
-Arborist.objective_names(::BPMultiObjectiveEvaluator) = ["fitness", "neg_coverage", "neg_success_rate"]
+Arborist.objective_names(::BPMultiObjectiveEvaluator) = ["fitness", "neg_success_rate"]
 Arborist.input_signature(e::BPMultiObjectiveEvaluator) = Arborist.input_signature(e.inner)
 Arborist.output_signature(e::BPMultiObjectiveEvaluator) = Arborist.output_signature(e.inner)
 

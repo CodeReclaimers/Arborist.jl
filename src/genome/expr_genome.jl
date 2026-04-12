@@ -234,6 +234,26 @@ function _is_valid_assignment(expr::Expr, state::GenState)::Bool
         lhs = expr.args[1]
         rhs = expr.args[2]
         ltype = get_lvalue_type(state, lhs)
+
+        # If the rvalue is a bare numeric literal and the types don't match,
+        # try to coerce it to the lvalue's type. LLMs commonly produce `0`
+        # (Int64) instead of `Int32(0)`, or `0.0` (Float64) instead of
+        # `Float32(0.0)`. Coercion is safe for literals — no precision loss
+        # for small integers, and Float64→Float32 is an explicit narrowing
+        # the user would write anyway.
+        if rhs isa Number
+            rtype = typeof(rhs)
+            if ltype != rtype
+                coerced = try
+                    convert(ltype, rhs)
+                catch
+                    return false
+                end
+                expr.args[2] = coerced
+            end
+            return true
+        end
+
         rtype = get_rvalue_type(state, rhs)
         return ltype == rtype
     catch e

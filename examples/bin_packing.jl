@@ -215,12 +215,13 @@ end
 
 """Auxiliary metrics derived from the evaluation trace."""
 struct BPAuxMetrics
-    fitness::Float64       # primary fitness (no penalty)
-    success_rate::Float64  # place_successes / max(1, place_calls)
-    coverage::Float64      # unique bins queried / max(1, n_bins)
+    fitness::Float64           # primary fitness (no penalty)
+    success_rate::Float64      # place_successes / max(1, place_calls)
+    coverage::Float64          # unique bins queried / max(1, n_bins)
+    failed_placements::Int     # place_calls - place_successes (total across episodes)
 end
 
-const _EMPTY_AUX = BPAuxMetrics(Inf, 0.0, 0.0)
+const _EMPTY_AUX = BPAuxMetrics(Inf, 0.0, 0.0, 0)
 
 """Evaluate a compiled function and return (fitness, aux_metrics)."""
 function _bp_evaluate_with_aux(e::BinPackingEvaluator, f::Function)::Tuple{Float64, BPAuxMetrics}
@@ -263,7 +264,8 @@ function _bp_evaluate_with_aux(e::BinPackingEvaluator, f::Function)::Tuple{Float
     fitness = total_ratio / e.n_episodes
     success_rate = Float64(total_place_successes) / max(1, total_place_calls)
     coverage = Float64(total_unique_bins) / max(1, total_n_bins)
-    return (fitness, BPAuxMetrics(fitness, success_rate, coverage))
+    failed_placements = total_place_calls - total_place_successes
+    return (fitness, BPAuxMetrics(fitness, success_rate, coverage, failed_placements))
 end
 
 """Lexicographic comparison: fitness > coverage > success_rate."""
@@ -306,14 +308,19 @@ end
 # =============================================================================
 
 """
-Wraps a BinPackingEvaluator to produce two objectives for NSGA-II:
+Wraps a BinPackingEvaluator to produce three objectives for NSGA-II:
   1. Primary fitness (bin ratio, lower is better)
   2. Negative success rate (lower is better, so -success_rate)
+  3. Failed placement calls (lower is better)
 
-Success rate = place_successes / max(1, place_calls). A program that
-places more items via explicit bp_place_in_bin calls (rather than
-relying on the fallback) must be interacting with bin state correctly.
-This objective can't be gamed by calling irrelevant primitives.
+Objective 2: success_rate = place_successes / max(1, place_calls).
+Programs must interact correctly with bin state to increase it.
+
+Objective 3: total failed bp_place_in_bin calls across all episodes.
+Reducible in two ways: (a) always open new bins (worsens obj 1) or
+(b) check bin contents before placing (requires control flow). The
+Pareto front naturally selects for (b) since (a) is dominated on
+objective 1.
 """
 struct BPMultiObjectiveEvaluator <: Arborist.AbstractMultiObjectiveEvaluator
     inner::BinPackingEvaluator
@@ -322,18 +329,18 @@ end
 function Arborist.evaluate_multi(e::BPMultiObjectiveEvaluator, genome::Arborist.ExprGenome)
     f = _bp_compile(genome)
     if f === nothing
-        return [Inf, 0.0]  # worst fitness, no successful placements
+        return [Inf, 0.0, Inf]
     end
     try
         _ensure_bp_states()
         fitness, aux = _bp_evaluate_with_aux(e.inner, f)
-        return [fitness, -aux.success_rate]
+        return [fitness, -aux.success_rate, Float64(aux.failed_placements)]
     catch
-        return [Inf, 0.0]
+        return [Inf, 0.0, Inf]
     end
 end
 
-Arborist.objective_names(::BPMultiObjectiveEvaluator) = ["fitness", "neg_success_rate"]
+Arborist.objective_names(::BPMultiObjectiveEvaluator) = ["fitness", "neg_success_rate", "failed_placements"]
 Arborist.input_signature(e::BPMultiObjectiveEvaluator) = Arborist.input_signature(e.inner)
 Arborist.output_signature(e::BPMultiObjectiveEvaluator) = Arborist.output_signature(e.inner)
 

@@ -222,11 +222,12 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
     body, user_content_len = _build_request_body(op, source, is_anthropic)
 
     # 4. Make the HTTP call via the replaceable hook.
-    t0 = time()
+    # time_ns() is nanosecond-resolution on all platforms; time() is coarse on Windows.
+    t0 = time_ns()
     response_text = try
         _http_post[](op.endpoint, headers, body, op.timeout_seconds)
     catch e
-        dt = time() - t0
+        dt = (time_ns() - t0) / 1e9
         @warn "LLMMutationOperator: HTTP request failed" exception=e
         stats.total_calls += 1
         stats.llm_failures += 1
@@ -234,7 +235,7 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
         stats.input_chars += user_content_len
         return mutate(op.fallback_op, g, rng)
     end
-    dt = time() - t0
+    dt = (time_ns() - t0) / 1e9
     stats.total_latency += dt
     stats.input_chars += user_content_len
 

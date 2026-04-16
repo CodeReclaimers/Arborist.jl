@@ -222,6 +222,17 @@ The LLM tuned the threshold parameters toward a more selective
 strategy that avoids early-bin bias. This parameter tuning within
 a structural template is where LLMs excel.
 
+**Correction (2026-04-15).** The "independently discovered" framing
+in this section is misleading for two reasons: (a) the runs reported
+here use a seeded initial population that already contained Best-Fit
+skeletons, so evolution was *refining* a template rather than
+discovering it de novo; and (b) the LLM system prompt contained a
+natural-language description of Best Fit ("scans the open bins and
+picks the one whose remaining capacity best matches the item size"),
+so the LLM's contribution was retrieval from the prompt, not
+invention from problem structure. See §2.9 for the 2026-04-14/15
+ablation data that pins down these two effects quantitatively.
+
 ### 2.4 LLM operator findings
 
 **Important caveat**: All LLM bin packing data below was collected with
@@ -362,6 +373,123 @@ evolutionary loop as bespoke infrastructure around the LLM.
 Arborist.jl treats the LLM as one operator among many in a
 composable framework. The evolved programs are identical in
 representation; the infrastructure is reusable.
+
+### 2.9 Provenance of the Best Fit result: retrieval, not invention
+
+**Finding (2026-04-14 and 2026-04-15 ablations).** The LLM's
+contribution on the online 1D bin-packing benchmark is retrieval of
+the Best-Fit heuristic from the natural-language hint in the system
+prompt, not synthesis from the primitive set. Two independent
+ablations pin this down:
+
+*Hint ablation.* Replacing the Best-Fit-describing sentence in
+`BP_LLM_SYSTEM_PROMPT` with a neutral task description drops best
+fitness from 1.0687 (baseline) to 1.2313 — essentially the same
+ballpark as pure GP without any LLM (1.2489 at 200 gen; 1.321 at
+1000 gen, see below). The natural-language hint is worth ~0.16
+fitness points on its own.
+
+*Invention ablation (`llm_only_neutral`, 2026-04-15).* Giving the
+LLM full mutation control (no classical operators) combined with a
+stricter neutral prompt that removes scan-and-check scaffolding and
+renames the primitives from `bp_*_bin` to `bp_*_container`
+(disrupting training-corpus retrieval on the word "bin") yielded
+best fitness 1.3331 in 12,448 LLM calls (99.9% syntactic success)
+across 200 generations. The LLM's top program queries only
+`bp_n_containers()` (the most recently opened container) and
+chooses between placing there or opening a new one — first-fit on
+the last bin. The scan loop that would make this Best Fit (or even
+First Fit) is missing entirely. qwen3-coder:30b at temperature 0.7
+does not independently invent the scan-loop structure from the
+primitives.
+
+*Unlock vs accelerate (`no_llm_extended`, 2026-04-15).* Running
+pure classical GP for 1000 generations (5× the baseline budget)
+plateaued at 1.321 with hypervolume frozen for the final 8+
+generations. The top programs contain no control flow at all. This
+rules out the "LLM just accelerates what pure GP would eventually
+find" interpretation: pure GP under the 2-objective canonical does
+not reach Best-Fit territory at any budget we have tested. The LLM
+is unlocking a region of solution space that pure classical
+operators cannot reach — but the unlock comes *from the prompt
+hint*, not from the model's independent generative capacity.
+
+*Summary table* (NSGA-II, seed 42, behavioral initialization, 200
+items, 20 episodes; objective count per row). The four 3-obj rows
+were collected before the 2026-04-14 ablation that retired the
+redundant `success_rate` objective; they remain comparable to the
+2-obj rows because that ablation showed best-fitness agreement
+within 10⁻⁴ between the two formulations:
+
+| Configuration | Gen | Best fitness | Notes |
+|---|---|---|---|
+| Hint + LLM + classical (baseline, 3-obj) | 200 | **1.0687** | Matches Best Fit |
+| LLM-only with hint (`llm_only`, 3-obj) | 200 | 1.3261 | Classical operators carry the weight |
+| LLM + classical, neutral prompt (`neutral_prompt`, 3-obj) | 200 | 1.2313 | Hint is worth ~0.16 fitness |
+| Classical GP only, no LLM (`no_llm`, 3-obj) | 200 | 1.2489 | Similar to neutral prompt |
+| Classical GP only, extended (`no_llm_extended`, 2-obj) | 1000 | 1.321 | Hard plateau; no structural innovation |
+| LLM-only, stricter neutral prompt, renamed primitives (`llm_only_neutral`, 2-obj) | 200 | 1.3331 | First-fit-on-last-bin |
+
+**Implication for the paper's framing.** The headline result should
+not be "LLM discovered Best Fit from problem primitives." It should
+be "LLM-assisted GP matches hand-coded Best Fit (1.0687) while pure
+GP plateaus at 1.32 at any tested budget, *when the system prompt
+describes the target heuristic in natural language and the initial
+population seeds the skeleton template*." The honest version is less
+dramatic but more useful: the framework's value is its ability to
+compose prompt hints + seed templates + classical operators into a
+search that reaches human-expert performance faster than any
+component alone.
+
+### 2.10 The practical LLM-assisted GP regime: partial seeds + loose hints
+
+The ablation data carves out three regimes:
+
+1. **Nothing seeded, no hints, no LLM inventive capacity**
+   (`llm_only_neutral`, `no_llm_extended`): plateaus around 1.32.
+   The LLM cannot synthesize algorithm structure from primitives
+   alone, and classical GP cannot escape its local basin. This is
+   the de-novo-discovery regime, and current (April 2026) LLM-
+   assisted GP does not work here.
+
+2. **Fully seeded template, no evolution**: Best-Fit template
+   achieves 1.0713 with std=0.0047 across 5 seeds (§2.6). This is
+   essentially "paste a heuristic and call it done." No algorithm
+   discovery; only confirms the seed was good.
+
+3. **Partial seeds + loose hints + composed operators** (the
+   baseline, 1.0687 under the historical 3-objective evaluator;
+   the 2-objective canonical matches within 10⁻⁴ per the 2026-04-14
+   ablation): seed population contains Best-Fit skeletons,
+   system prompt describes the strategy in natural language, LLM
+   fine-tunes thresholds, classical crossover/subtree-mutation
+   recombines parameters. This is the regime where LLM-assisted GP
+   is genuinely useful, and it is the regime practitioners will
+   actually be in for real problems where "the known-best heuristic
+   exists but has unclear optimal parameters."
+
+The practical takeaway: for a real engineering problem, the right
+workflow is (a) encode the best known heuristic's *structure* as a
+seed template, (b) describe the strategy in prose to the LLM, then
+(c) let GP explore parameter choices and small structural variants
+around that template. The claimed ~3× sample-efficiency benefit of
+the LLM operator (from the 2026-04-09 multiseed runs) lives in this
+regime. It is not a claim about the LLM inventing algorithms; it is
+a claim about the LLM effectively composing partial knowledge with
+stochastic search.
+
+**Contrast with the "LLM invents algorithms" framing** popular in
+FunSearch-adjacent writing: that framing requires either (a)
+problems where the "known-best heuristic" is not in the training
+corpus (e.g., novel OR-Library instances, custom objective shapes
+where no published heuristic matches) or (b) evidence that the LLM
+is combining primitives in a way that goes beyond its training
+distribution. Our 2026-04-15 data supports neither claim for
+qwen3-coder:30b on online 1D bin packing — a problem with decades
+of published literature and exact-match retrieval available to the
+model. A fair "invents algorithms" test would require a problem
+where the primitive set and objective have no close analog in the
+training corpus.
 
 ---
 
@@ -510,6 +638,16 @@ priority function significantly improved results. An Arborist.jl
 system prompt that includes the Best Fit skeleton and asks the LLM
 to improve only the scoring condition would be a direct FunSearch
 analog.
+
+**Partial answer (2026-04-14/15, §2.9).** The question "does the
+system prompt's natural-language description of the target heuristic
+help?" was answered directly: yes, and it is load-bearing. Removing
+the Best-Fit-describing sentence (neutral prompt) drops best fitness
+from 1.0687 to 1.2313 with the same LLM and same seed. The
+FunSearch-style skeleton approach would go further — fixing the
+control-flow scaffold and asking the LLM to evolve only the scoring
+body — and is the natural next step given that today's data shows
+the LLM cannot *invent* the skeleton on its own.
 
 ### 5.5 3D bin packing via ContainerLoading.jl
 

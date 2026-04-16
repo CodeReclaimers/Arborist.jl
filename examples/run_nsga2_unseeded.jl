@@ -1,7 +1,10 @@
 #!/usr/bin/env julia
 # NSGA-II bin packing with auxiliary trace objectives + qwen3-coder.
 #
-# Three objectives: [primary_fitness, -coverage, -success_rate]
+# Two objectives: [primary_fitness, failed_placements]. The 2026-04-14
+# ablation study found that a third success_rate objective is redundant
+# given failed_placements; the historical 3-objective formulation is
+# reproducible via the `three_objective` ablation in run_nsga2_ablations.jl.
 # Behavioral initialization (10k pool).
 # LLM mutation with ElitesSection(3) enrichment + debug logging.
 #
@@ -50,8 +53,8 @@ function main()
     )
 
     println("=" ^ 70)
-    println("NSGA-II Unseeded Bin Packing — 3 objectives + qwen3-coder")
-    println("  Objectives: fitness, success_rate, failed_placements")
+    println("NSGA-II Unseeded Bin Packing — 2 objectives + qwen3-coder")
+    println("  Objectives: fitness, failed_placements")
     println("  Population: 200, Generations: 200")
     println("  Init: behavioral (10k pool)")
     println("  LLM: qwen3-coder:30b + ElitesSection(3)")
@@ -73,19 +76,19 @@ function main()
     # Show the Pareto front sorted by primary fitness
     sorted_idx = sortperm(result.pareto_fitnesses, by=f -> f[1])
     println("\nTop 10 by primary fitness:")
-    println("  # | fitness | success_rate | failed_place | has_while | has_if")
-    println("  --|---------|--------------|--------------|-----------|-------")
+    println("  # | fitness | failed_place | has_while | has_if")
+    println("  --|---------|--------------|-----------|-------")
     for (rank, i) in enumerate(sorted_idx[1:min(10, length(sorted_idx))])
         f = result.pareto_fitnesses[i]
         g = result.pareto_front[i]
         src = Arborist.serialize(g)
         hw = occursin("while", src) ? "yes" : "no"
         hi = occursin("if", src) ? "yes" : "no"
-        println("  $(rank) | $(round(f[1], digits=4)) | $(round(-f[2], digits=3)) | $(round(f[3], digits=0)) | $hw | $hi")
+        println("  $(rank) | $(round(f[1], digits=4)) | $(round(f[2], digits=0)) | $hw | $hi")
     end
 
     # Show lowest-failed-placement programs
-    fp_idx = sortperm(result.pareto_fitnesses, by=f -> f[3])  # lowest failed placements first
+    fp_idx = sortperm(result.pareto_fitnesses, by=f -> f[2])  # lowest failed placements first
     println("\nTop 5 by fewest failed placements:")
     for (rank, i) in enumerate(fp_idx[1:min(5, length(fp_idx))])
         f = result.pareto_fitnesses[i]
@@ -93,7 +96,7 @@ function main()
         src = Arborist.serialize(g)
         hw = occursin("while", src) ? "yes" : "no"
         hi = occursin("if", src) ? "yes" : "no"
-        println("  $(rank) | fitness=$(round(f[1], digits=4)) sr=$(round(-f[2], digits=3)) failed=$(round(f[3], digits=0)) | while=$hw if=$hi")
+        println("  $(rank) | fitness=$(round(f[1], digits=4)) failed=$(round(f[2], digits=0)) | while=$hw if=$hi")
     end
 
     # Print best program by primary fitness

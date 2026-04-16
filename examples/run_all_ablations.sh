@@ -1,14 +1,15 @@
 #!/bin/bash
-# Driver script that runs all 7 NSGA-II bin-packing ablations sequentially,
+# Driver script that runs all NSGA-II bin-packing ablations sequentially,
 # skipping any that fail and continuing with the rest. Each ablation's
-# stdout/stderr is captured in its own log file.
+# stdout/stderr is captured in its own log file. Keep this list in sync
+# with ABLATION_NAMES in examples/run_nsga2_ablations.jl.
 
 set -u  # catch unset vars, but do NOT set -e (we want to continue on failure)
 
 cd "$(dirname "$0")/.."  # project root
 mkdir -p examples/logs/ablation
 
-ABLATIONS=(no_llm no_behavioral two_objective pop100 pop50 llm_only neutral_prompt)
+ABLATIONS=(no_llm no_llm_extended no_behavioral three_objective pop100 pop50 llm_only llm_only_neutral neutral_prompt)
 
 DRIVER_LOG="examples/logs/ablation/driver.log"
 echo "=== Ablation driver started at $(date -Iseconds) ===" | tee -a "$DRIVER_LOG"

@@ -29,10 +29,10 @@ mutable struct BinPackingState
     current_item::Float32      # size of the current item being placed
     placed::Bool               # whether current item was placed this step
     # Auxiliary metrics for tournament tiebreaking
-    place_calls::Int           # total bp_place_in_bin invocations
+    place_calls::Int           # total bp_place_in_container invocations
     place_successes::Int       # calls that resulted in s.placed = true
-    bins_queried::Int          # total bp_bin_remaining calls
-    unique_bins_queried::BitSet # distinct bin indices passed to bp_bin_remaining
+    bins_queried::Int          # total bp_container_remaining calls
+    unique_bins_queried::BitSet # distinct bin indices passed to bp_container_remaining
 end
 
 # Thread-local state: one BinPackingState per thread for parallel evaluation.
@@ -74,13 +74,13 @@ end
 # =============================================================================
 
 """Number of currently open bins."""
-function bp_n_bins()::Int32
+function bp_n_containers()::Int32
     return _get_bp_state().n_bins
 end
 
 """Remaining capacity of bin i (1-indexed, clamped to valid range).
 Returns 0.0f0 for invalid or out-of-range indices."""
-function bp_bin_remaining(i::Int32)::Float32
+function bp_container_remaining(i::Int32)::Float32
     s = _get_bp_state()
     s.bins_queried += 1
     push!(s.unique_bins_queried, Int(i))
@@ -101,7 +101,7 @@ end
 
 """Place current item in bin i. Returns true if successful.
 If i > n_bins, opens new bins up to i. Returns false if item doesn't fit."""
-function bp_place_in_bin(i::Int32)::Bool
+function bp_place_in_container(i::Int32)::Bool
     s = _get_bp_state()
     s.place_calls += 1
     s.placed && return false  # already placed this step
@@ -308,19 +308,20 @@ end
 # =============================================================================
 
 """
-Wraps a BinPackingEvaluator to produce three objectives for NSGA-II:
+Wraps a BinPackingEvaluator to produce two objectives for NSGA-II:
   1. Primary fitness (bin ratio, lower is better)
-  2. Negative success rate (lower is better, so -success_rate)
-  3. Failed placement calls (lower is better)
+  2. Failed placement calls (lower is better)
 
-Objective 2: success_rate = place_successes / max(1, place_calls).
-Programs must interact correctly with bin state to increase it.
-
-Objective 3: total failed bp_place_in_bin calls across all episodes.
+Objective 2: total failed bp_place_in_container calls across all episodes.
 Reducible in two ways: (a) always open new bins (worsens obj 1) or
 (b) check bin contents before placing (requires control flow). The
 Pareto front naturally selects for (b) since (a) is dominated on
 objective 1.
+
+The 2026-04-14 ablation study confirmed that a third success_rate
+objective is redundant given failed_placements — matching best
+fitness within 10⁻⁴ while producing a noisier Pareto front and
+hypervolume stuck at 0.0. See progress-20260414.md.
 """
 struct BPMultiObjectiveEvaluator <: Arborist.AbstractMultiObjectiveEvaluator
     inner::BinPackingEvaluator
@@ -329,18 +330,18 @@ end
 function Arborist.evaluate_multi(e::BPMultiObjectiveEvaluator, genome::Arborist.ExprGenome)
     f = _bp_compile(genome)
     if f === nothing
-        return [Inf, 0.0, Inf]
+        return [Inf, Inf]
     end
     try
         _ensure_bp_states()
         fitness, aux = _bp_evaluate_with_aux(e.inner, f)
-        return [fitness, -aux.success_rate, Float64(aux.failed_placements)]
+        return [fitness, Float64(aux.failed_placements)]
     catch
-        return [Inf, 0.0, Inf]
+        return [Inf, Inf]
     end
 end
 
-Arborist.objective_names(::BPMultiObjectiveEvaluator) = ["fitness", "neg_success_rate", "failed_placements"]
+Arborist.objective_names(::BPMultiObjectiveEvaluator) = ["fitness", "failed_placements"]
 Arborist.input_signature(e::BPMultiObjectiveEvaluator) = Arborist.input_signature(e.inner)
 Arborist.output_signature(e::BPMultiObjectiveEvaluator) = Arborist.output_signature(e.inner)
 
@@ -564,50 +565,50 @@ end
 # =============================================================================
 
 const BP_LLM_SYSTEM_PROMPT = """
-You are a genetic programming mutation operator for an online bin
-packing heuristic written in Julia.
+You are a genetic programming mutation operator for an online
+container packing heuristic written in Julia.
 
 ## Problem
 Items arrive one at a time. Each item has a size between 0 and 1.
-Each bin has capacity 1.0. The program is called once per item and
-must place it in a bin. The goal is to minimize the total number of
-bins used. A good heuristic scans the open bins and picks the one
-whose remaining capacity best matches the item size (minimizing
-wasted space).
+Each container has capacity 1.0. The program is called once per item
+and must place it in a container. The goal is to minimize the total
+number of containers used. A good heuristic scans the open containers
+and picks the one whose remaining capacity best matches the item size
+(minimizing wasted space).
 
 ## API (primitives available to the program)
-  bp_n_bins()::Int32
-    Returns the number of currently open bins. Bins are 1-indexed:
-    valid bin indices are 1, 2, ..., bp_n_bins(). Placing an item
-    in an index > bp_n_bins() opens a new bin.
+  bp_n_containers()::Int32
+    Returns the number of currently open containers. Containers are
+    1-indexed: valid container indices are 1, 2, ..., bp_n_containers().
+    Placing an item in an index > bp_n_containers() opens a new container.
 
-  bp_bin_remaining(i::Int32)::Float32
-    Returns the remaining capacity of bin i (1-indexed). Calling
-    with i < 1 or i > bp_n_bins() returns 0.0.
+  bp_container_remaining(i::Int32)::Float32
+    Returns the remaining capacity of container i (1-indexed). Calling
+    with i < 1 or i > bp_n_containers() returns 0.0.
 
   bp_item_size()::Float32
     Returns the size of the current item (between 0.0 and 1.0).
 
   bp_capacity()::Float32
-    Returns the bin capacity (always 1.0).
+    Returns the container capacity (always 1.0).
 
-  bp_place_in_bin(i::Int32)::Bool
-    Places the current item in bin i. Returns true if successful
-    (item fits), false otherwise. Only i in 1..bp_n_bins()+1 is
-    valid: existing bins 1..bp_n_bins(), or bp_n_bins()+1 to open
-    exactly one new bin. Indices outside this range return false.
-    Each item can only be placed once; subsequent calls after a
-    successful placement return false.
+  bp_place_in_container(i::Int32)::Bool
+    Places the current item in container i. Returns true if successful
+    (item fits), false otherwise. Only i in 1..bp_n_containers()+1 is
+    valid: existing containers 1..bp_n_containers(), or
+    bp_n_containers()+1 to open exactly one new container. Indices
+    outside this range return false. Each item can only be placed once;
+    subsequent calls after a successful placement return false.
     IMPORTANT: failed placement calls incur a fitness penalty.
 
 ## Variables
 All variables are pre-declared with fixed types. Use only these:
-  __temp_1, __temp_2, __temp_3 :: Int32   (loop counters, bin indices)
+  __temp_1, __temp_2, __temp_3 :: Int32   (loop counters, container indices)
   __temp_4, __temp_5, __temp_6 :: Float32 (scores, remaining capacity)
-  result :: Bool                          (output, set by bp_place_in_bin)
+  result :: Bool                          (output, set by bp_place_in_container)
 
 All Int32 variables are initialized to 0. All Float32 variables are
-initialized to 0.0. Bin scanning should start at Int32(1), not 0.
+initialized to 0.0. Container scanning should start at Int32(1), not 0.
 
 ## Rules
 - Return ONLY valid Julia assignment statements and control flow.
@@ -735,7 +736,7 @@ end
 #
 # The standard create_random_rvalue only returns variables or literals, never
 # function calls. For bin packing, initial programs need function calls like
-# bp_n_bins(), bp_bin_remaining(i), bp_item_size() to have any chance of
+# bp_n_containers(), bp_container_remaining(i), bp_item_size() to have any chance of
 # evolving useful heuristics.
 # =============================================================================
 
@@ -764,8 +765,8 @@ end
 
 """Create a random rvalue of type T, sometimes using function calls.
 Unlike the standard create_random_rvalue which only returns variables/literals,
-this version can generate function call expressions like bp_n_bins() or
-bp_bin_remaining(__temp_1), which are essential building blocks for bin packing."""
+this version can generate function call expressions like bp_n_containers() or
+bp_container_remaining(__temp_1), which are essential building blocks for bin packing."""
 function _bp_random_rvalue(state::Arborist.GenState, T::DataType)
     r = rand(state.rng)
     if r < 0.4
@@ -809,7 +810,7 @@ function _bp_random_initial_body(state::Arborist.GenState)
             # If statement
             push!(stmts, Arborist.create_random_if_statement(state; depth=2))
         elseif r < 0.35
-            # Standalone function call (may trigger side effects like bp_place_in_bin)
+            # Standalone function call (may trigger side effects like bp_place_in_container)
             T = rand(state.rng, Arborist._sorted_types(state.used_types))
             push!(stmts, Arborist.create_random_function_call(state, T))
         else
@@ -831,32 +832,32 @@ function _bp_seeded_body(state::Arborist.GenState, seed_type::Int)
         # Always try bin 1 — items overflow to fallback (new bin)
         return Expr[
             :(__temp_1 = Int32(1)),
-            :(result = bp_place_in_bin(__temp_1)),
+            :(result = bp_place_in_container(__temp_1)),
         ]
     elseif seed_type == 2
         # Try the last open bin, fall back to new bin
         return Expr[
-            :(__temp_1 = bp_n_bins()),
+            :(__temp_1 = bp_n_containers()),
             :(if __temp_1 > Int32(0)
-                result = bp_place_in_bin(__temp_1)
+                result = bp_place_in_container(__temp_1)
             else
-                result = bp_place_in_bin(Int32(1))
+                result = bp_place_in_container(Int32(1))
             end),
         ]
     elseif seed_type == 3
         # Linear scan: iterate over bins, place in first that fits
         return Expr[
             :(__temp_1 = Int32(1)),
-            :(while __temp_1 <= bp_n_bins()
-                __temp_4 = bp_bin_remaining(__temp_1)
+            :(while __temp_1 <= bp_n_containers()
+                __temp_4 = bp_container_remaining(__temp_1)
                 if __temp_4 >= bp_item_size()
-                    result = bp_place_in_bin(__temp_1)
+                    result = bp_place_in_container(__temp_1)
                 end
                 __temp_1 = __temp_1 + Int32(1)
             end),
             :(if !result
-                __temp_2 = bp_n_bins() + Int32(1)
-                result = bp_place_in_bin(__temp_2)
+                __temp_2 = bp_n_containers() + Int32(1)
+                result = bp_place_in_container(__temp_2)
             end),
         ]
     elseif seed_type == 4
@@ -865,8 +866,8 @@ function _bp_seeded_body(state::Arborist.GenState, seed_type::Int)
             :(__temp_1 = Int32(1)),
             :(__temp_2 = Int32(0)),
             :(__temp_5 = Float32(2.0)),
-            :(while __temp_1 <= bp_n_bins()
-                __temp_4 = bp_bin_remaining(__temp_1)
+            :(while __temp_1 <= bp_n_containers()
+                __temp_4 = bp_container_remaining(__temp_1)
                 if __temp_4 >= bp_item_size()
                     __temp_6 = __temp_4 - bp_item_size()
                     if __temp_6 < __temp_5
@@ -877,10 +878,10 @@ function _bp_seeded_body(state::Arborist.GenState, seed_type::Int)
                 __temp_1 = __temp_1 + Int32(1)
             end),
             :(if __temp_2 > Int32(0)
-                result = bp_place_in_bin(__temp_2)
+                result = bp_place_in_container(__temp_2)
             else
-                __temp_3 = bp_n_bins() + Int32(1)
-                result = bp_place_in_bin(__temp_3)
+                __temp_3 = bp_n_containers() + Int32(1)
+                result = bp_place_in_container(__temp_3)
             end),
         ]
     else
@@ -1145,11 +1146,11 @@ function bin_packing_function_set()
     fset = Arborist.FunctionSet(Set{Arborist.FunctionDetails}())
 
     # Bin packing primitives
-    push!(fset.funcs, Arborist.FunctionDetails(:bp_n_bins, DataType[], Int32))
+    push!(fset.funcs, Arborist.FunctionDetails(:bp_n_containers, DataType[], Int32))
     push!(fset.funcs, Arborist.FunctionDetails(:bp_item_size, DataType[], Float32))
     push!(fset.funcs, Arborist.FunctionDetails(:bp_capacity, DataType[], Float32))
-    push!(fset.funcs, Arborist.FunctionDetails(:bp_bin_remaining, [Int32], Float32))
-    push!(fset.funcs, Arborist.FunctionDetails(:bp_place_in_bin, [Int32], Bool))
+    push!(fset.funcs, Arborist.FunctionDetails(:bp_container_remaining, [Int32], Float32))
+    push!(fset.funcs, Arborist.FunctionDetails(:bp_place_in_container, [Int32], Bool))
 
     # Arithmetic
     for T in [Float32, Int32]

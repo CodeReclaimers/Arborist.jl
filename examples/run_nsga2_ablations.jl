@@ -1,14 +1,17 @@
 #!/usr/bin/env julia
 # NSGA-II bin packing ablation experiments.
 #
-# Six ablations of the baseline 3-objective unseeded experiment (run_nsga2_unseeded.jl):
-#   1. no_llm         — Pure GP, no LLM mutation operator
-#   2. no_behavioral   — Random init instead of behavioral initialization (10k pool)
-#   3. two_objective   — fitness + failed_placements only (drop success_rate)
-#   4a. pop100         — Population 100 (half baseline)
-#   4b. pop50          — Population 50 (quarter baseline)
-#   5. llm_only        — LLM mutation only, no classical operators
-#   6. neutral_prompt  — LLM with neutral system prompt (no Best Fit hint)
+# Baseline: canonical 2-objective unseeded experiment (run_nsga2_unseeded.jl),
+# objectives = (fitness, failed_placements). Ablations below:
+#   1. no_llm             — Pure GP, no LLM mutation operator (200 gen)
+#   1b. no_llm_extended   — no_llm at 1000 gen (accelerate-vs-unlock test)
+#   2. no_behavioral      — Random init instead of behavioral initialization (10k pool)
+#   3. three_objective    — Add back success_rate as a third objective (historical)
+#   4a. pop100            — Population 100 (half baseline)
+#   4b. pop50             — Population 50 (quarter baseline)
+#   5. llm_only           — LLM mutation only, no classical operators
+#   5b. llm_only_neutral  — llm_only with neutral prompt (independent inventive capacity)
+#   6. neutral_prompt     — LLM with neutral system prompt (no Best Fit hint)
 #
 # All ablations use 200 generations, seed 42, same evaluation parameters.
 #
@@ -26,52 +29,39 @@ include(joinpath(@__DIR__, "bin_packing.jl"))
 # =============================================================================
 
 const BP_NEUTRAL_SYSTEM_PROMPT = """
-You are a genetic programming mutation operator for an online bin
-packing heuristic written in Julia.
+You are a genetic programming mutation operator for a Julia program
+that solves a packing task.
 
-## Problem
-Items arrive one at a time. Each item has a size between 0 and 1.
-Each bin has capacity 1.0. The program is called once per item and
-must place it in a bin. The goal is to pack the maximum number of
-objects in the minimum number of bins.
+## Task
+A sequence of items is presented one at a time, each with a
+nonnegative real-valued size. A collection of containers, each of
+uniform capacity, is available and may be extended on demand. The
+program runs once per item and must assign that item to a container.
+The assignment is judged by the total number of containers used
+across the full sequence, with fewer being better.
 
-## API (primitives available to the program)
-  bp_n_bins()::Int32
-    Returns the number of currently open bins. Bins are 1-indexed:
-    valid bin indices are 1, 2, ..., bp_n_bins(). Placing an item
-    in an index > bp_n_bins() opens a new bin.
-
-  bp_bin_remaining(i::Int32)::Float32
-    Returns the remaining capacity of bin i (1-indexed). Calling
-    with i < 1 or i > bp_n_bins() returns 0.0.
-
-  bp_item_size()::Float32
-    Returns the size of the current item (between 0.0 and 1.0).
+## Available calls
+The program body may reference the following and nothing else. All
+are documented by their signature; their semantics are for the
+program to discover through the objective.
 
   bp_capacity()::Float32
-    Returns the bin capacity (always 1.0).
-
-  bp_place_in_bin(i::Int32)::Bool
-    Places the current item in bin i. Returns true if successful
-    (item fits), false otherwise. Only i in 1..bp_n_bins()+1 is
-    valid: existing bins 1..bp_n_bins(), or bp_n_bins()+1 to open
-    exactly one new bin. Indices outside this range return false.
-    Each item can only be placed once; subsequent calls after a
-    successful placement return false.
-    IMPORTANT: failed placement calls incur a fitness penalty.
+  bp_container_remaining(i::Int32)::Float32
+  bp_item_size()::Float32
+  bp_n_containers()::Int32
+  bp_place_in_container(i::Int32)::Bool
 
 ## Variables
 All variables are pre-declared with fixed types. Use only these:
-  __temp_1, __temp_2, __temp_3 :: Int32   (loop counters, bin indices)
-  __temp_4, __temp_5, __temp_6 :: Float32 (scores, remaining capacity)
-  result :: Bool                          (output, set by bp_place_in_bin)
+  __temp_1, __temp_2, __temp_3 :: Int32
+  __temp_4, __temp_5, __temp_6 :: Float32
+  result :: Bool
 
-All Int32 variables are initialized to 0. All Float32 variables are
-initialized to 0.0. Bin scanning should start at Int32(1), not 0.
+Int32 variables are initialized to 0; Float32 variables to 0.0f0.
 
-## Rules
+## Output rules
 - Return ONLY valid Julia assignment statements and control flow.
-- Use only the variables and primitives listed above.
+- Use only the variables and calls listed above.
 - Do not import anything or define functions.
 - Use Int32 literals for integer values: Int32(1), Int32(0), etc.
 - Use Float32 literals for float values: 1.0f0, 0.0f0, etc.
@@ -80,34 +70,35 @@ Respond with only the Julia statements, nothing else.
 """
 
 # =============================================================================
-# Two-objective evaluator: fitness + failed_placements (no success_rate)
+# Three-objective evaluator: fitness + neg_success_rate + failed_placements
+# Used by the `three_objective` ablation to reproduce the historical baseline
+# (prior to the 2026-04-14 ablation study that showed success_rate redundant).
 # =============================================================================
 
-struct BPTwoObjectiveEvaluator <: Arborist.AbstractMultiObjectiveEvaluator
+struct BPThreeObjectiveEvaluator <: Arborist.AbstractMultiObjectiveEvaluator
     inner::BinPackingEvaluator
 end
 
-function Arborist.evaluate_multi(e::BPTwoObjectiveEvaluator, genome::Arborist.ExprGenome)
+function Arborist.evaluate_multi(e::BPThreeObjectiveEvaluator, genome::Arborist.ExprGenome)
     f = _bp_compile(genome)
     if f === nothing
-        return [Inf, Inf]
+        return [Inf, 0.0, Inf]
     end
     try
         _ensure_bp_states()
         fitness, aux = _bp_evaluate_with_aux(e.inner, f)
-        return [fitness, Float64(aux.failed_placements)]
+        return [fitness, -aux.success_rate, Float64(aux.failed_placements)]
     catch
-        return [Inf, Inf]
+        return [Inf, 0.0, Inf]
     end
 end
 
-Arborist.objective_names(::BPTwoObjectiveEvaluator) = ["fitness", "failed_placements"]
-Arborist.input_signature(e::BPTwoObjectiveEvaluator) = Arborist.input_signature(e.inner)
-Arborist.output_signature(e::BPTwoObjectiveEvaluator) = Arborist.output_signature(e.inner)
+Arborist.objective_names(::BPThreeObjectiveEvaluator) = ["fitness", "neg_success_rate", "failed_placements"]
+Arborist.input_signature(e::BPThreeObjectiveEvaluator) = Arborist.input_signature(e.inner)
+Arborist.output_signature(e::BPThreeObjectiveEvaluator) = Arborist.output_signature(e.inner)
 
-# Behavioral init override for the two-objective evaluator
 function Arborist._nsga2_init_population(
-    problem::Arborist.GPProblem{Arborist.ExprGenome, BPTwoObjectiveEvaluator},
+    problem::Arborist.GPProblem{Arborist.ExprGenome, BPThreeObjectiveEvaluator},
     algorithm::Arborist.NSGAII,
     rng::AbstractRNG)
 
@@ -130,7 +121,8 @@ function Arborist._nsga2_init_population(
 end
 
 # =============================================================================
-# Random-init evaluator wrapper (bypasses behavioral init override)
+# Random-init evaluator wrapper (bypasses behavioral init override).
+# Uses the canonical 2-objective formulation (fitness + failed_placements).
 # =============================================================================
 
 struct BPRandomInitEvaluator <: Arborist.AbstractMultiObjectiveEvaluator
@@ -140,18 +132,18 @@ end
 function Arborist.evaluate_multi(e::BPRandomInitEvaluator, genome::Arborist.ExprGenome)
     f = _bp_compile(genome)
     if f === nothing
-        return [Inf, 0.0, Inf]
+        return [Inf, Inf]
     end
     try
         _ensure_bp_states()
         fitness, aux = _bp_evaluate_with_aux(e.inner, f)
-        return [fitness, -aux.success_rate, Float64(aux.failed_placements)]
+        return [fitness, Float64(aux.failed_placements)]
     catch
-        return [Inf, 0.0, Inf]
+        return [Inf, Inf]
     end
 end
 
-Arborist.objective_names(::BPRandomInitEvaluator) = ["fitness", "neg_success_rate", "failed_placements"]
+Arborist.objective_names(::BPRandomInitEvaluator) = ["fitness", "failed_placements"]
 Arborist.input_signature(e::BPRandomInitEvaluator) = Arborist.input_signature(e.inner)
 Arborist.output_signature(e::BPRandomInitEvaluator) = Arborist.output_signature(e.inner)
 
@@ -162,8 +154,9 @@ Arborist.output_signature(e::BPRandomInitEvaluator) = Arborist.output_signature(
 # Shared helpers
 # =============================================================================
 
-const ABLATION_NAMES = ["no_llm", "no_behavioral", "two_objective",
-                        "pop100", "pop50", "llm_only", "neutral_prompt"]
+const ABLATION_NAMES = ["no_llm", "no_llm_extended", "no_behavioral",
+                        "three_objective", "pop100", "pop50",
+                        "llm_only", "llm_only_neutral", "neutral_prompt"]
 
 function make_inner_eval()
     BinPackingEvaluator(n_episodes=20, n_items=200, capacity=1.0f0,
@@ -293,7 +286,7 @@ end
 # Ablation runners
 # =============================================================================
 
-function run_no_llm()
+function run_no_llm(; generations::Int=200)
     _ensure_bp_states()
 
     evaluator = BPMultiObjectiveEvaluator(make_inner_eval())
@@ -301,15 +294,16 @@ function run_no_llm()
     problem = Arborist.GPProblem(evaluator, Arborist.ExprGenome;
                                   function_set=fset, num_temps=6, seed=42)
     algorithm = Arborist.NSGAII(
-        pop_size=200, generations=200,
+        pop_size=200, generations=generations,
         mutation_rate=0.4, crossover_rate=0.3,
         mutation_ops=classical_mutation_ops(),
     )
 
+    tag = generations == 200 ? "NO_LLM" : "NO_LLM_EXTENDED"
     println("=" ^ 70)
-    println("Ablation: NO_LLM — Pure GP + NSGA-II (3 objectives)")
-    println("  Objectives: fitness, success_rate, failed_placements")
-    println("  Population: 200, Generations: 200")
+    println("Ablation: $tag — Pure GP + NSGA-II (2 objectives)")
+    println("  Objectives: fitness, failed_placements")
+    println("  Population: 200, Generations: $generations")
     println("  Init: behavioral (10k pool)")
     println("  Mutation: SubtreeMutation(x2), PointMutation, HoistMutation, ExpansionMutation")
     println("=" ^ 70)
@@ -344,7 +338,7 @@ function run_no_behavioral()
 
     println("=" ^ 70)
     println("Ablation: NO_BEHAVIORAL — Random init + NSGA-II + LLM")
-    println("  Objectives: fitness, success_rate, failed_placements")
+    println("  Objectives: fitness, failed_placements")
     println("  Population: 200, Generations: 200")
     println("  Init: random (3 assignments per genome)")
     println("  LLM: qwen3-coder:30b + ElitesSection(3)")
@@ -360,15 +354,15 @@ function run_no_behavioral()
     print_results(result, wall; llm_op=llm_op)
 end
 
-function run_two_objective()
+function run_three_objective()
     _ensure_bp_states()
 
     mkpath(joinpath(@__DIR__, "logs", "debug"))
-    debug_path = joinpath(@__DIR__, "logs", "debug", "nsga2_ablation_two_objective.log")
+    debug_path = joinpath(@__DIR__, "logs", "debug", "nsga2_ablation_three_objective.log")
     debug_io = open(debug_path, "w")
     llm_op = make_llm_op(debug_io)
 
-    evaluator = BPTwoObjectiveEvaluator(make_inner_eval())
+    evaluator = BPThreeObjectiveEvaluator(make_inner_eval())
     fset = bin_packing_function_set()
     problem = Arborist.GPProblem(evaluator, Arborist.ExprGenome;
                                   function_set=fset, num_temps=6, seed=42)
@@ -379,8 +373,8 @@ function run_two_objective()
     )
 
     println("=" ^ 70)
-    println("Ablation: TWO_OBJECTIVE — fitness + failed_placements (no success_rate)")
-    println("  Objectives: fitness, failed_placements")
+    println("Ablation: THREE_OBJECTIVE — historical fitness + success_rate + failed_placements")
+    println("  Objectives: fitness, neg_success_rate, failed_placements")
     println("  Population: 200, Generations: 200")
     println("  Init: behavioral (10k pool)")
     println("  LLM: qwen3-coder:30b + ElitesSection(3)")
@@ -416,7 +410,7 @@ function run_reduced_pop(pop_size::Int)
 
     println("=" ^ 70)
     println("Ablation: POP$(pop_size) — Reduced population ($(pop_size))")
-    println("  Objectives: fitness, success_rate, failed_placements")
+    println("  Objectives: fitness, failed_placements")
     println("  Population: $(pop_size), Generations: 200")
     println("  Init: behavioral (10k pool)")
     println("  LLM: qwen3-coder:30b + ElitesSection(3)")
@@ -452,7 +446,7 @@ function run_llm_only()
 
     println("=" ^ 70)
     println("Ablation: LLM_ONLY — LLM mutation only, no classical operators")
-    println("  Objectives: fitness, success_rate, failed_placements")
+    println("  Objectives: fitness, failed_placements")
     println("  Population: 200, Generations: 200")
     println("  Init: behavioral (10k pool)")
     println("  Mutation: TrackedMutation(LLM) only")
@@ -489,9 +483,46 @@ function run_neutral_prompt()
 
     println("=" ^ 70)
     println("Ablation: NEUTRAL_PROMPT — LLM with neutral system prompt")
-    println("  Objectives: fitness, success_rate, failed_placements")
+    println("  Objectives: fitness, failed_placements")
     println("  Population: 200, Generations: 200")
     println("  Init: behavioral (10k pool)")
+    println("  LLM: qwen3-coder:30b + ElitesSection(3) + NEUTRAL prompt")
+    println("  Debug log: $debug_path")
+    println("=" ^ 70)
+    flush(stdout)
+
+    t0 = time()
+    result = Arborist.solve(problem, algorithm; verbose=true)
+    wall = time() - t0
+    close(debug_io)
+
+    print_results(result, wall; llm_op=llm_op)
+end
+
+function run_llm_only_neutral()
+    _ensure_bp_states()
+
+    mkpath(joinpath(@__DIR__, "logs", "debug"))
+    debug_path = joinpath(@__DIR__, "logs", "debug", "nsga2_ablation_llm_only_neutral.log")
+    debug_io = open(debug_path, "w")
+    llm_op = make_llm_op(debug_io; system_prompt=BP_NEUTRAL_SYSTEM_PROMPT)
+
+    evaluator = BPMultiObjectiveEvaluator(make_inner_eval())
+    fset = bin_packing_function_set()
+    problem = Arborist.GPProblem(evaluator, Arborist.ExprGenome;
+                                  function_set=fset, num_temps=6, seed=42)
+    algorithm = Arborist.NSGAII(
+        pop_size=200, generations=200,
+        mutation_rate=0.4, crossover_rate=0.3,
+        mutation_ops=Arborist.AbstractMutationOperator[TrackedMutation(llm_op)],
+    )
+
+    println("=" ^ 70)
+    println("Ablation: LLM_ONLY_NEUTRAL — LLM-only mutation with neutral prompt")
+    println("  Objectives: fitness, failed_placements")
+    println("  Population: 200, Generations: 200")
+    println("  Init: behavioral (10k pool)")
+    println("  Mutation: TrackedMutation(LLM) only")
     println("  LLM: qwen3-coder:30b + ElitesSection(3) + NEUTRAL prompt")
     println("  Debug log: $debug_path")
     println("=" ^ 70)
@@ -524,16 +555,20 @@ end
 function run_ablation(name::AbstractString)
     if name == "no_llm"
         run_no_llm()
+    elseif name == "no_llm_extended"
+        run_no_llm(generations=1000)
     elseif name == "no_behavioral"
         run_no_behavioral()
-    elseif name == "two_objective"
-        run_two_objective()
+    elseif name == "three_objective"
+        run_three_objective()
     elseif name == "pop100"
         run_reduced_pop(100)
     elseif name == "pop50"
         run_reduced_pop(50)
     elseif name == "llm_only"
         run_llm_only()
+    elseif name == "llm_only_neutral"
+        run_llm_only_neutral()
     elseif name == "neutral_prompt"
         run_neutral_prompt()
     else

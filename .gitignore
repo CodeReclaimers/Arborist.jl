@@ -22,3 +22,6 @@ examples/bin_packing_results_multiseed*.md
 examples/*.log
 examples/logs/
 examples/data/
+
+# autoloop skill bookkeeping (durable artifacts live on autoloop/* git branches)
+autoloop/

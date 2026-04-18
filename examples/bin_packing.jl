@@ -361,7 +361,7 @@ function Arborist._nsga2_init_population(
 
     return Arborist.behavioral_initialize(
         state, inner_eval, fp_fn, behavioral_distance, algorithm.pop_size;
-        pool_size=10_000,
+        pool_size=parse(Int, get(ENV, "BP_POOL_SIZE", "10000")),
         bin_threshold=0.15,
         body_generator=s -> _bp_random_initial_body(s),
         parallel=true,
@@ -940,7 +940,7 @@ function Arborist.solve(problem::Arborist.GPProblem{Arborist.ExprGenome, E},
         fp_fn = g -> compute_bp_fingerprint(g, probe)
         genomes = Arborist.behavioral_initialize(
             state, evaluator, fp_fn, behavioral_distance, pop_size;
-            pool_size=10_000,
+            pool_size=parse(Int, get(ENV, "BP_POOL_SIZE", "10000")),
             bin_threshold=0.15,
             body_generator=s -> _bp_random_initial_body(s),
             parallel=true,

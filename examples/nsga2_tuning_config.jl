@@ -28,13 +28,14 @@ function build_tuning_algorithm(; generations::Int)
     algorithm = Arborist.NSGAII(
         pop_size = 200,
         generations = generations,
-        mutation_rate = 0.4,
-        crossover_rate = 0.3,
+        mutation_rate = 0.6,
+        crossover_rate = 0.2,
         mutation_ops = Arborist.AbstractMutationOperator[
             Arborist.SubtreeMutation(),
             Arborist.SubtreeMutation(),
             Arborist.PointMutation(),
-            Arborist.HoistMutation(),
+            Arborist.PointMutation(),
+            Arborist.ExpansionMutation(),
             Arborist.ExpansionMutation(),
         ],
     )

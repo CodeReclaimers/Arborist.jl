@@ -35,7 +35,6 @@ function build_tuning_algorithm(; generations::Int)
             Arborist.SubtreeMutation(),
             Arborist.PointMutation(),
             Arborist.PointMutation(),
-            Arborist.PointMutation(),
             Arborist.ExpansionMutation(),
             Arborist.ExpansionMutation(),
         ],

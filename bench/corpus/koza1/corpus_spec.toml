@@ -1,0 +1,15 @@
+# Koza-1 symbolic regression corpus specification.
+#
+# Target function: y = x^4 + x^3 + x^2 + x over xs = range(x_min, x_max, length=n_points).
+# xs and y are fully determined by these parameters (Float32 precision), so the
+# corpus is bytewise-frozen as long as this spec is frozen. Julia's range()
+# output is stable across 1.10.x patch versions.
+
+target = "x^4 + x^3 + x^2 + x"
+x_min = -1.0
+x_max = 1.0
+n_points = 20
+
+# Solver budget per repetition. Matches test/benchmarks/koza_regression.jl.
+generations = 300
+pop_size = 100

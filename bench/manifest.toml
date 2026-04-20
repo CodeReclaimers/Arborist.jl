@@ -1,0 +1,64 @@
+# Arborist benchstone manifest.
+#
+# Companion to /home/alan/benchstone (the benchmark harness).
+# Registered projects are invoked via the `invocation` template; each
+# [[benchmarks]] entry declares a single entry point implemented in
+# bench/benchmarks.jl. See bench/README.md for the contract summary.
+
+[project]
+name = "Arborist"
+language = "julia"
+# `--threads=8` is baked into the template so the subprocess gets the
+# declared thread count regardless of caller environment. Matches each
+# benchmark's `threads = 8` declaration below.
+invocation = "julia --project=. --threads=8 bench/benchmarks.jl --entry={entry_point} --config={config_path} --output={output_path}"
+
+# ---------------------------------------------------------------------------
+# Primary benchmark: NSGA-II bin packing, metric = test-seed fitness of
+# best Pareto member. Matches the 2026-04-18 Karpathy-loop setup.
+# ---------------------------------------------------------------------------
+[[benchmarks]]
+name = "nsga2_binpack_mean_fitness"
+entry_point = "nsga2_binpack_mean_fitness"
+tier = "quality"
+deterministic = false
+metric_direction = "minimize"
+
+expected_runtime_seconds = 1080  # ~18 min/rep; 90 min total for 5 reps
+threads = 8
+gpu = "none"
+background_required = true
+
+repetitions = 5
+baseline_seeds = [1, 2, 3, 4, 5]
+promotion_sigma = 2.0
+
+corpus_path = "bench/corpus/binpack_common"
+# sha256 of bench/corpus/binpack_common/corpus_spec.toml — the only file in
+# the corpus. See bench/README.md for the hashing convention.
+corpus_hash = "sha256:ece0e56a31e599434b190ce69829bb833f07383d0678d297596bf243ff84d2d3"
+
+# ---------------------------------------------------------------------------
+# Secondary benchmark: Koza-1 symbolic regression on TreeGenome. Picked as
+# the contract-stress case: different genome type, different algorithm,
+# different objective shape (single-objective MSE), different RNG
+# discipline, deterministic bytewise corpus, short runtime.
+# ---------------------------------------------------------------------------
+[[benchmarks]]
+name = "koza_regression_mean_fitness"
+entry_point = "koza_regression_mean_fitness"
+tier = "quality"
+deterministic = false
+metric_direction = "minimize"
+
+expected_runtime_seconds = 10
+threads = 8
+gpu = "none"
+background_required = false
+
+repetitions = 5
+baseline_seeds = [1, 2, 3, 4, 5]
+promotion_sigma = 2.0
+
+corpus_path = "bench/corpus/koza1"
+corpus_hash = "sha256:7ed5465cba7593c18bba0e852133c50f1e8602e44d701a15bb09f7cd88411feb"

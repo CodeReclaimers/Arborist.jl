@@ -1,0 +1,18 @@
+# NSGA-II bin packing corpus specification.
+#
+# Items are synthesized in-process by BinPackingEvaluator via
+# Random.MersenneTwister(rng_seed + episode_index). The generation is fully
+# deterministic from (rng_seed, n_episodes, n_items, item_dist, capacity) +
+# Julia's MersenneTwister, so freezing these parameters pins the corpus
+# bytewise for any given seed. Each repetition's rng_seed comes from the
+# invocation config; the held-out test seed is rng_seed + test_seed_offset.
+
+n_episodes = 20
+n_items = 200
+capacity = 1.0
+item_dist = "uniform"
+test_seed_offset = 1000
+
+# NSGA-II training budget per repetition. Matches the 2026-04-18 Karpathy-loop
+# holdout setup (pop_size=200, 200 generations, behavioral init pool=10000).
+generations = 200

@@ -1,0 +1,13 @@
+# Mountain Car NEAT corpus specification.
+#
+# Canonical sparse-reward RL task: underpowered car must reach goal at
+# position 0.5 by oscillating. Physics constants (pos_min/max, vel_min/max,
+# force 0.001, gravity 0.0025, initial pos uniform in [-0.6,-0.4])
+# are fixed in the entry-point code since they define the task.
+
+n_episodes = 5
+max_steps = 200
+episode_seed_base = 3000
+
+pop_size = 150
+generations = 100

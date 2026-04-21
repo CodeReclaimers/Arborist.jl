@@ -168,3 +168,22 @@ promotion_sigma = 2.0
 
 corpus_path = "bench/corpus/double_pole"
 corpus_hash = "sha256:abf4d9390abd0fb7ea93feac803fc2fc87be3851235c963ae6fe839d1348e221"
+
+[[benchmarks]]
+name = "mountain_car_mean_fitness"
+entry_point = "mountain_car_mean_fitness"
+tier = "quality"
+deterministic = false
+metric_direction = "minimize"
+
+expected_runtime_seconds = 8
+threads = 8
+gpu = "none"
+background_required = false
+
+repetitions = 5
+baseline_seeds = [1, 2, 3, 4, 5]
+promotion_sigma = 2.0
+
+corpus_path = "bench/corpus/mountain_car"
+corpus_hash = "sha256:855890894c520950f58b579059763440ce271175052ea43cdb3c7947727044ef"

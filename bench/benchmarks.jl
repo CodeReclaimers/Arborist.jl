@@ -795,6 +795,107 @@ function double_pole_mean_fitness(cfg::Dict, corpus_path::AbstractString)
     )
 end
 
+# ---------------------------------------------------------------------------
+# Mountain Car dynamics
+# ---------------------------------------------------------------------------
+
+const _MC_POS_MIN = -1.2
+const _MC_POS_MAX = 0.6
+const _MC_VEL_MIN = -0.07
+const _MC_VEL_MAX = 0.07
+const _MC_GOAL    = 0.5
+const _MC_FORCE   = 0.001
+const _MC_GRAVITY = 0.0025
+
+function _mc_initial_state(rng)
+    pos = -0.6 + 0.2 * rand(rng)
+    return (pos=pos, vel=0.0)
+end
+
+function _mc_dynamics(s, a)
+    new_vel = s.vel + _MC_FORCE * a - _MC_GRAVITY * cos(3 * s.pos)
+    new_vel = clamp(new_vel, _MC_VEL_MIN, _MC_VEL_MAX)
+    new_pos = s.pos + new_vel
+    if new_pos < _MC_POS_MIN
+        return (pos=_MC_POS_MIN, vel=0.0)
+    elseif new_pos > _MC_POS_MAX
+        return (pos=_MC_POS_MAX, vel=new_vel)
+    else
+        return (pos=new_pos, vel=new_vel)
+    end
+end
+
+_mc_reward(s, a, sp) = -1.0
+_mc_done(s) = s.pos >= _MC_GOAL
+_mc_obs(s) = Float64[s.pos, s.vel]
+function _mc_decode(y)
+    i = argmax(y)
+    return i == 1 ? -1 : (i == 2 ? 0 : 1)
+end
+
+# ---------------------------------------------------------------------------
+# Entry point: Mountain Car NEAT, mean reward (negated)
+# ---------------------------------------------------------------------------
+
+function mountain_car_mean_fitness(cfg::Dict, corpus_path::AbstractString)
+    spec = TOML.parsefile(joinpath(corpus_path, "corpus_spec.toml"))
+    n_episodes = Int(spec["n_episodes"])
+    max_steps = Int(spec["max_steps"])
+    episode_seed_base = Int(spec["episode_seed_base"])
+    pop_size = Int(spec["pop_size"])
+    generations = Int(spec["generations"])
+
+    seed = Int(cfg["seed"])
+
+    evaluator = EpisodicEvaluator(
+        2, 3,
+        _mc_initial_state, _mc_dynamics,
+        _mc_reward, _mc_done,
+        _mc_obs, _mc_decode;
+        max_steps=max_steps, n_episodes=n_episodes,
+        episode_seed_base=episode_seed_base,
+        allow_recurrent=false,
+    )
+
+    ops = neat_defaults()
+    algorithm = GeneticProgramming(
+        pop_size=pop_size, generations=generations,
+        mutation_rate=0.5, crossover_rate=0.3, elitism=2,
+        mutation_ops=ops.mutation_ops, crossover_ops=ops.crossover_ops,
+        speciation=ThresholdSpeciation(threshold=3.0, min_species_size=2,
+                                       stagnation_limit=25),
+    )
+
+    reset_innovation_counter!()
+    problem = GPProblem(evaluator, GraphGenome; seed=seed)
+
+    t0 = time()
+    result = Arborist.solve(problem, algorithm; verbose=false)
+    wall = time() - t0
+
+    return Dict{String,Any}(
+        "status" => "ok",
+        "metric" => Float64(result.best_fitness),
+        "metric_components" => Dict{String,Any}(
+            "best_fitness" => Float64(result.best_fitness),
+            "generations_run" => result.generations_run,
+            "converged" => result.converged,
+            "best_node_count" => length(result.best_genome.nodes),
+            "best_enabled_conns" => count(c.enabled for c in values(result.best_genome.connections)),
+        ),
+        "wall_clock_seconds" => Float64(wall),
+        "metadata" => Dict{String,Any}(
+            "julia_version" => string(VERSION),
+            "threads_actual" => Threads.nthreads(),
+            "n_episodes" => n_episodes,
+            "max_steps" => max_steps,
+            "pop_size" => pop_size,
+            "generations" => generations,
+            "notes" => "metric = -mean_reward; lower is better; fitness < 200 ⇒ at least one goal reach",
+        ),
+    )
+end
+
 const _ENTRY_POINTS = Dict{String,Function}(
     "nsga2_binpack_mean_fitness" => nsga2_binpack_mean_fitness,
     "koza_regression_mean_fitness" => koza_regression_mean_fitness,
@@ -803,6 +904,7 @@ const _ENTRY_POINTS = Dict{String,Function}(
     "two_spirals_nsga2_mean_fitness" => two_spirals_nsga2_mean_fitness,
     "cartpole_mean_fitness" => cartpole_mean_fitness,
     "double_pole_mean_fitness" => double_pole_mean_fitness,
+    "mountain_car_mean_fitness" => mountain_car_mean_fitness,
 )
 
 # ---------------------------------------------------------------------------

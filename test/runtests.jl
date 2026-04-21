@@ -47,6 +47,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
         include("benchmarks/two_spirals_nsga2_neat.jl")
         include("benchmarks/cartpole_neat.jl")
         include("benchmarks/double_pole_neat.jl")
+        include("benchmarks/mountain_car_neat.jl")
         include("benchmarks/sequence_memory_neat.jl")
         include("benchmarks/lorenz_recovery.jl")
     else

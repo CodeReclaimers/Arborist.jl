@@ -18,7 +18,10 @@
 
 using DynamicExpressions
 using Random
-using Statistics: mean
+
+# Local mean helper — see note in keijzer_extrapolation.jl.  Pkg.test
+# runs in a sandboxed env where stdlib Statistics is not available.
+_mean_iris(x) = sum(x) / length(x)
 
 # Each row: (sepal_length, sepal_width, petal_length, petal_width, class_index)
 # class: 1 = setosa, 2 = versicolor, 3 = virginica
@@ -188,7 +191,7 @@ const _IRIS_DATA = Tuple{Float32, Float32, Float32, Float32, Int}[
         acc
     end
 
-    mean_acc = mean(accuracies)
+    mean_acc = _mean_iris(accuracies)
     n_above_90 = count(a -> a >= 0.90, accuracies)
     println("  Iris: $n_above_90/5 seeds >= 90% test accuracy " *
             "(mean = $(round(mean_acc * 100, digits=1))%)")

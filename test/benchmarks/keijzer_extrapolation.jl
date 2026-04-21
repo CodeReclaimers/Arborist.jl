@@ -13,7 +13,12 @@
 
 using DynamicExpressions
 using Random
-using Statistics: mean
+
+# Local mean helper — avoids `using Statistics` because Pkg.test runs in
+# a sandboxed environment where stdlib Statistics is not in the test
+# target's [deps].  `sum(x) / length(x)` is fine for the sample sizes
+# here.
+_mean_float(x) = sum(x) / length(x)
 
 # Reuse the protected operators from nguyen_regression if already loaded,
 # else define locally.  Guard with `@isdefined` so the file can also run
@@ -80,8 +85,8 @@ end
             best = result.best_genome
             pred_tint  = best.tree(X_tint,  operators)
             pred_textr = best.tree(X_textr, operators)
-            rmse_tint  = sqrt(mean((Float64.(pred_tint)  .- Float64.(y_tint))  .^ 2))
-            rmse_textr = sqrt(mean((Float64.(pred_textr) .- Float64.(y_textr)) .^ 2))
+            rmse_tint  = sqrt(_mean_float((Float64.(pred_tint)  .- Float64.(y_tint))  .^ 2))
+            rmse_textr = sqrt(_mean_float((Float64.(pred_textr) .- Float64.(y_textr)) .^ 2))
 
             println("    Keijzer-4 seed=$seed: train_fit=$(round(result.best_fitness, sigdigits=3)), " *
                     "test_rmse_interior=$(round(rmse_tint, sigdigits=3)), " *
@@ -135,7 +140,7 @@ end
 
             best = result.best_genome
             pred_test = best.tree(X_test, operators)
-            rmse_test = sqrt(mean((Float64.(pred_test) .- Float64.(y_test)) .^ 2))
+            rmse_test = sqrt(_mean_float((Float64.(pred_test) .- Float64.(y_test)) .^ 2))
 
             println("    Keijzer-11 seed=$seed: train_fit=$(round(result.best_fitness, sigdigits=3)), " *
                     "test_rmse=$(round(rmse_test, sigdigits=3))")

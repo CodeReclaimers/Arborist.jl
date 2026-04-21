@@ -507,16 +507,20 @@ end
 function _nsga2_init_population(problem::GPProblem{GraphGenome, E},
                                  algorithm::NSGAII,
                                  rng::AbstractRNG) where {E<:AbstractMultiObjectiveEvaluator}
-    # Unwrap ParsimonyEvaluator to get the inner GraphEvaluator.
     evaluator = problem.evaluator
-    inner = evaluator isa ParsimonyEvaluator ? evaluator.inner : evaluator
-    if !(inner isa GraphEvaluator)
-        error("NSGA-II with GraphGenome requires the evaluator (or its inner evaluator) " *
-              "to be a GraphEvaluator. Got: $(typeof(inner))")
+    # Narrow guard for the common-mistake case: ParsimonyEvaluator wrapping
+    # a non-GraphEvaluator (e.g., a TableFitnessEvaluator built for
+    # ExprGenome). Other AbstractMultiObjectiveEvaluator subtypes are
+    # trusted — they must implement evaluate_multi(::EvaluatorType,
+    # ::GraphGenome) themselves (see test/benchmarks/retina_nsga2_neat.jl
+    # for an example).
+    if evaluator isa ParsimonyEvaluator && !(evaluator.inner isa GraphEvaluator)
+        error("NSGA-II with GraphGenome and ParsimonyEvaluator requires the " *
+              "inner evaluator to be a GraphEvaluator. Got: $(typeof(evaluator.inner))")
     end
 
-    n_in  = size(inner.input_data, 1)
-    n_out = size(inner.output_data, 1)
+    n_in  = length(input_signature(evaluator))
+    n_out = length(output_signature(evaluator))
     pop_size = algorithm.pop_size
 
     genomes = Vector{GraphGenome}(undef, pop_size)

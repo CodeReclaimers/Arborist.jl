@@ -52,6 +52,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
         include("benchmarks/sequence_recall_neat.jl")
         include("benchmarks/retina_neat.jl")
         include("benchmarks/mackey_glass_neat.jl")
+        include("benchmarks/retina_nsga2_neat.jl")
         include("benchmarks/lorenz_recovery.jl")
     else
         @info "Skipping benchmarks (set ARBORIST_RUN_BENCHMARKS=true to run)"

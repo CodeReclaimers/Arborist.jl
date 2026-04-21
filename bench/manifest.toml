@@ -187,3 +187,27 @@ promotion_sigma = 2.0
 
 corpus_path = "bench/corpus/mountain_car"
 corpus_hash = "sha256:855890894c520950f58b579059763440ce271175052ea43cdb3c7947727044ef"
+
+# ---------------------------------------------------------------------------
+# Phase D benchmarks: modularity, dynamics, multi-objective showcases.
+# Added 2026-04-21.
+# ---------------------------------------------------------------------------
+
+[[benchmarks]]
+name = "retina_mean_fitness"
+entry_point = "retina_mean_fitness"
+tier = "quality"
+deterministic = false
+metric_direction = "minimize"
+
+expected_runtime_seconds = 15
+threads = 8
+gpu = "none"
+background_required = false
+
+repetitions = 5
+baseline_seeds = [1, 2, 3, 4, 5]
+promotion_sigma = 2.0
+
+corpus_path = "bench/corpus/retina"
+corpus_hash = "sha256:2c3933e824e08cbdabb1210b5e0e0019efcfbaadcdc4e7c3ecda5e6748cd0d8b"

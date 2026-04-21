@@ -1,0 +1,14 @@
+# Retina left-and-right (Clune, Mouret & Lipson 2013) corpus specification.
+#
+# 4-bit left + 4-bit right = 8-bit input, 256 enumerated patterns. Object
+# definition: single-bit-set 4-bit pattern (4 of 16 per side). Target =
+# (left_is_object AND right_is_object). The dataset is fully determined
+# by these parameters.
+
+n_input_bits_per_side = 4   # 4 + 4 = 8-bit input, 256 pattern enumeration
+# Object definition: count_ones(side_bits) == 1 (single-bit-set patterns).
+# Fixed in the entry-point code.
+
+# Solver budget per repetition. Matches test/benchmarks/retina_neat.jl.
+pop_size = 200
+generations = 300

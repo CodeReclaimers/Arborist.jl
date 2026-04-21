@@ -896,6 +896,85 @@ function mountain_car_mean_fitness(cfg::Dict, corpus_path::AbstractString)
     )
 end
 
+# ---------------------------------------------------------------------------
+# Retina left-and-right dataset construction
+# ---------------------------------------------------------------------------
+
+function _retina_dataset(n_input_bits_per_side::Int)
+    side_size = 2^n_input_bits_per_side
+    n_patterns = side_size * side_size
+    input_data  = zeros(Float64, 2 * n_input_bits_per_side, n_patterns)
+    output_data = zeros(Float64, 1, n_patterns)
+    col = 0
+    for left in 0:(side_size - 1)
+        left_obj = count_ones(left) == 1
+        for right in 0:(side_size - 1)
+            col += 1
+            right_obj = count_ones(right) == 1
+            for i in 1:n_input_bits_per_side
+                input_data[i, col] = Float64((left >> (i - 1)) & 1)
+                input_data[i + n_input_bits_per_side, col] =
+                    Float64((right >> (i - 1)) & 1)
+            end
+            output_data[1, col] = (left_obj && right_obj) ? 1.0 : 0.0
+        end
+    end
+    return input_data, output_data
+end
+
+# ---------------------------------------------------------------------------
+# Entry point: Retina classification NEAT, best_fitness
+# ---------------------------------------------------------------------------
+
+function retina_mean_fitness(cfg::Dict, corpus_path::AbstractString)
+    spec = TOML.parsefile(joinpath(corpus_path, "corpus_spec.toml"))
+    n_bits_side = Int(spec["n_input_bits_per_side"])
+    pop_size = Int(spec["pop_size"])
+    generations = Int(spec["generations"])
+
+    seed = Int(cfg["seed"])
+
+    input_data, output_data = _retina_dataset(n_bits_side)
+    evaluator = GraphEvaluator(input_data, output_data)
+
+    ops = neat_defaults()
+    algorithm = GeneticProgramming(
+        pop_size=pop_size, generations=generations,
+        mutation_rate=0.5, crossover_rate=0.3, elitism=2,
+        mutation_ops=ops.mutation_ops, crossover_ops=ops.crossover_ops,
+        speciation=ThresholdSpeciation(threshold=3.0, min_species_size=2,
+                                       stagnation_limit=25),
+    )
+
+    reset_innovation_counter!()
+    problem = GPProblem(evaluator, GraphGenome; seed=seed)
+
+    t0 = time()
+    result = Arborist.solve(problem, algorithm; verbose=false)
+    wall = time() - t0
+
+    return Dict{String,Any}(
+        "status" => "ok",
+        "metric" => Float64(result.best_fitness),
+        "metric_components" => Dict{String,Any}(
+            "best_fitness" => Float64(result.best_fitness),
+            "generations_run" => result.generations_run,
+            "converged" => result.converged,
+            "best_node_count" => length(result.best_genome.nodes),
+            "best_enabled_conns" => count(c.enabled for c in values(result.best_genome.connections)),
+        ),
+        "wall_clock_seconds" => Float64(wall),
+        "metadata" => Dict{String,Any}(
+            "julia_version" => string(VERSION),
+            "threads_actual" => Threads.nthreads(),
+            "n_input_bits_per_side" => n_bits_side,
+            "pop_size" => pop_size,
+            "generations" => generations,
+            "notes" => "metric = final best_fitness (MSE) on 2^(2*n_bits) enumerated retina patterns",
+        ),
+    )
+end
+
 const _ENTRY_POINTS = Dict{String,Function}(
     "nsga2_binpack_mean_fitness" => nsga2_binpack_mean_fitness,
     "koza_regression_mean_fitness" => koza_regression_mean_fitness,
@@ -905,6 +984,7 @@ const _ENTRY_POINTS = Dict{String,Function}(
     "cartpole_mean_fitness" => cartpole_mean_fitness,
     "double_pole_mean_fitness" => double_pole_mean_fitness,
     "mountain_car_mean_fitness" => mountain_car_mean_fitness,
+    "retina_mean_fitness" => retina_mean_fitness,
 )
 
 # ---------------------------------------------------------------------------

@@ -8,12 +8,15 @@
     output_data = Float64[0 1 1 0]
     evaluator = GraphEvaluator(input_data, output_data)
 
+    ops = neat_defaults()
     algorithm = GeneticProgramming(
         pop_size=150,
         generations=150,
         mutation_rate=0.5,
         crossover_rate=0.3,
         elitism=2,
+        mutation_ops=ops.mutation_ops,
+        crossover_ops=ops.crossover_ops,
         speciation=ThresholdSpeciation(threshold=3.0, min_species_size=2,
                                        stagnation_limit=15)
     )

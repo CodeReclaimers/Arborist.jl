@@ -4,9 +4,11 @@ Generic, extensible genetic programming framework for Julia. Problem/Algorithm/S
 
 ## Project Status
 
-All tests pass. Fast tier: 3164 tests, ~1m08s. Full benchmarks: 3186 tests, ~8m53s. The single "broken" reported in the test summary is `@test_skip "ANTHROPIC_API_KEY not set"` in `test/integration/test_llm_operator.jl` — `@test_skip` is reported in the same column as `@test_broken`.
+All tests pass. Fast tier: 3378 tests, ~1m23s. Full benchmarks: 3509 tests, ~9m16s. The single "broken" reported in the test summary is `@test_skip "ANTHROPIC_API_KEY not set"` in `test/integration/test_llm_operator.jl` — `@test_skip` is reported in the same column as `@test_broken`.
 
 **Core framework** (Phases 1-6): Complete. ExprGenome, TreeGenome, AntGenome, GraphGenome. LLM mutation operator. Island model (sequential, sync distributed, async distributed). Speciation (threshold, behavioral). AST sanitizer.
+
+**GraphGenome framework integration (2026-04-20)**: GraphGenome is a first-class genome across the framework. Operator dispatch via `NEATDefaultMutation` + five individual mutation operators (`WeightPerturbMutation`, `WeightReplaceMutation`, `AddConnectionMutation`, `AddNodeMutation`, `ToggleConnectionMutation`) and `NEATCrossover`. Works with NSGA-II (Pareto of fitness vs enabled-connection count), sequential IslandModel, and distributed IslandModel (per-worker disjoint innovation ID ranges via `init_innovation_range!`). `GraphEvaluator` supports recurrent networks via `allow_recurrent=true` with `relaxation_passes=N`; samples are treated as a time sequence with persistent node state. Use `neat_defaults()` to get `(mutation_ops, crossover_ops)` for drop-in use. `_validate_ops` throws a clear `ArgumentError` when incompatible ops (e.g., default ExprGenome ops) are passed with a GraphGenome problem.
 
 **NSGA-II multi-objective GP**: `NSGAII` algorithm with non-dominated sorting, crowding distance, and (mu+lambda) survivor selection. `ParsimonyEvaluator` wraps any single-objective evaluator into 2 objectives (fitness + complexity). Returns `NSGAIIResult` with Pareto front and hypervolume history. Example: `examples/nsga2_regression.jl`.
 
@@ -48,6 +50,7 @@ src/
     mutation.jl            # SubtreeMutation, PointMutation, HoistMutation, ExpansionMutation
     crossover.jl           # SubtreeCrossover
     selection.jl           # TournamentSelection
+    neat_mutation.jl       # NEAT operators: WeightPerturb/Replace, AddConnection/Node, Toggle, NEATDefaultMutation, NEATCrossover, neat_defaults()
   evaluators.jl            # TableFitnessEvaluator
   algorithm.jl             # GeneticProgramming, IslandModel
   solve.jl                 # solve(), _parallel_evaluate!, _breed_next_generation!
@@ -69,7 +72,7 @@ src/
 - **`parallel=true`** enables `Threads.@threads` evaluation. Set `false` for reproducibility.
 - **Fitness sharing for minimization**: configurable via `sharing_formula` -- `:log2` (default), `:sqrt`, `:linear`, `:none`. Use `apply_sharing(raw, size, formula)`.
 - **Output flushing**: `flush(stdout)` after progress output in long-running loops.
-- **Innovation counter**: `reset_innovation_counter!()` before each GraphGenome solve.
+- **Innovation counter**: the single-objective, NSGA-II, and sequential IslandModel `solve` methods reset the process-global innovation counter on entry when `G === GraphGenome`. Distributed IslandModel uses `init_innovation_range!((island_id - 1) * INNOVATION_STRIDE)` per worker to keep innovation IDs disjoint across processes.
 - **AST Sanitizer**: opt-in whitelist for @eval security. See `docs/src/security.md`.
 
 ## Known Limitations
@@ -77,7 +80,7 @@ src/
 - **@eval method table growth**: Every ExprGenome evaluation adds a method to Julia's method table. Long runs accumulate thousands of methods. TreeGenome avoids this via DynamicExpressions' compiled evaluation.
 - **AntGenome not thread-safe**: Uses a module-level `Ref` for simulator state. Runtime error if `parallel=true`. Bin packing and sorting examples demonstrate the thread-local state workaround.
 - **GraphGenome.deserialize not implemented**: Returns `nothing` with a warning. LLM mutation of GraphGenome is non-functional.
-- **Distributed NEAT innovation collisions**: Separate workers assign conflicting node IDs. Must be addressed before enabling GraphGenome with `distributed=true`.
+- **Distributed NEAT innovation matching is disjoint-range, not content-aware**: Distributed IslandModel gives each worker a unique innovation ID range (`[0, 10^9)`, `[10^9, 2·10^9)`, …) so IDs don't collide. The cost is that structurally identical mutations on different workers receive different IDs — treated as disjoint (non-matching) by NEAT crossover rather than aligned. Per-generation cross-worker innovation dedup is not implemented.
 - **ExprGenome serialize round-trip is partial**: `repr()` produces `Float32(literal)` forms that fail type-checking (~80% round-trip success rate).
 
 ## Running Tests

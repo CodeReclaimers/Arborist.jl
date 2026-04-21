@@ -503,6 +503,29 @@ function _nsga2_init_population(problem::GPProblem{TreeGenome{T}, E},
     return genomes
 end
 
+# --- GraphGenome initialization ---
+function _nsga2_init_population(problem::GPProblem{GraphGenome, E},
+                                 algorithm::NSGAII,
+                                 rng::AbstractRNG) where {E<:AbstractMultiObjectiveEvaluator}
+    # Unwrap ParsimonyEvaluator to get the inner GraphEvaluator.
+    evaluator = problem.evaluator
+    inner = evaluator isa ParsimonyEvaluator ? evaluator.inner : evaluator
+    if !(inner isa GraphEvaluator)
+        error("NSGA-II with GraphGenome requires the evaluator (or its inner evaluator) " *
+              "to be a GraphEvaluator. Got: $(typeof(inner))")
+    end
+
+    n_in  = size(inner.input_data, 1)
+    n_out = size(inner.output_data, 1)
+    pop_size = algorithm.pop_size
+
+    genomes = Vector{GraphGenome}(undef, pop_size)
+    for i in 1:pop_size
+        genomes[i] = initialize(GraphGenome, n_in, n_out, rng)
+    end
+    return genomes
+end
+
 # =============================================================================
 # NSGA-II survivor selection
 # =============================================================================
@@ -584,6 +607,15 @@ function solve(problem::GPProblem{G, E},
                callback = nothing) where {G, E<:AbstractMultiObjectiveEvaluator}
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
+
+    _validate_ops(algorithm.mutation_ops, algorithm.crossover_ops, G)
+
+    # GraphGenome uses a process-global innovation counter that tracks structural
+    # mutation IDs. Reset it at the top of each solve so successive runs in the
+    # same process start from 1 (same semantics as the single-objective path).
+    if G === GraphGenome
+        reset_innovation_counter!()
+    end
 
     evaluator = problem.evaluator
     pop_size = algorithm.pop_size

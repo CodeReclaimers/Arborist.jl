@@ -94,3 +94,15 @@ function from_migrant(m::MigrantGenome, ::Type{GraphGenome})
     nodes, connections, n_inputs, n_outputs = m.data
     GraphGenome(deepcopy(nodes), deepcopy(connections), n_inputs, n_outputs, m.fitness)
 end
+
+"""
+    from_migrant(m::MigrantGenome, ctx::GraphGenomeContext) -> GraphGenome
+
+Context-dispatched form used by `IslandModel` (`_inject_migrants_local!`
+calls `from_migrant(m, island.state)` uniformly across genome types).
+GraphGenome migrants carry their own `n_inputs` / `n_outputs`, so the
+context is consulted only for dispatch.
+"""
+function from_migrant(m::MigrantGenome, ::GraphGenomeContext)
+    from_migrant(m, GraphGenome)
+end

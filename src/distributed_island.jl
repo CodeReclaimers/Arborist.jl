@@ -5,13 +5,15 @@
 # islands: each process has its own compilation lock, world age counter,
 # and module-level state.
 #
-# KNOWN LIMITATION: GraphGenome (NEAT) uses a global innovation counter.
-# In distributed mode, each worker has an independent counter starting at 0,
-# so different workers will assign identical innovation numbers to unrelated
-# mutations. During migration, _neat_crossover aligns by innovation number,
-# which would corrupt network topology. GraphGenome is not yet reachable via
-# the distributed path (see _initialize_population), but this must be
-# addressed before enabling it.
+# GraphGenome (NEAT) uses a process-local innovation counter. In
+# distributed mode, each worker initializes its counter to a disjoint range
+# (`init_innovation_range!((island_id - 1) * INNOVATION_STRIDE)`) so that
+# NEAT crossover on migrants does not align structurally unrelated genes
+# under the same innovation number. The cost of this scheme is that
+# independent identical structural mutations on different workers receive
+# different innovation numbers — they are treated as disjoint genes by
+# crossover rather than matching. In practice this is the standard trade
+# distributed NEAT implementations make.
 
 # =============================================================================
 # Worker-local island state
@@ -31,6 +33,11 @@ the state field directly, and (b) `_inject_migrants_local!` dispatches
 `from_migrant(m, state)` on the runtime type without needing a static
 narrowing.
 """
+# Per-worker innovation ID range width for distributed GraphGenome runs.
+# Default 10^9 supports up to one billion structural mutations per worker
+# before adjacent ranges collide.
+const INNOVATION_STRIDE = 10^9
+
 mutable struct IslandState{G<:AbstractGenome}
     genomes::Vector{G}
     fitnesses::Vector{Float64}
@@ -55,6 +62,17 @@ dict and returns the island_id.
 """
 function _init_island_local(problem::GPProblem{G,E}, alg::GeneticProgramming,
                             seed::UInt64, island_id::Int) where {G,E}
+    # GraphGenome's innovation counter is process-local; under distributed
+    # execution each worker starts its own counter at 0. Without a disjoint
+    # per-worker range, two workers would assign the same innovation number
+    # to structurally unrelated mutations, and NEAT crossover on migrants
+    # would then align unrelated genes. Set the offset BEFORE
+    # `_initialize_population` so the initial connections get IDs in this
+    # worker's range.
+    if G === GraphGenome
+        init_innovation_range!((island_id - 1) * INNOVATION_STRIDE)
+    end
+
     rng = Random.MersenneTwister(seed)
     pop = _initialize_population(problem, alg, rng)
     genomes, gen_state = pop

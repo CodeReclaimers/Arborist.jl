@@ -62,6 +62,44 @@ function _initialize_population(problem::GPProblem{G,E},
 end
 
 """
+    _validate_ops(mutation_ops, crossover_ops, ::Type{G})
+
+Verify that at least one operator in each vector has a `mutate` / `crossover`
+method dispatched on genome type `G`. Throws `ArgumentError` with a pointer
+at the right default operators if no compatible operator is present. This
+catches the common case where a user constructs `GeneticProgramming` or
+`NSGAII` with the default ExprGenome operators and hands it a GraphGenome
+problem — without this check the failure would surface as a cryptic
+`MethodError` deep inside the breed loop.
+"""
+function _validate_ops(mutation_ops::Vector{AbstractMutationOperator},
+                       crossover_ops::Vector{AbstractCrossoverOperator},
+                       ::Type{G}) where {G}
+    have_mut = any(op -> hasmethod(mutate, Tuple{typeof(op), G, AbstractRNG}), mutation_ops)
+    have_xo  = any(op -> hasmethod(crossover, Tuple{typeof(op), G, G, AbstractRNG}), crossover_ops)
+
+    hint = if G === GraphGenome
+        "Use `neat_defaults()` to get (mutation_ops, crossover_ops) for GraphGenome: " *
+        "`ops = neat_defaults(); GeneticProgramming(; mutation_ops=ops.mutation_ops, " *
+        "crossover_ops=ops.crossover_ops, ...)`."
+    else
+        "Pass operators that dispatch on $G."
+    end
+
+    if !have_mut
+        throw(ArgumentError(
+            "No mutation operator in `mutation_ops` dispatches on $G. " *
+            "Got types: $([typeof(op) for op in mutation_ops]). $hint"))
+    end
+    if !have_xo
+        throw(ArgumentError(
+            "No crossover operator in `crossover_ops` dispatches on $G. " *
+            "Got types: $([typeof(op) for op in crossover_ops]). $hint"))
+    end
+    return nothing
+end
+
+"""
     _tournament_select(fitnesses, tournament_size, rng) -> Int
 
 Perform tournament selection. Returns the index of the selected individual.
@@ -483,6 +521,16 @@ function solve(problem::GPProblem{G,E},
           Random.MersenneTwister(problem.seed)
 
     alg = algorithm.island_algorithm
+    _validate_ops(alg.mutation_ops, alg.crossover_ops, G)
+
+    # GraphGenome maintains a process-global innovation counter that all
+    # islands share in sequential mode. Reset it once before island setup so
+    # innovations are coherent across islands (required for NEAT crossover
+    # when migrants are swapped in).
+    if G === GraphGenome
+        reset_innovation_counter!()
+    end
+
     n = algorithm.n_islands
     pop_size = alg.pop_size
     bp = alg.bloat_penalty

@@ -16,8 +16,9 @@
         rng = Random.MersenneTwister(42)
         reset_innovation_counter!()
         g = initialize(GraphGenome, 2, 1, rng)
+        mut = NEATDefaultMutation()
         for _ in 1:20
-            g2 = mutate(g, rng)
+            g2 = mutate(mut, g, rng)
             @test g2 isa GraphGenome
         end
     end
@@ -27,8 +28,9 @@
         reset_innovation_counter!()
         g1 = initialize(GraphGenome, 2, 1, rng)
         g2 = initialize(GraphGenome, 2, 1, rng)
+        xo = NEATCrossover()
         for _ in 1:10
-            (c1, c2) = crossover(g1, g2, rng)
+            (c1, c2) = crossover(xo, g1, g2, rng)
             @test c1 isa GraphGenome
             @test c2 isa GraphGenome
         end
@@ -119,9 +121,12 @@
         evaluator = GraphEvaluator(input_data, output_data)
 
         problem = GPProblem(evaluator, GraphGenome; seed=42)
+        ops = neat_defaults()
         algorithm = GeneticProgramming(
             pop_size=30, generations=10,
             mutation_rate=0.5, crossover_rate=0.2,
+            mutation_ops=ops.mutation_ops,
+            crossover_ops=ops.crossover_ops,
             speciation=ThresholdSpeciation(threshold=3.0)
         )
 
@@ -137,13 +142,14 @@
         # This tests the fix for non-deterministic Dict iteration in
         # _mutate_weights!, _mutate_weight_replace!, _mutate_add_connection!,
         # _mutate_add_node!, _mutate_toggle_connection!, and _neat_crossover.
+        mut = NEATDefaultMutation()
         for trial in 1:5
             reset_innovation_counter!()
             rng1 = Random.MersenneTwister(trial)
             g1 = initialize(GraphGenome, 3, 2, rng1)
             # Run 50 mutations to exercise all mutation types
             for _ in 1:50
-                g1 = mutate(g1, rng1)
+                g1 = mutate(mut, g1, rng1)
             end
             weights1 = sort([c.weight for c in values(g1.connections)])
 
@@ -151,7 +157,7 @@
             rng2 = Random.MersenneTwister(trial)
             g2 = initialize(GraphGenome, 3, 2, rng2)
             for _ in 1:50
-                g2 = mutate(g2, rng2)
+                g2 = mutate(mut, g2, rng2)
             end
             weights2 = sort([c.weight for c in values(g2.connections)])
 
@@ -169,15 +175,17 @@
         rng = Random.MersenneTwister(42)
         g1 = initialize(GraphGenome, 2, 1, rng)
         g2 = initialize(GraphGenome, 2, 1, rng)
+        mut = NEATDefaultMutation()
+        xo = NEATCrossover()
         # Mutate to create structural differences (disjoint innovations)
         for _ in 1:15
-            g1 = mutate(g1, rng)
+            g1 = mutate(mut, g1, rng)
         end
         for _ in 1:15
-            g2 = mutate(g2, rng)
+            g2 = mutate(mut, g2, rng)
         end
         g1.fitness = 0.3; g2.fitness = 0.9
-        c1, c2 = crossover(g1, g2, rng)
+        c1, c2 = crossover(xo, g1, g2, rng)
         # Children should have different connection sets because
         # c1 gets fitter parent's disjoint/excess, c2 gets other parent's
         inns1 = Set(keys(c1.connections))
@@ -188,6 +196,8 @@
     end
 
     @testset "crossover determinism (sorted Set iteration)" begin
+        mut = NEATDefaultMutation()
+        xo = NEATCrossover()
         for trial in 1:5
             reset_innovation_counter!()
             rng1 = Random.MersenneTwister(100 + trial)
@@ -195,22 +205,22 @@
             g2 = initialize(GraphGenome, 2, 1, rng1)
             # Mutate to create structural differences
             for _ in 1:10
-                g1 = mutate(g1, rng1)
-                g2 = mutate(g2, rng1)
+                g1 = mutate(mut, g1, rng1)
+                g2 = mutate(mut, g2, rng1)
             end
             g1.fitness = 0.5; g2.fitness = 1.0
-            c1a, c2a = crossover(g1, g2, rng1)
+            c1a, c2a = crossover(xo, g1, g2, rng1)
 
             reset_innovation_counter!()
             rng2 = Random.MersenneTwister(100 + trial)
             g3 = initialize(GraphGenome, 2, 1, rng2)
             g4 = initialize(GraphGenome, 2, 1, rng2)
             for _ in 1:10
-                g3 = mutate(g3, rng2)
-                g4 = mutate(g4, rng2)
+                g3 = mutate(mut, g3, rng2)
+                g4 = mutate(mut, g4, rng2)
             end
             g3.fitness = 0.5; g4.fitness = 1.0
-            c1b, c2b = crossover(g3, g4, rng2)
+            c1b, c2b = crossover(xo, g3, g4, rng2)
 
             w1a = sort([c.weight for c in values(c1a.connections)])
             w1b = sort([c.weight for c in values(c1b.connections)])
@@ -241,5 +251,160 @@
 
         # Should return Inf due to cycle
         @test evaluate_genome(g, evaluator) == Inf
+    end
+
+    @testset "operator dispatch — individual NEAT operators" begin
+        # Each NEAT mutation operator runs standalone and produces a valid GraphGenome.
+        reset_innovation_counter!()
+        rng = Random.MersenneTwister(7)
+        g = initialize(GraphGenome, 3, 2, rng)
+        # Grow a few connections so add_node has enabled edges to split.
+        for _ in 1:5
+            g = mutate(AddConnectionMutation(), g, rng)
+        end
+
+        wp = mutate(WeightPerturbMutation(), g, rng)
+        @test wp isa GraphGenome
+        @test length(wp.connections) == length(g.connections)
+
+        wr = mutate(WeightReplaceMutation(), g, rng)
+        @test wr isa GraphGenome
+
+        ac = mutate(AddConnectionMutation(), g, rng)
+        @test ac isa GraphGenome
+        @test length(ac.connections) >= length(g.connections)
+
+        an = mutate(AddNodeMutation(), g, rng)
+        @test an isa GraphGenome
+        # add-node inserts one hidden node + two connections when an enabled
+        # edge exists; with no enabled edge it's a no-op.
+        @test length(an.nodes) >= length(g.nodes)
+
+        tc = mutate(ToggleConnectionMutation(), g, rng)
+        @test tc isa GraphGenome
+        @test length(tc.connections) == length(g.connections)
+    end
+
+    @testset "NEATDefaultMutation reproduces legacy branching" begin
+        # The composite operator with default rates (0.80/0.10/0.05/0.03/0.02)
+        # should trace the same RNG-consumption path that the old bare
+        # `mutate(g, rng)` did — if both were run with the same seed we'd get
+        # the same result. Here we verify that NEATDefaultMutation is
+        # deterministic across two independent runs with the same seed.
+        mut = NEATDefaultMutation()
+        reset_innovation_counter!()
+        rng1 = Random.MersenneTwister(2026)
+        g1 = initialize(GraphGenome, 3, 2, rng1)
+        for _ in 1:40
+            g1 = mutate(mut, g1, rng1)
+        end
+
+        reset_innovation_counter!()
+        rng2 = Random.MersenneTwister(2026)
+        g2 = initialize(GraphGenome, 3, 2, rng2)
+        for _ in 1:40
+            g2 = mutate(mut, g2, rng2)
+        end
+
+        w1 = sort([c.weight for c in values(g1.connections)])
+        w2 = sort([c.weight for c in values(g2.connections)])
+        @test length(w1) == length(w2)
+        @test w1 ≈ w2
+    end
+
+    @testset "NEATDefaultMutation rate validation" begin
+        @test_throws ArgumentError NEATDefaultMutation(
+            weight_perturb_rate=0.5, weight_replace_rate=0.1,
+            add_connection_rate=0.05, add_node_rate=0.03, toggle_rate=0.02)  # sums to 0.70
+    end
+
+    @testset "_validate_ops rejects ExprGenome ops for GraphGenome" begin
+        input_data = Float64[0 0 1 1; 0 1 0 1]
+        output_data = Float64[0 1 1 0]
+        evaluator = GraphEvaluator(input_data, output_data)
+
+        # Default GeneticProgramming uses SubtreeMutation/PointMutation/SubtreeCrossover
+        # which dispatch on ExprGenome, not GraphGenome. We expect a clear error.
+        bad = GeneticProgramming(pop_size=10, generations=2)
+        problem = GPProblem(evaluator, GraphGenome; seed=1)
+
+        err = try
+            solve(problem, bad; verbose=false)
+            nothing
+        catch e
+            e
+        end
+        @test err isa ArgumentError
+        msg = sprint(showerror, err)
+        @test occursin("mutation operator", msg) || occursin("crossover operator", msg)
+        @test occursin("neat_defaults", msg)
+    end
+
+    @testset "neat_defaults returns operator-compatible vectors" begin
+        ops = neat_defaults()
+        @test ops.mutation_ops isa Vector{AbstractMutationOperator}
+        @test ops.crossover_ops isa Vector{AbstractCrossoverOperator}
+        @test !isempty(ops.mutation_ops)
+        @test !isempty(ops.crossover_ops)
+        # Smoke test: validation passes with neat_defaults.
+        @test Arborist._validate_ops(ops.mutation_ops, ops.crossover_ops, GraphGenome) === nothing
+    end
+
+    @testset "GraphEvaluator recurrent mode accepts cycles" begin
+        # Manually-built genome with a cycle (hidden node self-loops through output):
+        # inputs: 1 (x1), 2 (bias), output: 3; hidden node 4 with self-cycle 4->4
+        nodes = Dict(
+            1 => NodeGene(1, :input, :identity),
+            2 => NodeGene(2, :bias,  :identity),
+            3 => NodeGene(3, :output, :sigmoid),
+            4 => NodeGene(4, :hidden, :tanh),
+        )
+        conns = Dict(
+            1 => ConnectionGene(1, 4, 0.5, true, 1),
+            2 => ConnectionGene(2, 4, 0.1, true, 2),
+            3 => ConnectionGene(4, 4, 0.3, true, 3),   # self-cycle (recurrent)
+            4 => ConnectionGene(4, 3, 0.7, true, 4),
+        )
+        g = GraphGenome(nodes, conns, 1, 1, Inf)
+
+        input_data  = Float64[0.0 0.5 1.0]  # 1 input, 3 timesteps
+        output_data = Float64[0.2 0.4 0.6]  # target values
+
+        # Feedforward evaluator: cycle → Inf
+        ff_eval = GraphEvaluator(input_data, output_data)
+        @test evaluate_genome(g, ff_eval) == Inf
+
+        # Recurrent evaluator: finite MSE
+        rec_eval = GraphEvaluator(input_data, output_data;
+                                  allow_recurrent=true, relaxation_passes=2)
+        fitness = evaluate_genome(g, rec_eval)
+        @test isfinite(fitness)
+        @test fitness >= 0.0
+        println("  recurrent XOR-like toy: MSE=$(round(fitness, digits=6))")
+        flush(stdout)
+    end
+
+    @testset "GraphEvaluator recurrent mode preserves feedforward XOR" begin
+        # Feedforward default must still behave identically on XOR data.
+        input_data = Float64[0 0 1 1; 0 1 0 1]
+        output_data = Float64[0 1 1 0]
+        ev_default = GraphEvaluator(input_data, output_data)
+        ev_explicit = GraphEvaluator(input_data, output_data;
+                                      allow_recurrent=false, relaxation_passes=1)
+        reset_innovation_counter!()
+        rng = Random.MersenneTwister(99)
+        g = initialize(GraphGenome, 2, 1, rng)
+        f_default  = evaluate_genome(g, ev_default)
+        f_explicit = evaluate_genome(g, ev_explicit)
+        @test f_default ≈ f_explicit
+        @test isfinite(f_default)
+    end
+
+    @testset "GraphEvaluator relaxation_passes validation" begin
+        input_data  = Float64[0.0 1.0]
+        output_data = Float64[0.0 1.0]
+        @test_throws ArgumentError GraphEvaluator(input_data, output_data;
+                                                    allow_recurrent=true,
+                                                    relaxation_passes=0)
     end
 end

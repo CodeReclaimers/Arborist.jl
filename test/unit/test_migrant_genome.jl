@@ -57,4 +57,37 @@
         @test reconstructed.primitives == genome.primitives
         @test reconstructed.max_depth == genome.max_depth
     end
+
+    @testset "GraphGenome round-trip" begin
+        reset_innovation_counter!()
+        rng = Random.MersenneTwister(42)
+        g = initialize(GraphGenome, 3, 2, rng)
+        # Evolve some structure so the round-trip exercises more than the
+        # minimal fully-connected init.
+        mut = NEATDefaultMutation()
+        for _ in 1:20
+            g = mutate(mut, g, rng)
+        end
+        g.fitness = 0.42
+
+        migrant = to_migrant(g, g.fitness)
+        @test migrant isa MigrantGenome
+        @test migrant.fitness == 0.42
+        @test migrant.genome_type === :GraphGenome
+
+        reconstructed = from_migrant(migrant, GraphGenome)
+        @test reconstructed isa GraphGenome
+        @test reconstructed.n_inputs == g.n_inputs
+        @test reconstructed.n_outputs == g.n_outputs
+        @test reconstructed.fitness == g.fitness
+        @test length(reconstructed.nodes) == length(g.nodes)
+        @test length(reconstructed.connections) == length(g.connections)
+        # Connection innovations should round-trip exactly.
+        @test Set(keys(reconstructed.connections)) == Set(keys(g.connections))
+
+        # Deep-copy check: mutating the reconstruction should not affect the original.
+        first_inn = first(keys(reconstructed.connections))
+        reconstructed.connections[first_inn].weight = 12345.0
+        @test g.connections[first_inn].weight != 12345.0
+    end
 end

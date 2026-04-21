@@ -134,4 +134,56 @@ using Distributed
             rmprocs(added)
         end
     end
+
+    @testset "Sync distributed GraphGenome (2 islands, disjoint innovations)" begin
+        added = addprocs(2; exeflags="--project=$(Base.active_project())")
+        @everywhere using Arborist
+
+        try
+            input_data = Float64[0 0 1 1; 0 1 0 1]
+            output_data = Float64[0 1 1 0]
+            evaluator = GraphEvaluator(input_data, output_data)
+            problem = GPProblem(evaluator, GraphGenome; seed=42)
+
+            ops = neat_defaults()
+            algorithm = IslandModel(
+                n_islands=2,
+                island_algorithm=GeneticProgramming(
+                    pop_size=20, generations=10,
+                    mutation_rate=0.5, crossover_rate=0.2,
+                    parallel=false,
+                    mutation_ops=ops.mutation_ops,
+                    crossover_ops=ops.crossover_ops,
+                ),
+                migration_interval=5, migration_size=2,
+                distributed=true, async=false,
+            )
+
+            result = solve(problem, algorithm; verbose=false)
+            @test result isa GPResult{GraphGenome}
+            @test result.best_fitness >= 0.0
+            @test result.best_fitness < Inf
+            @test length(result.fitness_history) == 10
+            @test length(result.population) == 2 * 20
+
+            # Disjoint-range verification: every genome in the final population
+            # should have all innovations within exactly one worker's range
+            # ([0, STRIDE) or [STRIDE, 2*STRIDE)). If worker 1 assigned innovation
+            # 3 and worker 2 also assigned innovation 3, migrants would carry
+            # innovation 3 back to worker 1 where it would match an unrelated
+            # connection — that's the bug this fix prevents. Post-migration,
+            # genomes can carry innovations from either range, but never values
+            # outside both ranges.
+            stride = Arborist.INNOVATION_STRIDE
+            for g in result.population
+                for inn in keys(g.connections)
+                    in_range_1 = 0 < inn <= stride
+                    in_range_2 = stride < inn <= 2 * stride
+                    @test in_range_1 || in_range_2
+                end
+            end
+        finally
+            rmprocs(added)
+        end
+    end
 end

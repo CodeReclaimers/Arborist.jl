@@ -109,4 +109,46 @@
         println("  _naturalize_migrant: ExprGenome state rebound to destination")
         flush(stdout)
     end
+
+    @testset "IslandModel solve with GraphGenome (sequential)" begin
+        input_data = Float64[0 0 1 1; 0 1 0 1]
+        output_data = Float64[0 1 1 0]
+        evaluator = GraphEvaluator(input_data, output_data)
+        problem = GPProblem(evaluator, GraphGenome; seed=42)
+
+        ops = neat_defaults()
+        algorithm = IslandModel(
+            n_islands=3,
+            island_algorithm=GeneticProgramming(
+                pop_size=30, generations=20,
+                mutation_rate=0.5, crossover_rate=0.3,
+                mutation_ops=ops.mutation_ops,
+                crossover_ops=ops.crossover_ops,
+                speciation=ThresholdSpeciation(threshold=3.0),
+            ),
+            migration_interval=5,
+            migration_size=2,
+        )
+
+        result = solve(problem, algorithm; verbose=false)
+        @test result isa GPResult{GraphGenome}
+        @test result.best_fitness >= 0.0
+        @test isfinite(result.best_fitness)
+        @test length(result.fitness_history) == 20
+        println("  IslandModel GraphGenome: best_fitness=$(round(result.best_fitness, digits=4)), " *
+                "nodes=$(length(result.best_genome.nodes))")
+        flush(stdout)
+    end
+
+    @testset "IslandModel rejects incompatible ops for GraphGenome" begin
+        input_data = Float64[0 0 1 1; 0 1 0 1]
+        output_data = Float64[0 1 1 0]
+        evaluator = GraphEvaluator(input_data, output_data)
+        problem = GPProblem(evaluator, GraphGenome; seed=1)
+
+        # Default GP ops are ExprGenome-flavored — must be caught at solve entry.
+        bad = IslandModel(n_islands=2,
+                          island_algorithm=GeneticProgramming(pop_size=10, generations=2))
+        @test_throws ArgumentError solve(problem, bad; verbose=false)
+    end
 end

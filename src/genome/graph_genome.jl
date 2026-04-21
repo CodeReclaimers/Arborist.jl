@@ -26,14 +26,51 @@ Reset the global innovation counter to 0. Must be called at the start
 of each `solve()` call for GraphGenome problems.
 """
 function reset_innovation_counter!()
+    init_innovation_range!(0)
+end
+
+"""
+    init_innovation_range!(offset::Int)
+
+Set the module-local innovation counter to `offset`. Used by the
+distributed island model to give each worker a disjoint range of
+innovation IDs so that NEAT crossover on migrants does not align
+structurally unrelated genes under the same innovation number.
+
+Callers in distributed mode typically use offsets like
+`(island_id - 1) * 10^9` — disjoint as long as no single worker allocates
+more than `10^9` structural mutations in a run. The sequential island
+model does not need this: all islands share the same process-global
+counter, which already ensures uniqueness.
+"""
+function init_innovation_range!(offset::Int)
     lock(_innovation_lock) do
-        _innovation_counter[] = 0
+        _innovation_counter[] = offset
     end
 end
 
 # =============================================================================
 # Node and connection genes
 # =============================================================================
+
+"""
+    GraphGenomeContext
+
+Per-island state carrier for `GraphGenome` under `IslandModel`. Parallels
+`GenState` (ExprGenome) and `TreeGenomeContext` (TreeGenome): all three
+carry `.rng` so that island-loop sites reading `state.rng` work uniformly,
+and all three are the second element of the tuple returned from
+`_initialize_population`.
+
+The extra `n_inputs` / `n_outputs` fields are kept available for future use
+(e.g. cross-island initialization) but aren't currently consulted — migrant
+GraphGenomes carry their own `n_inputs` / `n_outputs`.
+"""
+struct GraphGenomeContext
+    rng::AbstractRNG
+    n_inputs::Int
+    n_outputs::Int
+end
 
 """
     NodeGene
@@ -160,43 +197,13 @@ end
 # =============================================================================
 # AbstractGenome interface
 # =============================================================================
-
-function mutate(g::GraphGenome, rng::AbstractRNG)
-    new_g = _copy_graph(g)
-    r = rand(rng)
-    if r < 0.8
-        _mutate_weights!(new_g, rng)
-    elseif r < 0.9
-        _mutate_weight_replace!(new_g, rng)
-    elseif r < 0.95
-        _mutate_add_connection!(new_g, rng)
-    elseif r < 0.98
-        _mutate_add_node!(new_g, rng)
-    else
-        _mutate_toggle_connection!(new_g, rng)
-    end
-    return new_g
-end
-
-function crossover(g1::GraphGenome, g2::GraphGenome, rng::AbstractRNG)
-    # NEAT crossover: disjoint/excess genes come from the fitter parent.
-    # Use cached fitness to determine which parent is fitter (lower = better).
-    # Standard NEAT produces one child; the framework needs two.
-    # The second child swaps parent order so that disjoint/excess genes
-    # from the less-fit parent are also preserved in the population.
-    if g1.fitness <= g2.fitness
-        child1 = _neat_crossover(g1, g2, rng)
-        child2 = _neat_crossover(g2, g1, rng)
-    else
-        child1 = _neat_crossover(g2, g1, rng)
-        child2 = _neat_crossover(g1, g2, rng)
-    end
-    return (child1, child2)
-end
-
-# Operator-dispatch fallbacks for shared _breed_next_generation!.
-crossover(::AbstractCrossoverOperator, g1::GraphGenome, g2::GraphGenome, rng::AbstractRNG) = crossover(g1, g2, rng)
-mutate(::AbstractMutationOperator, g::GraphGenome, rng::AbstractRNG) = mutate(g, rng)
+#
+# Mutation and crossover on GraphGenome go through the framework's operator
+# dispatch (`AbstractMutationOperator` / `AbstractCrossoverOperator`). See
+# `src/operators/neat_mutation.jl` for `NEATDefaultMutation` (canonical
+# Stanley & Miikkulainen branching) and the individual-branch operators, and
+# `src/operators/crossover.jl` for `NEATCrossover`. Use `neat_defaults()` to
+# get a ready-made (mutation_ops, crossover_ops) tuple.
 
 function distance(g1::GraphGenome, g2::GraphGenome)
     _neat_distance(g1, g2)
@@ -227,30 +234,31 @@ end
 # Mutation operators
 # =============================================================================
 
-function _mutate_weights!(g::GraphGenome, rng::AbstractRNG)
-    # Perturb each enabled weight independently with 90% probability.
-    # Standard NEAT: each weight has an independent chance of perturbation.
+function _mutate_weights!(g::GraphGenome, rng::AbstractRNG;
+                          perturb_prob::Float64=0.9, perturb_sigma::Float64=0.3)
+    # Perturb each enabled weight independently with `perturb_prob` probability.
     # Sort by innovation number for deterministic RNG consumption order.
     for c in sort!(collect(values(g.connections)), by=c -> c.innovation)
-        if c.enabled && rand(rng) < 0.9
-            c.weight += randn(rng) * 0.3
+        if c.enabled && rand(rng) < perturb_prob
+            c.weight += randn(rng) * perturb_sigma
         end
     end
 end
 
-function _mutate_weight_replace!(g::GraphGenome, rng::AbstractRNG)
+function _mutate_weight_replace!(g::GraphGenome, rng::AbstractRNG;
+                                 replace_sigma::Float64=2.0)
     conns = sort!(collect(values(g.connections)), by=c -> c.innovation)
     isempty(conns) && return
     c = rand(rng, conns)
-    c.weight = randn(rng) * 2.0
+    c.weight = randn(rng) * replace_sigma
 end
 
-function _mutate_add_connection!(g::GraphGenome, rng::AbstractRNG)
+function _mutate_add_connection!(g::GraphGenome, rng::AbstractRNG;
+                                 max_attempts::Int=20)
     node_ids = sort!(collect(keys(g.nodes)))
     length(node_ids) < 2 && return
 
-    # Try up to 20 times to find a valid new connection
-    for _ in 1:20
+    for _ in 1:max_attempts
         from_id = rand(rng, node_ids)
         to_id = rand(rng, node_ids)
         from_node = g.nodes[from_id]
@@ -273,7 +281,8 @@ function _mutate_add_connection!(g::GraphGenome, rng::AbstractRNG)
     end
 end
 
-function _mutate_add_node!(g::GraphGenome, rng::AbstractRNG)
+function _mutate_add_node!(g::GraphGenome, rng::AbstractRNG;
+                           hidden_activations::Vector{Symbol}=Symbol[:sigmoid, :tanh, :relu])
     enabled_conns = sort!([c for c in values(g.connections) if c.enabled], by=c -> c.innovation)
     isempty(enabled_conns) && return
 
@@ -282,7 +291,7 @@ function _mutate_add_node!(g::GraphGenome, rng::AbstractRNG)
 
     # New hidden node
     new_id = maximum(keys(g.nodes)) + 1
-    activation = rand(rng, [:sigmoid, :tanh, :relu])
+    activation = rand(rng, hidden_activations)
     g.nodes[new_id] = NodeGene(new_id, :hidden, activation)
 
     # Two new connections: in_node -> new_node -> out_node
@@ -420,20 +429,47 @@ end
 
 Evaluates a `GraphGenome` by building the neural network from the genome
 topology, running it on input data, and computing MSE against target outputs.
+
+# Fields
+- `input_data::Matrix{Float64}`: `n_inputs × n_samples`. In recurrent mode,
+  samples are treated as a time sequence and node activations persist across
+  samples.
+- `output_data::Matrix{Float64}`: `n_outputs × n_samples`.
+- `activation_fns::Dict{Symbol, Function}`: activation function lookup.
+- `allow_recurrent::Bool`: when `true`, cycles in the genome are allowed and
+  evaluation uses a relaxation loop with state that persists across samples.
+  Default `false` — cycles return `Inf`, state resets per sample.
+- `relaxation_passes::Int`: number of activation sweeps per sample when
+  `allow_recurrent=true`. Default `1`. Higher values let information
+  propagate further through the network within a single sample.
 """
 struct GraphEvaluator <: AbstractEvaluator
     input_data::Matrix{Float64}    # n_inputs × n_samples
     output_data::Matrix{Float64}   # n_outputs × n_samples
     activation_fns::Dict{Symbol, Function}
+    allow_recurrent::Bool
+    relaxation_passes::Int
 end
 
 """
-    GraphEvaluator(input_data, output_data)
+    GraphEvaluator(input_data, output_data;
+                   activation_fns=ACTIVATION_FNS,
+                   allow_recurrent=false,
+                   relaxation_passes=1)
 
-Construct a `GraphEvaluator` with default activation functions.
+Construct a `GraphEvaluator`. Defaults match the original feedforward
+behavior: cycles return `Inf`, per-sample state reset, single forward pass.
+Pass `allow_recurrent=true` for sequence/memory tasks where node
+activations should persist across samples (and cycles are legal).
 """
-function GraphEvaluator(input_data::Matrix{Float64}, output_data::Matrix{Float64})
-    GraphEvaluator(input_data, output_data, ACTIVATION_FNS)
+function GraphEvaluator(input_data::Matrix{Float64}, output_data::Matrix{Float64};
+                        activation_fns::Dict{Symbol, Function}=ACTIVATION_FNS,
+                        allow_recurrent::Bool=false,
+                        relaxation_passes::Int=1)
+    relaxation_passes >= 1 || throw(ArgumentError(
+        "relaxation_passes must be >= 1 (got $relaxation_passes)"))
+    GraphEvaluator(input_data, output_data, activation_fns,
+                   allow_recurrent, relaxation_passes)
 end
 
 input_signature(e::GraphEvaluator) = Dict(Symbol("x$i") => Float64 for i in 1:size(e.input_data, 1))
@@ -442,69 +478,147 @@ output_signature(e::GraphEvaluator) = Dict(Symbol("y$i") => Float64 for i in 1:s
 """
     evaluate_genome(g::GraphGenome, e::GraphEvaluator) -> Float64
 
-Evaluate a GraphGenome by forward-propagating inputs through the network.
-Returns mean squared error against target outputs. Returns Inf if the
-network contains cycles or evaluation throws.
+Evaluate a GraphGenome by propagating inputs through the network. Returns
+mean squared error against target outputs.
+
+- Feedforward mode (`e.allow_recurrent=false`, default): topologically
+  sorts the network; returns `Inf` on cycle. Each sample is independent —
+  node activations reset between samples.
+- Recurrent mode (`e.allow_recurrent=true`): cycles are allowed. Node
+  activations **persist across samples** (samples are treated as a time
+  sequence). Each sample runs `e.relaxation_passes` activation sweeps over
+  all non-input nodes in sorted-id order, reading from the previous pass's
+  values for inputs from cyclic edges.
 """
 function evaluate_genome(g::GraphGenome, e::GraphEvaluator)
     try
-        n_samples = size(e.input_data, 2)
-        total_se = 0.0
-
-        # Topological sort of enabled connections
-        eval_order = _topological_sort(g)
-        eval_order === nothing && return Inf
-
-        # Get sorted input and output node IDs
-        input_ids = sort!([n.id for n in values(g.nodes) if n.type == :input])
-        output_ids = sort!([n.id for n in values(g.nodes) if n.type == :output])
-        bias_ids = [n.id for n in values(g.nodes) if n.type == :bias]
-
-        for s in 1:n_samples
-            # Initialize node values
-            node_vals = Dict{Int, Float64}()
-
-            for (idx, nid) in enumerate(input_ids)
-                node_vals[nid] = e.input_data[idx, s]
-            end
-            for nid in bias_ids
-                node_vals[nid] = 1.0
-            end
-
-            # Forward propagation in topological order
-            for nid in eval_order
-                haskey(g.nodes, nid) || continue
-                node = g.nodes[nid]
-                node.type in (:input, :bias) && continue
-
-                # Sum incoming weights
-                total = 0.0
-                for c in values(g.connections)
-                    if c.enabled && c.out_node == nid
-                        total += c.weight * get(node_vals, c.in_node, 0.0)
-                    end
-                end
-
-                # Apply activation
-                act_fn = get(e.activation_fns, node.activation, identity)
-                node_vals[nid] = act_fn(total)
-            end
-
-            # Compute squared error for outputs
-            for (idx, nid) in enumerate(output_ids)
-                predicted = get(node_vals, nid, 0.0)
-                expected = e.output_data[idx, s]
-                se = (predicted - expected)^2
-                isfinite(se) || return Inf
-                total_se += se
-            end
+        if e.allow_recurrent
+            return _evaluate_recurrent(g, e)
+        else
+            return _evaluate_feedforward(g, e)
         end
-
-        return total_se / (n_samples * length(output_ids))
     catch e
         e isa InterruptException && rethrow()
         return Inf
     end
+end
+
+function _evaluate_feedforward(g::GraphGenome, e::GraphEvaluator)
+    n_samples = size(e.input_data, 2)
+    total_se = 0.0
+
+    # Topological sort of enabled connections
+    eval_order = _topological_sort(g)
+    eval_order === nothing && return Inf
+
+    # Get sorted input and output node IDs
+    input_ids = sort!([n.id for n in values(g.nodes) if n.type == :input])
+    output_ids = sort!([n.id for n in values(g.nodes) if n.type == :output])
+    bias_ids = [n.id for n in values(g.nodes) if n.type == :bias]
+
+    for s in 1:n_samples
+        # Initialize node values
+        node_vals = Dict{Int, Float64}()
+
+        for (idx, nid) in enumerate(input_ids)
+            node_vals[nid] = e.input_data[idx, s]
+        end
+        for nid in bias_ids
+            node_vals[nid] = 1.0
+        end
+
+        # Forward propagation in topological order
+        for nid in eval_order
+            haskey(g.nodes, nid) || continue
+            node = g.nodes[nid]
+            node.type in (:input, :bias) && continue
+
+            # Sum incoming weights
+            total = 0.0
+            for c in values(g.connections)
+                if c.enabled && c.out_node == nid
+                    total += c.weight * get(node_vals, c.in_node, 0.0)
+                end
+            end
+
+            # Apply activation
+            act_fn = get(e.activation_fns, node.activation, identity)
+            node_vals[nid] = act_fn(total)
+        end
+
+        # Compute squared error for outputs
+        for (idx, nid) in enumerate(output_ids)
+            predicted = get(node_vals, nid, 0.0)
+            expected = e.output_data[idx, s]
+            se = (predicted - expected)^2
+            isfinite(se) || return Inf
+            total_se += se
+        end
+    end
+
+    return total_se / (n_samples * length(output_ids))
+end
+
+function _evaluate_recurrent(g::GraphGenome, e::GraphEvaluator)
+    n_samples = size(e.input_data, 2)
+    total_se = 0.0
+
+    input_ids  = sort!([n.id for n in values(g.nodes) if n.type == :input])
+    output_ids = sort!([n.id for n in values(g.nodes) if n.type == :output])
+    bias_ids   = [n.id for n in values(g.nodes) if n.type == :bias]
+
+    # Sort all non-input/non-bias nodes by id for deterministic update order.
+    # Recurrent edges consume the previous pass's value of their in_node;
+    # forward edges consume the current pass's value if updated earlier in
+    # the sweep. Sorted-id order matches NEAT's add-node id-growth pattern
+    # (new hidden nodes get the next largest id), so the natural reading
+    # order roughly matches topological order where it exists.
+    update_ids = sort!([n.id for n in values(g.nodes) if !(n.type in (:input, :bias))])
+
+    # Persistent state across samples (the "recurrent" in allow_recurrent).
+    # Start at zero.
+    node_vals = Dict{Int, Float64}(nid => 0.0 for nid in keys(g.nodes))
+
+    for s in 1:n_samples
+        # Overwrite inputs and bias for this timestep.
+        for (idx, nid) in enumerate(input_ids)
+            node_vals[nid] = e.input_data[idx, s]
+        end
+        for nid in bias_ids
+            node_vals[nid] = 1.0
+        end
+
+        # Relaxation: run `relaxation_passes` sweeps, each reading from a
+        # snapshot of the previous pass.
+        for _ in 1:e.relaxation_passes
+            prev = copy(node_vals)
+            for nid in update_ids
+                haskey(g.nodes, nid) || continue
+                node = g.nodes[nid]
+
+                total = 0.0
+                for c in values(g.connections)
+                    if c.enabled && c.out_node == nid
+                        total += c.weight * get(prev, c.in_node, 0.0)
+                    end
+                end
+
+                act_fn = get(e.activation_fns, node.activation, identity)
+                node_vals[nid] = act_fn(total)
+            end
+        end
+
+        # Error at the end of the relaxation.
+        for (idx, nid) in enumerate(output_ids)
+            predicted = get(node_vals, nid, 0.0)
+            expected = e.output_data[idx, s]
+            se = (predicted - expected)^2
+            isfinite(se) || return Inf
+            total_se += se
+        end
+    end
+
+    return total_se / (n_samples * length(output_ids))
 end
 
 """Topological sort of network nodes. Returns nothing if cycle detected."""
@@ -575,6 +689,7 @@ function solve(problem::GPProblem{GraphGenome, E},
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
+    _validate_ops(algorithm.mutation_ops, algorithm.crossover_ops, GraphGenome)
     reset_innovation_counter!()
 
     evaluator = problem.evaluator
@@ -646,4 +761,30 @@ function solve(problem::GPProblem{GraphGenome, E},
         algorithm.generations, time() - t0,
         fitnesses[1] < algorithm.convergence_threshold
     )
+end
+
+# =============================================================================
+# IslandModel support — _initialize_population for GraphGenome
+# =============================================================================
+#
+# The generic IslandModel solve path (src/solve.jl) calls
+# `_initialize_population(problem, alg, rng)` per island and expects a
+# `(genomes, state)` tuple where `state.rng` is consulted by the per-island
+# loop. Reset of the innovation counter is the caller's responsibility —
+# sequential IslandModel resets once before spawning islands so all islands
+# share a coherent innovation history.
+function _initialize_population(problem::GPProblem{GraphGenome, E},
+                                 algorithm::GeneticProgramming,
+                                 rng::AbstractRNG) where {E<:GraphEvaluator}
+    evaluator = problem.evaluator
+    n_in  = size(evaluator.input_data, 1)
+    n_out = size(evaluator.output_data, 1)
+    pop_size = algorithm.pop_size
+
+    genomes = Vector{GraphGenome}(undef, pop_size)
+    for i in 1:pop_size
+        genomes[i] = initialize(GraphGenome, n_in, n_out, rng)
+    end
+
+    return (genomes, GraphGenomeContext(rng, n_in, n_out))
 end

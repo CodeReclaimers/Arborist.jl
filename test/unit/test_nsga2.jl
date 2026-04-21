@@ -291,4 +291,75 @@ using DynamicExpressions: OperatorEnum, Node
         println("  Callback: $(length(callback_log)) generations logged")
     end
 
+    # =========================================================================
+    # GraphGenome + NSGA-II
+    # =========================================================================
+
+    @testset "NSGA-II with GraphGenome (Pareto fitness vs complexity)" begin
+        # XOR as the target. Pareto front should span a range of connection
+        # counts — with ParsimonyEvaluator, the second objective is the number
+        # of enabled connections (from `complexity(::GraphGenome)`).
+        input_data = Float64[0 0 1 1; 0 1 0 1]
+        output_data = Float64[0 1 1 0]
+        evaluator = ParsimonyEvaluator(GraphEvaluator(input_data, output_data))
+
+        problem = GPProblem(evaluator, GraphGenome; seed=17)
+        ops = neat_defaults()
+        algorithm = NSGAII(
+            pop_size=40, generations=20,
+            mutation_rate=0.5, crossover_rate=0.3, parallel=false,
+            mutation_ops=ops.mutation_ops,
+            crossover_ops=ops.crossover_ops,
+        )
+
+        result = solve(problem, algorithm; verbose=false)
+        @test result isa NSGAIIResult{GraphGenome}
+        @test result.objective_names == ["fitness", "complexity"]
+        @test !isempty(result.pareto_front)
+        @test all(g isa GraphGenome for g in result.pareto_front)
+
+        # Pareto front should include at least one non-trivial point.
+        front_fitness     = [f[1] for f in result.pareto_fitnesses]
+        front_complexity  = [f[2] for f in result.pareto_fitnesses]
+        @test all(isfinite, front_fitness)
+        @test all(c -> c >= 0.0, front_complexity)
+
+        # Hypervolume should be positive (reference point is derived from
+        # the worst finite objective values scaled by 1.1).
+        @test any(h -> h > 0.0, result.hypervolume_history)
+
+        println("  NSGA-II GraphGenome XOR: front=$(length(result.pareto_front)), " *
+                "fitness range=[$(round(minimum(front_fitness), digits=4)), " *
+                "$(round(maximum(front_fitness), digits=4))], " *
+                "complexity range=[$(minimum(front_complexity)), " *
+                "$(maximum(front_complexity))]")
+        flush(stdout)
+    end
+
+    @testset "NSGA-II with GraphGenome rejects bad ops" begin
+        input_data = Float64[0 0 1 1; 0 1 0 1]
+        output_data = Float64[0 1 1 0]
+        evaluator = ParsimonyEvaluator(GraphEvaluator(input_data, output_data))
+        problem = GPProblem(evaluator, GraphGenome; seed=1)
+        # Default NSGAII ops are ExprGenome-flavored; validation must catch it.
+        algorithm = NSGAII(pop_size=10, generations=2)
+        @test_throws ArgumentError solve(problem, algorithm; verbose=false)
+    end
+
+    @testset "NSGA-II with GraphGenome rejects non-GraphEvaluator" begin
+        # ParsimonyEvaluator wrapping a TableFitnessEvaluator should fail the
+        # init check — GraphGenome needs a GraphEvaluator inside.
+        inputs  = Dict{Symbol, DataType}(:x => Float64)
+        outputs = Dict{Symbol, DataType}(:y => Float64)
+        input_rows  = [Dict{Symbol, Any}(:x => 1.0), Dict{Symbol, Any}(:x => 2.0)]
+        output_rows = [Dict{Symbol, Any}(:y => 2.0), Dict{Symbol, Any}(:y => 4.0)]
+        inner = TableFitnessEvaluator(inputs, outputs, input_rows, output_rows)
+        eval_bad = ParsimonyEvaluator(inner)
+        problem_bad = GPProblem(eval_bad, GraphGenome; seed=1)
+        ops = neat_defaults()
+        alg = NSGAII(pop_size=10, generations=2,
+                     mutation_ops=ops.mutation_ops, crossover_ops=ops.crossover_ops)
+        @test_throws ErrorException solve(problem_bad, alg; verbose=false)
+    end
+
 end  # @testset "NSGA-II"

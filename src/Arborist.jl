@@ -65,6 +65,9 @@ include("solve.jl")
 include("genome/ant_genome.jl")
 include("genome/graph_genome.jl")
 
+# --- NEAT mutation operators (need GraphGenome + NEATCrossover) ---
+include("operators/neat_mutation.jl")
+
 # --- Migration types (needs all genome types) ---
 include("migration.jl")
 
@@ -135,6 +138,14 @@ export
     ExpansionMutation,
     SubtreeCrossover,
     TournamentSelection,
+    WeightPerturbMutation,
+    WeightReplaceMutation,
+    AddConnectionMutation,
+    AddNodeMutation,
+    ToggleConnectionMutation,
+    NEATDefaultMutation,
+    NEATCrossover,
+    neat_defaults,
 
     # Concrete types — speciation
     NoSpeciation,
@@ -167,6 +178,8 @@ export
     GraphEvaluator,
     ACTIVATION_FNS,
     reset_innovation_counter!,
+    init_innovation_range!,
+    GraphGenomeContext,
 
     # Interface functions
     solve,

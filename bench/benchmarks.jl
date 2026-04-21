@@ -975,6 +975,96 @@ function retina_mean_fitness(cfg::Dict, corpus_path::AbstractString)
     )
 end
 
+# ---------------------------------------------------------------------------
+# Mackey-Glass τ=17 time series
+# ---------------------------------------------------------------------------
+
+function _mackey_glass_series(n::Int; τ::Int = 17,
+                               β::Float64 = 0.2, γ::Float64 = 0.1, p::Int = 10,
+                               dt::Float64 = 1.0, burn_in::Int = 500)
+    total = n + burn_in
+    x = zeros(Float64, total + τ + 1)
+    for i in 1:(τ + 1)
+        x[i] = 1.2
+    end
+    function dxdt(xt, xt_delay)
+        return β * xt_delay / (1 + xt_delay^p) - γ * xt
+    end
+    for t in (τ + 1):(total + τ)
+        xt = x[t]
+        xt_delay = x[t - τ]
+        k1 = dxdt(xt, xt_delay)
+        k2 = dxdt(xt + 0.5 * dt * k1, xt_delay)
+        k3 = dxdt(xt + 0.5 * dt * k2, xt_delay)
+        k4 = dxdt(xt + dt * k3,        xt_delay)
+        x[t + 1] = xt + (dt / 6.0) * (k1 + 2k2 + 2k3 + k4)
+    end
+    return x[(τ + burn_in + 1):(τ + burn_in + n + 1)]
+end
+
+# ---------------------------------------------------------------------------
+# Entry point: Mackey-Glass one-step-ahead prediction, recurrent NEAT
+# ---------------------------------------------------------------------------
+
+function mackey_glass_mean_fitness(cfg::Dict, corpus_path::AbstractString)
+    spec = TOML.parsefile(joinpath(corpus_path, "corpus_spec.toml"))
+    n_train = Int(spec["n_train"])
+    τ = Int(spec["tau"])
+    burn_in = Int(spec["burn_in"])
+    pop_size = Int(spec["pop_size"])
+    generations = Int(spec["generations"])
+
+    seed = Int(cfg["seed"])
+
+    series = _mackey_glass_series(n_train; τ=τ, burn_in=burn_in)
+    inputs  = series[1:n_train]
+    targets = series[2:(n_train + 1)]
+    input_data  = reshape(inputs,  1, :)
+    output_data = reshape(targets, 1, :)
+
+    evaluator = GraphEvaluator(input_data, output_data;
+                               allow_recurrent=true, relaxation_passes=2)
+
+    ops = neat_defaults()
+    algorithm = GeneticProgramming(
+        pop_size=pop_size, generations=generations,
+        mutation_rate=0.5, crossover_rate=0.3, elitism=2,
+        mutation_ops=ops.mutation_ops, crossover_ops=ops.crossover_ops,
+        speciation=ThresholdSpeciation(threshold=3.0, min_species_size=2,
+                                       stagnation_limit=20),
+    )
+
+    reset_innovation_counter!()
+    problem = GPProblem(evaluator, GraphGenome; seed=seed)
+
+    t0 = time()
+    result = Arborist.solve(problem, algorithm; verbose=false)
+    wall = time() - t0
+
+    return Dict{String,Any}(
+        "status" => "ok",
+        "metric" => Float64(result.best_fitness),
+        "metric_components" => Dict{String,Any}(
+            "best_fitness" => Float64(result.best_fitness),
+            "generations_run" => result.generations_run,
+            "converged" => result.converged,
+            "best_node_count" => length(result.best_genome.nodes),
+            "best_enabled_conns" => count(c.enabled for c in values(result.best_genome.connections)),
+        ),
+        "wall_clock_seconds" => Float64(wall),
+        "metadata" => Dict{String,Any}(
+            "julia_version" => string(VERSION),
+            "threads_actual" => Threads.nthreads(),
+            "n_train" => n_train,
+            "tau" => τ,
+            "burn_in" => burn_in,
+            "pop_size" => pop_size,
+            "generations" => generations,
+            "notes" => "metric = one-step-ahead prediction MSE on Mackey-Glass τ=17 series",
+        ),
+    )
+end
+
 const _ENTRY_POINTS = Dict{String,Function}(
     "nsga2_binpack_mean_fitness" => nsga2_binpack_mean_fitness,
     "koza_regression_mean_fitness" => koza_regression_mean_fitness,
@@ -985,6 +1075,7 @@ const _ENTRY_POINTS = Dict{String,Function}(
     "double_pole_mean_fitness" => double_pole_mean_fitness,
     "mountain_car_mean_fitness" => mountain_car_mean_fitness,
     "retina_mean_fitness" => retina_mean_fitness,
+    "mackey_glass_mean_fitness" => mackey_glass_mean_fitness,
 )
 
 # ---------------------------------------------------------------------------

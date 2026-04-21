@@ -211,3 +211,22 @@ promotion_sigma = 2.0
 
 corpus_path = "bench/corpus/retina"
 corpus_hash = "sha256:2c3933e824e08cbdabb1210b5e0e0019efcfbaadcdc4e7c3ecda5e6748cd0d8b"
+
+[[benchmarks]]
+name = "mackey_glass_mean_fitness"
+entry_point = "mackey_glass_mean_fitness"
+tier = "quality"
+deterministic = false
+metric_direction = "minimize"
+
+expected_runtime_seconds = 30
+threads = 8
+gpu = "none"
+background_required = false
+
+repetitions = 5
+baseline_seeds = [1, 2, 3, 4, 5]
+promotion_sigma = 2.0
+
+corpus_path = "bench/corpus/mackey_glass"
+corpus_hash = "sha256:05e0898eee75495625b5db150c6da98dbc9f94872392ef9ba206777e2f7e05c9"

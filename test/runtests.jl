@@ -20,6 +20,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
     include("unit/test_sanitizer.jl")
     include("unit/test_ant_genome.jl")
     include("unit/test_graph_genome.jl")
+    include("unit/test_episodic_evaluator.jl")
     include("unit/test_coverage_gaps.jl")
     include("unit/test_nsga2.jl")
     include("unit/test_prompt_context.jl")

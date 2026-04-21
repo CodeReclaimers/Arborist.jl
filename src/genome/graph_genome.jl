@@ -683,6 +683,189 @@ function _copy_graph(g::GraphGenome)
 end
 
 # =============================================================================
+# EpisodicEvaluator — closed-loop control task evaluator
+# =============================================================================
+
+"""
+    EpisodicEvaluator{FInit,FDyn,FRew,FDone,FObs,FDec} <: AbstractEvaluator
+
+Evaluates a `GraphGenome` as a closed-loop policy on an episodic
+environment defined by declarative callables. The network is treated as
+`obs -> action`, and the evaluator drives the loop:
+
+    for ep in 1:n_episodes
+        rng   = MersenneTwister(episode_seed_base + ep)
+        state = initial_state(rng)
+        for step in 1:max_steps
+            obs          = observe(state)
+            net_output   = forward_network(state, obs)
+            action       = decode_action(net_output)
+            next_state   = dynamics(state, action)
+            total       += reward(state, action, next_state)
+            state        = next_state
+            done(state) && break
+        end
+    end
+
+Fitness is `-mean_reward_per_episode` (framework convention is
+lower-is-better, so episodic tasks that want to *maximise* reward are
+negated). On cycle detection in `allow_recurrent=false` mode, returns `Inf`.
+
+# Fields
+- `n_inputs::Int` / `n_outputs::Int` — dimensions the network expects,
+  must match `length(observe(state))` and `length(net_output)`.
+- `initial_state::FInit` — `rng -> state`. Must be reproducible from rng.
+- `dynamics::FDyn` — `(state, action) -> next_state`.
+- `reward::FRew` — `(state, action, next_state) -> Float64`.
+- `done::FDone` — `state -> Bool`. Stops the episode early when `true`.
+- `observe::FObs` — `state -> Vector{Float64}` of length `n_inputs`.
+- `decode_action::FDec` — `Vector{Float64}` of length `n_outputs` → action.
+- `max_steps::Int` — per-episode step cap.
+- `n_episodes::Int` — rollouts averaged per `evaluate_genome` call.
+- `episode_seed_base::Int` — `rng = MersenneTwister(base + ep_index)`.
+- `activation_fns::Dict{Symbol,Function}` — defaults to `ACTIVATION_FNS`.
+- `allow_recurrent::Bool` — defaults `true` (episodic tasks usually want
+  persistent hidden-node state across timesteps).
+- `relaxation_passes::Int` — recurrent-mode sweeps per step; default `1`.
+
+# Design
+The shape is declarative / pure-functional by default (see
+memory/episodic_evaluator_design.md). For environments with heavy
+reusable state (physics-engine handle, loaded dataset), a future
+`StatefulEpisodicEvaluator` subtype can offer the `reset!`/`step!`
+idiom; it is intentionally not built yet.
+"""
+struct EpisodicEvaluator{FInit,FDyn,FRew,FDone,FObs,FDec} <: AbstractEvaluator
+    n_inputs::Int
+    n_outputs::Int
+    initial_state::FInit
+    dynamics::FDyn
+    reward::FRew
+    done::FDone
+    observe::FObs
+    decode_action::FDec
+    max_steps::Int
+    n_episodes::Int
+    episode_seed_base::Int
+    activation_fns::Dict{Symbol,Function}
+    allow_recurrent::Bool
+    relaxation_passes::Int
+end
+
+"""
+    EpisodicEvaluator(n_inputs, n_outputs, initial_state, dynamics, reward, done,
+                      observe, decode_action; max_steps, n_episodes, ...)
+
+Outer constructor. Keyword-argument defaults:
+
+- `max_steps = 1000`
+- `n_episodes = 1`
+- `episode_seed_base = 0`
+- `activation_fns = ACTIVATION_FNS`
+- `allow_recurrent = true`
+- `relaxation_passes = 1`
+"""
+function EpisodicEvaluator(n_inputs::Int, n_outputs::Int,
+                            initial_state, dynamics, reward, done,
+                            observe, decode_action;
+                            max_steps::Int = 1000,
+                            n_episodes::Int = 1,
+                            episode_seed_base::Int = 0,
+                            activation_fns::Dict{Symbol,Function} = ACTIVATION_FNS,
+                            allow_recurrent::Bool = true,
+                            relaxation_passes::Int = 1)
+    EpisodicEvaluator(n_inputs, n_outputs,
+                      initial_state, dynamics, reward, done,
+                      observe, decode_action,
+                      max_steps, n_episodes, episode_seed_base,
+                      activation_fns, allow_recurrent, relaxation_passes)
+end
+
+input_signature(e::EpisodicEvaluator) =
+    Dict(Symbol("x$i") => Float64 for i in 1:e.n_inputs)
+output_signature(e::EpisodicEvaluator) =
+    Dict(Symbol("y$i") => Float64 for i in 1:e.n_outputs)
+
+"""
+    evaluate_genome(g::GraphGenome, e::EpisodicEvaluator) -> Float64
+
+Run `e.n_episodes` closed-loop rollouts of `g` as a policy on the
+environment described by `e`, return `-mean_reward_per_episode`.
+"""
+function evaluate_genome(g::GraphGenome, e::EpisodicEvaluator)
+    # Precompute node partitions used every step.
+    input_ids  = sort!([n.id for n in values(g.nodes) if n.type == :input])
+    output_ids = sort!([n.id for n in values(g.nodes) if n.type == :output])
+    bias_ids   = [n.id for n in values(g.nodes) if n.type == :bias]
+
+    length(input_ids) == e.n_inputs || return Inf
+    length(output_ids) == e.n_outputs || return Inf
+
+    local ff_order::Vector{Int}
+    local update_ids::Vector{Int}
+    if e.allow_recurrent
+        update_ids = sort!([n.id for n in values(g.nodes)
+                            if !(n.type in (:input, :bias))])
+    else
+        order = _topological_sort(g)
+        order === nothing && return Inf   # cycle: illegal in feedforward mode
+        ff_order = [nid for nid in order
+                    if haskey(g.nodes, nid) && !(g.nodes[nid].type in (:input, :bias))]
+    end
+
+    total_reward = 0.0
+    for ep in 1:e.n_episodes
+        rng = Random.MersenneTwister(e.episode_seed_base + ep)
+        state = e.initial_state(rng)
+
+        # Persistent per-episode node state. For feedforward mode these
+        # non-input/bias/output values are overwritten every step; for
+        # recurrent mode they carry forward (the intended memory channel).
+        node_vals = Dict{Int, Float64}(nid => 0.0 for nid in keys(g.nodes))
+
+        ep_reward = 0.0
+        step_count = 0
+        while step_count < e.max_steps && !e.done(state)
+            step_count += 1
+
+            obs_vec = e.observe(state)
+            length(obs_vec) == e.n_inputs || return Inf
+
+            for (idx, nid) in enumerate(input_ids)
+                node_vals[nid] = obs_vec[idx]
+            end
+            for nid in bias_ids
+                node_vals[nid] = 1.0
+            end
+
+            if e.allow_recurrent
+                for _ in 1:e.relaxation_passes
+                    prev = copy(node_vals)
+                    _apply_node_activations!(node_vals, prev, update_ids,
+                                              g, e.activation_fns)
+                end
+            else
+                _apply_node_activations!(node_vals, node_vals, ff_order,
+                                          g, e.activation_fns)
+            end
+
+            output_vec = [get(node_vals, nid, 0.0) for nid in output_ids]
+            action = e.decode_action(output_vec)
+
+            next_state = e.dynamics(state, action)
+            r = e.reward(state, action, next_state)
+            isfinite(r) || return Inf
+            ep_reward += r
+            state = next_state
+        end
+
+        total_reward += ep_reward
+    end
+
+    return -(total_reward / e.n_episodes)
+end
+
+# =============================================================================
 # GraphGenome solve method
 # =============================================================================
 

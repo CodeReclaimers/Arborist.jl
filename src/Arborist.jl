@@ -176,6 +176,7 @@ export
     NodeGene,
     ConnectionGene,
     GraphEvaluator,
+    EpisodicEvaluator,
     ACTIVATION_FNS,
     reset_innovation_counter!,
     init_innovation_range!,

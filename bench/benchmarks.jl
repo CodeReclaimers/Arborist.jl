@@ -370,9 +370,203 @@ function koza_regression_mean_fitness(cfg::Dict, corpus_path::AbstractString)
     )
 end
 
+# ---------------------------------------------------------------------------
+# Entry point: 3-bit parity NEAT, best_fitness
+# ---------------------------------------------------------------------------
+
+function parity3_mean_fitness(cfg::Dict, corpus_path::AbstractString)
+    spec = TOML.parsefile(joinpath(corpus_path, "corpus_spec.toml"))
+    n_bits = Int(spec["n_bits"])
+    pop_size = Int(spec["pop_size"])
+    generations = Int(spec["generations"])
+
+    seed = Int(cfg["seed"])
+
+    n_cases = 2^n_bits
+    input_data = zeros(Float64, n_bits, n_cases)
+    output_data = zeros(Float64, 1, n_cases)
+    for bits in 0:(n_cases - 1)
+        n_true = 0
+        for i in 1:n_bits
+            val = (bits >> (i - 1)) & 1
+            input_data[i, bits + 1] = Float64(val)
+            n_true += val
+        end
+        output_data[1, bits + 1] = Float64(n_true % 2)
+    end
+
+    evaluator = GraphEvaluator(input_data, output_data)
+    ops = neat_defaults()
+    algorithm = GeneticProgramming(
+        pop_size=pop_size, generations=generations,
+        mutation_rate=0.5, crossover_rate=0.3, elitism=2,
+        mutation_ops=ops.mutation_ops, crossover_ops=ops.crossover_ops,
+        speciation=ThresholdSpeciation(threshold=3.0, min_species_size=2,
+                                       stagnation_limit=20),
+    )
+
+    reset_innovation_counter!()
+    problem = GPProblem(evaluator, GraphGenome; seed=seed)
+
+    t0 = time()
+    result = Arborist.solve(problem, algorithm; verbose=false)
+    wall = time() - t0
+
+    return Dict{String,Any}(
+        "status" => "ok",
+        "metric" => Float64(result.best_fitness),
+        "metric_components" => Dict{String,Any}(
+            "best_fitness" => Float64(result.best_fitness),
+            "generations_run" => result.generations_run,
+            "converged" => result.converged,
+            "best_node_count" => length(result.best_genome.nodes),
+        ),
+        "wall_clock_seconds" => Float64(wall),
+        "metadata" => Dict{String,Any}(
+            "julia_version" => string(VERSION),
+            "threads_actual" => Threads.nthreads(),
+            "n_bits" => n_bits,
+            "pop_size" => pop_size,
+            "generations" => generations,
+            "notes" => "metric = final best_fitness (MSE) on enumerated 2^n_bits boolean cases",
+        ),
+    )
+end
+
+# ---------------------------------------------------------------------------
+# Two-spirals data generation (shared between single- and multi-objective entry points)
+# ---------------------------------------------------------------------------
+
+function _two_spirals_dataset(n_per_spiral::Int)
+    n_total = 2 * n_per_spiral
+    input_data = zeros(Float64, 2, n_total)
+    output_data = zeros(Float64, 1, n_total)
+    for k in 0:(n_per_spiral - 1)
+        angle = k * π / 16.0
+        radius = 6.5 * (104 - k) / 104.0
+        x = radius * sin(angle)
+        y = radius * cos(angle)
+        input_data[1, 2k + 1] = x
+        input_data[2, 2k + 1] = y
+        output_data[1, 2k + 1] = 1.0
+        input_data[1, 2k + 2] = -x
+        input_data[2, 2k + 2] = -y
+        output_data[1, 2k + 2] = -1.0
+    end
+    return input_data, output_data
+end
+
+# ---------------------------------------------------------------------------
+# Entry point: Two-spirals classification NEAT, best_fitness
+# ---------------------------------------------------------------------------
+
+function two_spirals_mean_fitness(cfg::Dict, corpus_path::AbstractString)
+    spec = TOML.parsefile(joinpath(corpus_path, "corpus_spec.toml"))
+    n_per_spiral = Int(spec["n_per_spiral"])
+    pop_size = Int(spec["pop_size"])
+    generations = Int(spec["generations"])
+
+    seed = Int(cfg["seed"])
+
+    input_data, output_data = _two_spirals_dataset(n_per_spiral)
+    evaluator = GraphEvaluator(input_data, output_data)
+    ops = neat_defaults()
+    algorithm = GeneticProgramming(
+        pop_size=pop_size, generations=generations,
+        mutation_rate=0.5, crossover_rate=0.3, elitism=2,
+        mutation_ops=ops.mutation_ops, crossover_ops=ops.crossover_ops,
+        speciation=ThresholdSpeciation(threshold=3.0, min_species_size=2,
+                                       stagnation_limit=20),
+    )
+
+    reset_innovation_counter!()
+    problem = GPProblem(evaluator, GraphGenome; seed=seed)
+
+    t0 = time()
+    result = Arborist.solve(problem, algorithm; verbose=false)
+    wall = time() - t0
+
+    return Dict{String,Any}(
+        "status" => "ok",
+        "metric" => Float64(result.best_fitness),
+        "metric_components" => Dict{String,Any}(
+            "best_fitness" => Float64(result.best_fitness),
+            "generations_run" => result.generations_run,
+            "converged" => result.converged,
+            "best_node_count" => length(result.best_genome.nodes),
+        ),
+        "wall_clock_seconds" => Float64(wall),
+        "metadata" => Dict{String,Any}(
+            "julia_version" => string(VERSION),
+            "threads_actual" => Threads.nthreads(),
+            "n_per_spiral" => n_per_spiral,
+            "pop_size" => pop_size,
+            "generations" => generations,
+            "notes" => "metric = final best_fitness (MSE) on 2*n_per_spiral Lang-Witbrock points",
+        ),
+    )
+end
+
+# ---------------------------------------------------------------------------
+# Entry point: NSGA-II two-spirals, best Pareto-front fitness
+# ---------------------------------------------------------------------------
+
+function two_spirals_nsga2_mean_fitness(cfg::Dict, corpus_path::AbstractString)
+    spec = TOML.parsefile(joinpath(corpus_path, "corpus_spec.toml"))
+    n_per_spiral = Int(spec["n_per_spiral"])
+    pop_size = Int(spec["pop_size"])
+    generations = Int(spec["generations"])
+
+    seed = Int(cfg["seed"])
+
+    input_data, output_data = _two_spirals_dataset(n_per_spiral)
+    evaluator = ParsimonyEvaluator(GraphEvaluator(input_data, output_data))
+    ops = neat_defaults()
+    algorithm = NSGAII(
+        pop_size=pop_size, generations=generations,
+        mutation_rate=0.5, crossover_rate=0.3, parallel=false,
+        mutation_ops=ops.mutation_ops, crossover_ops=ops.crossover_ops,
+    )
+
+    reset_innovation_counter!()
+    problem = GPProblem(evaluator, GraphGenome; seed=seed)
+
+    t0 = time()
+    result = Arborist.solve(problem, algorithm; verbose=false)
+    wall = time() - t0
+
+    front_fitness = [f[1] for f in result.pareto_fitnesses]
+    front_complexity = [f[2] for f in result.pareto_fitnesses]
+    best_fit = minimum(front_fitness)
+
+    return Dict{String,Any}(
+        "status" => "ok",
+        "metric" => Float64(best_fit),
+        "metric_components" => Dict{String,Any}(
+            "best_fit_on_front" => Float64(best_fit),
+            "pareto_front_size" => length(result.pareto_front),
+            "min_complexity" => Float64(minimum(front_complexity)),
+            "max_complexity" => Float64(maximum(front_complexity)),
+            "hypervolume_final" => Float64(result.hypervolume_history[end]),
+        ),
+        "wall_clock_seconds" => Float64(wall),
+        "metadata" => Dict{String,Any}(
+            "julia_version" => string(VERSION),
+            "threads_actual" => Threads.nthreads(),
+            "n_per_spiral" => n_per_spiral,
+            "pop_size" => pop_size,
+            "generations" => generations,
+            "notes" => "metric = best (lowest) fitness on Pareto front; parsimony vs MSE",
+        ),
+    )
+end
+
 const _ENTRY_POINTS = Dict{String,Function}(
     "nsga2_binpack_mean_fitness" => nsga2_binpack_mean_fitness,
     "koza_regression_mean_fitness" => koza_regression_mean_fitness,
+    "parity3_mean_fitness" => parity3_mean_fitness,
+    "two_spirals_mean_fitness" => two_spirals_mean_fitness,
+    "two_spirals_nsga2_mean_fitness" => two_spirals_nsga2_mean_fitness,
 )
 
 # ---------------------------------------------------------------------------

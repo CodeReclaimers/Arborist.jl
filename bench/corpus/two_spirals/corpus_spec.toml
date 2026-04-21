@@ -1,0 +1,14 @@
+# Two-spirals classification NEAT corpus specification.
+#
+# Lang & Witbrock (1989) parameterization: for k = 0..n_per_spiral-1,
+#   angle  = k * π / 16
+#   radius = 6.5 * (104 - k) / 104
+#   x = radius * sin(angle), y = radius * cos(angle)
+# Spiral A: (x, y, +1). Spiral B: (-x, -y, -1). Total 2 * n_per_spiral.
+# The dataset is fully determined by n_per_spiral.
+
+n_per_spiral = 97
+
+# Solver budget per repetition. Matches test/benchmarks/two_spirals_neat.jl.
+pop_size = 200
+generations = 500

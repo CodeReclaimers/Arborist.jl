@@ -62,3 +62,66 @@ promotion_sigma = 2.0
 
 corpus_path = "bench/corpus/koza1"
 corpus_hash = "sha256:7ed5465cba7593c18bba0e852133c50f1e8602e44d701a15bb09f7cd88411feb"
+
+# ---------------------------------------------------------------------------
+# Phase A neuroevolution benchmarks: GraphGenome / NEAT on classification.
+# Added 2026-04-21. See test/benchmarks/{parity,two_spirals*}_neat.jl for the
+# corresponding test-suite checks and convergence thresholds.
+# ---------------------------------------------------------------------------
+
+[[benchmarks]]
+name = "parity3_mean_fitness"
+entry_point = "parity3_mean_fitness"
+tier = "quality"
+deterministic = false
+metric_direction = "minimize"
+
+expected_runtime_seconds = 10
+threads = 8
+gpu = "none"
+background_required = false
+
+repetitions = 5
+baseline_seeds = [1, 2, 3, 4, 5]
+promotion_sigma = 2.0
+
+corpus_path = "bench/corpus/parity3"
+corpus_hash = "sha256:7139615b5f31a01be6a241f4c8997dfd75069cf0366f41d9e31cb862f22f76c4"
+
+[[benchmarks]]
+name = "two_spirals_mean_fitness"
+entry_point = "two_spirals_mean_fitness"
+tier = "quality"
+deterministic = false
+metric_direction = "minimize"
+
+expected_runtime_seconds = 30
+threads = 8
+gpu = "none"
+background_required = false
+
+repetitions = 5
+baseline_seeds = [1, 2, 3, 4, 5]
+promotion_sigma = 2.0
+
+corpus_path = "bench/corpus/two_spirals"
+corpus_hash = "sha256:6eb1454d2931784b2087b62d1fb96d761dd856e026c86103f305be0340ca3492"
+
+[[benchmarks]]
+name = "two_spirals_nsga2_mean_fitness"
+entry_point = "two_spirals_nsga2_mean_fitness"
+tier = "quality"
+deterministic = false
+metric_direction = "minimize"
+
+expected_runtime_seconds = 10
+threads = 8
+gpu = "none"
+background_required = false
+
+repetitions = 5
+baseline_seeds = [1, 2, 3, 4, 5]
+promotion_sigma = 2.0
+
+corpus_path = "bench/corpus/two_spirals_nsga2"
+corpus_hash = "sha256:b347ea4844c0d83e575ed0cc664bada8b90d210853c83f680480948ebce568ba"

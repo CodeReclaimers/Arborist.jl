@@ -1,0 +1,12 @@
+# NSGA-II two-spirals corpus specification.
+#
+# Same 194-point Lang & Witbrock dataset as bench/corpus/two_spirals, but
+# a separate corpus entry because the solver budget differs and because a
+# hash-changed budget must not silently invalidate the single-objective
+# baseline history.
+
+n_per_spiral = 97
+
+# Solver budget per repetition. Matches test/benchmarks/two_spirals_nsga2_neat.jl.
+pop_size = 150
+generations = 300

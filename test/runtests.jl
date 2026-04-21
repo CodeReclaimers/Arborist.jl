@@ -41,6 +41,9 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
         include("benchmarks/speedup_benchmark.jl")
         include("benchmarks/xor_neat.jl")
         include("benchmarks/xor_nsga2_neat.jl")
+        include("benchmarks/parity_neat.jl")
+        include("benchmarks/two_spirals_neat.jl")
+        include("benchmarks/two_spirals_nsga2_neat.jl")
         include("benchmarks/sequence_memory_neat.jl")
         include("benchmarks/lorenz_recovery.jl")
     else

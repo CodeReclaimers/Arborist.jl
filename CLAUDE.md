@@ -2,6 +2,18 @@
 
 Generic, extensible genetic programming framework for Julia. Problem/Algorithm/Solve pattern modeled on SciML/DiffEq.
 
+## Session Notes
+
+Session updates for this project go to **refstore session notes**, not to
+`progress-YYYYMMDD.md` files. Record via `mcp__refstore__write_session_note`
+(project key `genprog_jl`, display name `Arborist.jl`) — content and cadence
+rules in `CLAUDE.shared.md` still apply (record every commit, include
+decisions + rejected alternatives, verification evidence, what was not done).
+
+Existing `progress-YYYYMMDD.md` files at the repo root remain as historical
+record — do not append to them. Read them when you need pre-migration
+context; write new updates only via refstore.
+
 ## Project Status
 
 All tests pass. Fast tier: 3378 tests, ~1m23s. Full benchmarks: 3509 tests, ~9m16s. The single "broken" reported in the test summary is `@test_skip "ANTHROPIC_API_KEY not set"` in `test/integration/test_llm_operator.jl` — `@test_skip` is reported in the same column as `@test_broken`.

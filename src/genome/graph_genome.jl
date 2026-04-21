@@ -503,6 +503,39 @@ function evaluate_genome(g::GraphGenome, e::GraphEvaluator)
     end
 end
 
+# ---------------------------------------------------------------------------
+# Shared forward-pass helper (used by _evaluate_feedforward, _evaluate_recurrent,
+# and EpisodicEvaluator). For each node in `update_order`, sums weighted inputs
+# from `source`, applies the node's activation, and writes the result to
+# `dest`. `dest` and `source` may be the same Dict (feedforward mode: reads of
+# an in_node that was already updated this sweep see the new value) or
+# different Dicts (recurrent mode: reads come from a prior snapshot).
+# `update_order` should be pre-filtered to exclude :input and :bias nodes —
+# callers seed those directly.
+# ---------------------------------------------------------------------------
+
+function _apply_node_activations!(
+    dest::Dict{Int, Float64},
+    source::Dict{Int, Float64},
+    update_order::AbstractVector{Int},
+    g::GraphGenome,
+    activation_fns::Dict{Symbol, Function},
+)
+    for nid in update_order
+        haskey(g.nodes, nid) || continue
+        node = g.nodes[nid]
+        total = 0.0
+        for c in values(g.connections)
+            if c.enabled && c.out_node == nid
+                total += c.weight * get(source, c.in_node, 0.0)
+            end
+        end
+        act_fn = get(activation_fns, node.activation, identity)
+        dest[nid] = act_fn(total)
+    end
+    return dest
+end
+
 function _evaluate_feedforward(g::GraphGenome, e::GraphEvaluator)
     n_samples = size(e.input_data, 2)
     total_se = 0.0
@@ -516,6 +549,11 @@ function _evaluate_feedforward(g::GraphGenome, e::GraphEvaluator)
     output_ids = sort!([n.id for n in values(g.nodes) if n.type == :output])
     bias_ids = [n.id for n in values(g.nodes) if n.type == :bias]
 
+    # Pre-filter topologically-sorted order to skip :input / :bias — those
+    # are seeded directly per-sample and don't get activated.
+    ff_order = [nid for nid in eval_order
+                if haskey(g.nodes, nid) && !(g.nodes[nid].type in (:input, :bias))]
+
     for s in 1:n_samples
         # Initialize node values
         node_vals = Dict{Int, Float64}()
@@ -527,24 +565,9 @@ function _evaluate_feedforward(g::GraphGenome, e::GraphEvaluator)
             node_vals[nid] = 1.0
         end
 
-        # Forward propagation in topological order
-        for nid in eval_order
-            haskey(g.nodes, nid) || continue
-            node = g.nodes[nid]
-            node.type in (:input, :bias) && continue
-
-            # Sum incoming weights
-            total = 0.0
-            for c in values(g.connections)
-                if c.enabled && c.out_node == nid
-                    total += c.weight * get(node_vals, c.in_node, 0.0)
-                end
-            end
-
-            # Apply activation
-            act_fn = get(e.activation_fns, node.activation, identity)
-            node_vals[nid] = act_fn(total)
-        end
+        # Forward propagation in topological order — updates dest in place,
+        # reading from the same dict so later nodes see earlier updates.
+        _apply_node_activations!(node_vals, node_vals, ff_order, g, e.activation_fns)
 
         # Compute squared error for outputs
         for (idx, nid) in enumerate(output_ids)
@@ -592,20 +615,7 @@ function _evaluate_recurrent(g::GraphGenome, e::GraphEvaluator)
         # snapshot of the previous pass.
         for _ in 1:e.relaxation_passes
             prev = copy(node_vals)
-            for nid in update_ids
-                haskey(g.nodes, nid) || continue
-                node = g.nodes[nid]
-
-                total = 0.0
-                for c in values(g.connections)
-                    if c.enabled && c.out_node == nid
-                        total += c.weight * get(prev, c.in_node, 0.0)
-                    end
-                end
-
-                act_fn = get(e.activation_fns, node.activation, identity)
-                node_vals[nid] = act_fn(total)
-            end
+            _apply_node_activations!(node_vals, prev, update_ids, g, e.activation_fns)
         end
 
         # Error at the end of the relaxation.

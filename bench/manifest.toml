@@ -125,3 +125,27 @@ promotion_sigma = 2.0
 
 corpus_path = "bench/corpus/two_spirals_nsga2"
 corpus_hash = "sha256:b347ea4844c0d83e575ed0cc664bada8b90d210853c83f680480948ebce568ba"
+
+# ---------------------------------------------------------------------------
+# Phase B control benchmarks: GraphGenome + EpisodicEvaluator.
+# Added 2026-04-21.
+# ---------------------------------------------------------------------------
+
+[[benchmarks]]
+name = "cartpole_mean_fitness"
+entry_point = "cartpole_mean_fitness"
+tier = "quality"
+deterministic = false
+metric_direction = "minimize"
+
+expected_runtime_seconds = 5
+threads = 8
+gpu = "none"
+background_required = false
+
+repetitions = 5
+baseline_seeds = [1, 2, 3, 4, 5]
+promotion_sigma = 2.0
+
+corpus_path = "bench/corpus/cartpole"
+corpus_hash = "sha256:2f2b2ddc9943dcb798673f62af16e25933564a249dbe315cc07b3cf73ce45f1d"

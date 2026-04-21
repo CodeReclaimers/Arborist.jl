@@ -874,11 +874,16 @@ end
 
 Run NEAT-style evolution with GraphGenome. Handles initialization,
 mutation, crossover with innovation-aligned genes, and speciation.
+
+Accepts any `AbstractEvaluator` that implements `evaluate_genome(::GraphGenome, e)`
+and whose `input_signature(e)` / `output_signature(e)` lengths match the
+intended network dimensions — `GraphEvaluator` for table-based tasks,
+`EpisodicEvaluator` for closed-loop control tasks.
 """
 function solve(problem::GPProblem{GraphGenome, E},
                algorithm::GeneticProgramming;
                verbose::Bool = false,
-               callback = nothing) where {E<:GraphEvaluator}
+               callback = nothing) where {E<:AbstractEvaluator}
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
@@ -886,8 +891,8 @@ function solve(problem::GPProblem{GraphGenome, E},
     reset_innovation_counter!()
 
     evaluator = problem.evaluator
-    n_in = size(evaluator.input_data, 1)
-    n_out = size(evaluator.output_data, 1)
+    n_in = length(input_signature(evaluator))
+    n_out = length(output_signature(evaluator))
     pop_size = algorithm.pop_size
 
     # Initialize population
@@ -968,10 +973,10 @@ end
 # share a coherent innovation history.
 function _initialize_population(problem::GPProblem{GraphGenome, E},
                                  algorithm::GeneticProgramming,
-                                 rng::AbstractRNG) where {E<:GraphEvaluator}
+                                 rng::AbstractRNG) where {E<:AbstractEvaluator}
     evaluator = problem.evaluator
-    n_in  = size(evaluator.input_data, 1)
-    n_out = size(evaluator.output_data, 1)
+    n_in  = length(input_signature(evaluator))
+    n_out = length(output_signature(evaluator))
     pop_size = algorithm.pop_size
 
     genomes = Vector{GraphGenome}(undef, pop_size)

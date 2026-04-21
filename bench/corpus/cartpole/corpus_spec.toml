@@ -1,0 +1,18 @@
+# Single-pole cart-pole NEAT corpus specification.
+#
+# Barto/Sutton/Anderson (1983) dynamics. Physics constants (gravity,
+# masscart, masspole, length, force_mag, tau) are fixed in the entry-point
+# code since they define the task itself rather than the episode sampler.
+# This spec pins only the per-rep solver budget and the evaluator shape.
+
+# Per-fitness-eval episode count and max steps.
+n_episodes = 5
+max_steps = 200
+# Seed base used by EpisodicEvaluator to derive the per-episode initial-state
+# MersenneTwister seed (base + ep_index). Fixed here so corpus determinism
+# does not depend on host environment.
+episode_seed_base = 1000
+
+# Solver budget per repetition. Matches test/benchmarks/cartpole_neat.jl.
+pop_size = 100
+generations = 60

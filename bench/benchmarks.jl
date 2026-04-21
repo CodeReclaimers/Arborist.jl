@@ -561,12 +561,117 @@ function two_spirals_nsga2_mean_fitness(cfg::Dict, corpus_path::AbstractString)
     )
 end
 
+# ---------------------------------------------------------------------------
+# Cart-pole dynamics (shared by Phase B control benchmarks)
+# ---------------------------------------------------------------------------
+
+const _CP_GRAVITY    = 9.8
+const _CP_MASSCART   = 1.0
+const _CP_MASSPOLE   = 0.1
+const _CP_LENGTH     = 0.5
+const _CP_FORCE_MAG  = 10.0
+const _CP_TAU        = 0.02
+const _CP_X_LIMIT    = 2.4
+const _CP_THETA_LIMIT = π / 15.0
+
+function _cartpole_initial_state(rng)
+    return (x         = 0.1 * (rand(rng) - 0.5),
+            xdot      = 0.1 * (rand(rng) - 0.5),
+            theta     = 0.1 * (rand(rng) - 0.5),
+            theta_dot = 0.1 * (rand(rng) - 0.5))
+end
+
+function _cartpole_dynamics(s, a)
+    force = a * _CP_FORCE_MAG
+    total_mass = _CP_MASSCART + _CP_MASSPOLE
+    polemass_length = _CP_MASSPOLE * _CP_LENGTH
+    costh = cos(s.theta)
+    sinth = sin(s.theta)
+    temp = (force + polemass_length * s.theta_dot^2 * sinth) / total_mass
+    theta_acc = (_CP_GRAVITY * sinth - costh * temp) /
+                (_CP_LENGTH * (4.0/3.0 - _CP_MASSPOLE * costh^2 / total_mass))
+    x_acc = temp - polemass_length * theta_acc * costh / total_mass
+    return (x         = s.x + _CP_TAU * s.xdot,
+            xdot      = s.xdot + _CP_TAU * x_acc,
+            theta     = s.theta + _CP_TAU * s.theta_dot,
+            theta_dot = s.theta_dot + _CP_TAU * theta_acc)
+end
+
+_cartpole_reward(s, a, sp) = 1.0
+_cartpole_done(s) = abs(s.x) > _CP_X_LIMIT || abs(s.theta) > _CP_THETA_LIMIT
+_cartpole_obs(s) = Float64[s.x, s.xdot, s.theta, s.theta_dot]
+_cartpole_decode(y) = y[1] > 0.5 ? 1 : -1
+
+# ---------------------------------------------------------------------------
+# Entry point: Single-pole cart-pole NEAT, mean balance duration
+# ---------------------------------------------------------------------------
+
+function cartpole_mean_fitness(cfg::Dict, corpus_path::AbstractString)
+    spec = TOML.parsefile(joinpath(corpus_path, "corpus_spec.toml"))
+    n_episodes = Int(spec["n_episodes"])
+    max_steps = Int(spec["max_steps"])
+    episode_seed_base = Int(spec["episode_seed_base"])
+    pop_size = Int(spec["pop_size"])
+    generations = Int(spec["generations"])
+
+    seed = Int(cfg["seed"])
+
+    evaluator = EpisodicEvaluator(
+        4, 1,
+        _cartpole_initial_state, _cartpole_dynamics,
+        _cartpole_reward, _cartpole_done,
+        _cartpole_obs, _cartpole_decode;
+        max_steps=max_steps, n_episodes=n_episodes,
+        episode_seed_base=episode_seed_base,
+        allow_recurrent=false,
+    )
+
+    ops = neat_defaults()
+    algorithm = GeneticProgramming(
+        pop_size=pop_size, generations=generations,
+        mutation_rate=0.5, crossover_rate=0.3, elitism=2,
+        mutation_ops=ops.mutation_ops, crossover_ops=ops.crossover_ops,
+        speciation=ThresholdSpeciation(threshold=3.0, min_species_size=2,
+                                       stagnation_limit=20),
+    )
+
+    reset_innovation_counter!()
+    problem = GPProblem(evaluator, GraphGenome; seed=seed)
+
+    t0 = time()
+    result = Arborist.solve(problem, algorithm; verbose=false)
+    wall = time() - t0
+
+    return Dict{String,Any}(
+        "status" => "ok",
+        "metric" => Float64(result.best_fitness),
+        "metric_components" => Dict{String,Any}(
+            "best_fitness" => Float64(result.best_fitness),
+            "generations_run" => result.generations_run,
+            "converged" => result.converged,
+            "best_node_count" => length(result.best_genome.nodes),
+            "best_enabled_conns" => count(c.enabled for c in values(result.best_genome.connections)),
+        ),
+        "wall_clock_seconds" => Float64(wall),
+        "metadata" => Dict{String,Any}(
+            "julia_version" => string(VERSION),
+            "threads_actual" => Threads.nthreads(),
+            "n_episodes" => n_episodes,
+            "max_steps" => max_steps,
+            "pop_size" => pop_size,
+            "generations" => generations,
+            "notes" => "metric = -mean_balance_steps; lower is better; -200 = max-horizon balance",
+        ),
+    )
+end
+
 const _ENTRY_POINTS = Dict{String,Function}(
     "nsga2_binpack_mean_fitness" => nsga2_binpack_mean_fitness,
     "koza_regression_mean_fitness" => koza_regression_mean_fitness,
     "parity3_mean_fitness" => parity3_mean_fitness,
     "two_spirals_mean_fitness" => two_spirals_mean_fitness,
     "two_spirals_nsga2_mean_fitness" => two_spirals_nsga2_mean_fitness,
+    "cartpole_mean_fitness" => cartpole_mean_fitness,
 )
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,15 @@
+# Double-pole (Markovian) cart-pole NEAT corpus specification.
+#
+# Wieland (1991) two-pole dynamics. Physics constants (gravity, masscart,
+# mass_long, mass_short, length_long, length_short, force_mag, tau, friction
+# mu_c/mu_p) are fixed in the entry-point code since they define the task.
+# This spec pins the solver budget and the evaluator shape.
+
+# Per-fitness-eval episode count and max steps.
+n_episodes = 3
+max_steps = 10000
+episode_seed_base = 2000
+
+# Solver budget per repetition. Matches test/benchmarks/double_pole_neat.jl.
+pop_size = 150
+generations = 100

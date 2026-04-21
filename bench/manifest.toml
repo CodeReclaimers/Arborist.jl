@@ -149,3 +149,22 @@ promotion_sigma = 2.0
 
 corpus_path = "bench/corpus/cartpole"
 corpus_hash = "sha256:2f2b2ddc9943dcb798673f62af16e25933564a249dbe315cc07b3cf73ce45f1d"
+
+[[benchmarks]]
+name = "double_pole_mean_fitness"
+entry_point = "double_pole_mean_fitness"
+tier = "quality"
+deterministic = false
+metric_direction = "minimize"
+
+expected_runtime_seconds = 60
+threads = 8
+gpu = "none"
+background_required = false
+
+repetitions = 5
+baseline_seeds = [1, 2, 3, 4, 5]
+promotion_sigma = 2.0
+
+corpus_path = "bench/corpus/double_pole"
+corpus_hash = "sha256:abf4d9390abd0fb7ea93feac803fc2fc87be3851235c963ae6fe839d1348e221"

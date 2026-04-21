@@ -665,6 +665,136 @@ function cartpole_mean_fitness(cfg::Dict, corpus_path::AbstractString)
     )
 end
 
+# ---------------------------------------------------------------------------
+# Double-pole (Wieland two-pole) dynamics
+# ---------------------------------------------------------------------------
+
+const _DP_GRAVITY     = 9.8
+const _DP_MASSCART    = 1.0
+const _DP_MASS_LONG   = 0.1
+const _DP_MASS_SHORT  = 0.01
+const _DP_LENGTH_LONG  = 0.5
+const _DP_LENGTH_SHORT = 0.05
+const _DP_FORCE_MAG   = 10.0
+const _DP_TAU         = 0.01
+const _DP_X_LIMIT     = 2.4
+const _DP_THETA_LIMIT = π / 15.0
+const _DP_MU_C        = 0.0005
+const _DP_MU_P        = 0.000002
+
+function _doublepole_initial_state(rng)
+    return (x         = 0.0,
+            xdot      = 0.0,
+            theta1    = 0.07 * (rand(rng) - 0.5),
+            theta1dot = 0.0,
+            theta2    = 0.07 * (rand(rng) - 0.5),
+            theta2dot = 0.0)
+end
+
+function _dp_pole_f(theta, theta_dot, m, l)
+    costh = cos(theta); sinth = sin(theta)
+    return m * l * theta_dot^2 * sinth +
+           0.75 * m * costh * (_DP_MU_P * theta_dot / (m * l) +
+                               _DP_GRAVITY * sinth)
+end
+
+_dp_pole_m(theta, m) = m * (1.0 - 0.75 * cos(theta)^2)
+
+function _doublepole_dynamics(s, a)
+    force = a * _DP_FORCE_MAG
+    f1 = _dp_pole_f(s.theta1, s.theta1dot, _DP_MASS_LONG, _DP_LENGTH_LONG)
+    f2 = _dp_pole_f(s.theta2, s.theta2dot, _DP_MASS_SHORT, _DP_LENGTH_SHORT)
+    m1 = _dp_pole_m(s.theta1, _DP_MASS_LONG)
+    m2 = _dp_pole_m(s.theta2, _DP_MASS_SHORT)
+    x_acc = (force - _DP_MU_C * sign(s.xdot) + f1 + f2) /
+            (_DP_MASSCART + m1 + m2)
+    theta1_acc = -0.75 / _DP_LENGTH_LONG *
+                 (x_acc * cos(s.theta1) + _DP_GRAVITY * sin(s.theta1) +
+                  _DP_MU_P * s.theta1dot / (_DP_MASS_LONG * _DP_LENGTH_LONG))
+    theta2_acc = -0.75 / _DP_LENGTH_SHORT *
+                 (x_acc * cos(s.theta2) + _DP_GRAVITY * sin(s.theta2) +
+                  _DP_MU_P * s.theta2dot / (_DP_MASS_SHORT * _DP_LENGTH_SHORT))
+    return (x         = s.x + _DP_TAU * s.xdot,
+            xdot      = s.xdot + _DP_TAU * x_acc,
+            theta1    = s.theta1 + _DP_TAU * s.theta1dot,
+            theta1dot = s.theta1dot + _DP_TAU * theta1_acc,
+            theta2    = s.theta2 + _DP_TAU * s.theta2dot,
+            theta2dot = s.theta2dot + _DP_TAU * theta2_acc)
+end
+
+_doublepole_reward(s, a, sp) = 1.0
+function _doublepole_done(s)
+    abs(s.x) > _DP_X_LIMIT && return true
+    abs(s.theta1) > _DP_THETA_LIMIT && return true
+    abs(s.theta2) > _DP_THETA_LIMIT && return true
+    return false
+end
+_doublepole_obs(s) = Float64[s.x, s.xdot, s.theta1, s.theta1dot, s.theta2, s.theta2dot]
+_doublepole_decode(y) = y[1] > 0.5 ? 1 : -1
+
+# ---------------------------------------------------------------------------
+# Entry point: Double-pole Markovian NEAT, mean balance duration
+# ---------------------------------------------------------------------------
+
+function double_pole_mean_fitness(cfg::Dict, corpus_path::AbstractString)
+    spec = TOML.parsefile(joinpath(corpus_path, "corpus_spec.toml"))
+    n_episodes = Int(spec["n_episodes"])
+    max_steps = Int(spec["max_steps"])
+    episode_seed_base = Int(spec["episode_seed_base"])
+    pop_size = Int(spec["pop_size"])
+    generations = Int(spec["generations"])
+
+    seed = Int(cfg["seed"])
+
+    evaluator = EpisodicEvaluator(
+        6, 1,
+        _doublepole_initial_state, _doublepole_dynamics,
+        _doublepole_reward, _doublepole_done,
+        _doublepole_obs, _doublepole_decode;
+        max_steps=max_steps, n_episodes=n_episodes,
+        episode_seed_base=episode_seed_base,
+        allow_recurrent=false,
+    )
+
+    ops = neat_defaults()
+    algorithm = GeneticProgramming(
+        pop_size=pop_size, generations=generations,
+        mutation_rate=0.5, crossover_rate=0.3, elitism=2,
+        mutation_ops=ops.mutation_ops, crossover_ops=ops.crossover_ops,
+        speciation=ThresholdSpeciation(threshold=3.0, min_species_size=2,
+                                       stagnation_limit=25),
+    )
+
+    reset_innovation_counter!()
+    problem = GPProblem(evaluator, GraphGenome; seed=seed)
+
+    t0 = time()
+    result = Arborist.solve(problem, algorithm; verbose=false)
+    wall = time() - t0
+
+    return Dict{String,Any}(
+        "status" => "ok",
+        "metric" => Float64(result.best_fitness),
+        "metric_components" => Dict{String,Any}(
+            "best_fitness" => Float64(result.best_fitness),
+            "generations_run" => result.generations_run,
+            "converged" => result.converged,
+            "best_node_count" => length(result.best_genome.nodes),
+            "best_enabled_conns" => count(c.enabled for c in values(result.best_genome.connections)),
+        ),
+        "wall_clock_seconds" => Float64(wall),
+        "metadata" => Dict{String,Any}(
+            "julia_version" => string(VERSION),
+            "threads_actual" => Threads.nthreads(),
+            "n_episodes" => n_episodes,
+            "max_steps" => max_steps,
+            "pop_size" => pop_size,
+            "generations" => generations,
+            "notes" => "metric = -mean_balance_steps; Markovian 6-D obs; Wieland two-pole dynamics",
+        ),
+    )
+end
+
 const _ENTRY_POINTS = Dict{String,Function}(
     "nsga2_binpack_mean_fitness" => nsga2_binpack_mean_fitness,
     "koza_regression_mean_fitness" => koza_regression_mean_fitness,
@@ -672,6 +802,7 @@ const _ENTRY_POINTS = Dict{String,Function}(
     "two_spirals_mean_fitness" => two_spirals_mean_fitness,
     "two_spirals_nsga2_mean_fitness" => two_spirals_nsga2_mean_fitness,
     "cartpole_mean_fitness" => cartpole_mean_fitness,
+    "double_pole_mean_fitness" => double_pole_mean_fitness,
 )
 
 # ---------------------------------------------------------------------------

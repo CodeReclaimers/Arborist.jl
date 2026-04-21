@@ -37,6 +37,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
         include("benchmarks/max_ones.jl")
         include("benchmarks/symbolic_regression.jl")
         include("benchmarks/koza_regression.jl")
+        include("benchmarks/nguyen_regression.jl")
         include("benchmarks/boolean_parity.jl")
         include("benchmarks/ant_trail.jl")
         include("benchmarks/speedup_benchmark.jl")

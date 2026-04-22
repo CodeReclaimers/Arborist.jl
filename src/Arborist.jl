@@ -97,6 +97,9 @@ include("tree_genome.jl")
 # --- ADFGenome (Koza-style Automatically Defined Functions on TreeGenome) ---
 include("genome/adf_genome.jl")
 
+# --- CMA-ES for fixed-topology continuous parameter search ---
+include("cmaes.jl")
+
 # --- NSGA-II multi-objective optimization ---
 include("nsga2.jl")
 
@@ -159,6 +162,9 @@ export
     GeneticProgramming,
     IslandModel,
     NSGAII,
+    CMAES,
+    flatten_weights,
+    unflatten_weights!,
 
     # Multi-objective types
     AbstractMultiObjectiveEvaluator,

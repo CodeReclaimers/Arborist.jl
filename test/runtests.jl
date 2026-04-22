@@ -34,6 +34,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
     include("unit/test_checkpoint.jl")
     include("unit/test_plots_ext.jl")
     include("unit/test_adf_genome.jl")
+    include("unit/test_cmaes.jl")
 
     # Integration tests — always run, target < 60s total
     include("integration/test_llm_operator.jl")

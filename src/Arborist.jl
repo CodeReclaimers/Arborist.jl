@@ -59,6 +59,10 @@ include("operators/selection.jl")
 include("operators/mutation.jl")
 include("operators/crossover.jl")
 
+# --- Constant-optimization config (needs to be available inside
+#     the GeneticProgramming struct defined in algorithm.jl) ---
+include("constant_optimization.jl")
+
 # --- Algorithm configuration (needs operator types) ---
 include("algorithm.jl")
 
@@ -112,6 +116,10 @@ export
     TableFitnessEvaluator,
     TreeFitnessEvaluator,
     SymbolicRegressionEvaluator,
+
+    # Constant optimization
+    ConstantOptimization,
+    optimize_constants!,
 
     # Concrete types — algorithms
     GeneticProgramming,

@@ -31,6 +31,7 @@ struct GeneticProgramming <: AbstractEvolutionaryAlgorithm
     crossover_ops::Vector{AbstractCrossoverOperator}
     selection::AbstractSelectionStrategy
     convergence_threshold::Float64
+    constant_optimization::Union{Nothing, ConstantOptimization}
 end
 
 """
@@ -50,7 +51,8 @@ function GeneticProgramming(;
     mutation_ops::Vector{<:AbstractMutationOperator} = AbstractMutationOperator[SubtreeMutation(), PointMutation()],
     crossover_ops::Vector{<:AbstractCrossoverOperator} = AbstractCrossoverOperator[SubtreeCrossover()],
     selection::AbstractSelectionStrategy = TournamentSelection(3),
-    convergence_threshold::Float64 = Inf
+    convergence_threshold::Float64 = Inf,
+    constant_optimization::Union{Nothing, ConstantOptimization} = nothing,
 )
     if crossover_rate + mutation_rate > 1.0
         throw(ArgumentError(
@@ -64,7 +66,8 @@ function GeneticProgramming(;
         parallel, speciation,
         convert(Vector{AbstractMutationOperator}, mutation_ops),
         convert(Vector{AbstractCrossoverOperator}, crossover_ops),
-        selection, convergence_threshold
+        selection, convergence_threshold,
+        constant_optimization,
     )
 end
 

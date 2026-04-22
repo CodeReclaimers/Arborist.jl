@@ -6,6 +6,7 @@
 # side effects, use ExprGenome instead.
 
 using DynamicExpressions
+using DynamicExpressions: eval_tree_array, get_scalar_constants, set_scalar_constants!
 
 # =============================================================================
 # TreeGenome struct
@@ -493,6 +494,12 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
             next_fitnesses[i] = (bp > 0.0 && isfinite(raw)) ? raw + bp * complexity(next_genomes[i]) : raw
         end
 
+        # Periodic constant-optimization pass on top-K individuals. Refines
+        # numeric literals against the dataset via BFGS with FD gradients; see
+        # `src/constant_optimization.jl`. Zero overhead when disabled.
+        _maybe_optimize_constants!(next_genomes, next_fitnesses, evaluator,
+                                   algorithm, gen, bp)
+
         genomes = next_genomes
         fitnesses = next_fitnesses
     end
@@ -704,6 +711,231 @@ function SymbolicRegressionEvaluator(f;
     end
 
     return TreeFitnessEvaluator(X, y, operators)
+end
+
+# =============================================================================
+# Periodic constant optimization (see src/constant_optimization.jl for config)
+# =============================================================================
+#
+# Local BFGS on numeric literals in a TreeGenome's expression tree against a
+# TreeFitnessEvaluator's dataset. Central finite-difference gradients, Armijo
+# backtracking line search. Zygote-free (central FD avoids needing an AD
+# package; DynamicExpressions' `eval_grad_tree_array` errors without Zygote
+# and `differentiable_eval_tree_array` does not actually return gradients).
+
+"""
+    optimize_constants!(g::TreeGenome, e::TreeFitnessEvaluator; kwargs...) -> Float64
+
+Apply BFGS with central finite-difference gradients to the constants of `g.tree`
+against `e`'s dataset. Mutates `g.tree` in place; returns the post-optimization
+MSE loss.
+
+Returns the pre-optimization loss unchanged if the tree has zero constants or
+if the initial evaluation produces `Inf` / `NaN`. Never makes the tree worse:
+if BFGS diverges or line search fails, constants are restored and the original
+loss is returned.
+
+# Keyword arguments
+- `max_iter::Int = 50`
+- `tol::Float64 = 1e-8`
+- `fd_step::Float64 = 1e-3`
+"""
+function optimize_constants!(g::TreeGenome{T}, e::TreeFitnessEvaluator{T};
+                             max_iter::Int = 50,
+                             tol::Float64 = 1e-8,
+                             fd_step::Float64 = 1e-3) where T
+    constants, refs = get_scalar_constants(g.tree)
+    n = length(constants)
+    initial_loss = _tree_mse(g.tree, e)
+    n == 0 && return initial_loss
+    isfinite(initial_loss) || return initial_loss
+
+    initial_constants = copy(constants)
+    h = T(fd_step)
+
+    function f_and_grad(c::Vector{T})
+        set_scalar_constants!(g.tree, c, refs)
+        loss = _tree_mse(g.tree, e)
+        isfinite(loss) || return (Inf, fill(Inf, n))
+        grad = Vector{Float64}(undef, n)
+        for i in 1:n
+            orig = c[i]
+            c[i] = orig + h
+            set_scalar_constants!(g.tree, c, refs)
+            loss_p = _tree_mse(g.tree, e)
+            c[i] = orig - h
+            set_scalar_constants!(g.tree, c, refs)
+            loss_m = _tree_mse(g.tree, e)
+            c[i] = orig
+            grad[i] = (isfinite(loss_p) && isfinite(loss_m)) ?
+                (loss_p - loss_m) / (2.0 * Float64(h)) : 0.0
+        end
+        set_scalar_constants!(g.tree, c, refs)
+        return (loss, grad)
+    end
+
+    c_opt, loss_opt = _bfgs_minimize(f_and_grad, constants;
+                                     max_iter=max_iter, tol=tol)
+
+    # Accept only strict improvement — guard against roundoff / divergence.
+    if isfinite(loss_opt) && loss_opt < initial_loss
+        set_scalar_constants!(g.tree, c_opt, refs)
+        return loss_opt
+    else
+        set_scalar_constants!(g.tree, initial_constants, refs)
+        return initial_loss
+    end
+end
+
+# Forward MSE on the evaluator's dataset. Returns Inf on evaluation failure.
+function _tree_mse(tree::Node{T}, e::TreeFitnessEvaluator{T}) where T
+    try
+        predictions, complete = eval_tree_array(tree, e.X, e.operators)
+        complete || return Inf
+        n = length(e.y)
+        sse = 0.0
+        @inbounds for i in 1:n
+            d = Float64(predictions[i]) - Float64(e.y[i])
+            sse += d * d
+        end
+        mse = sse / n
+        return isfinite(mse) ? mse : Inf
+    catch err
+        err isa InterruptException && rethrow()
+        return Inf
+    end
+end
+
+"""
+    _bfgs_minimize(f_and_grad, x0; max_iter, tol) -> (x_best, f_best)
+
+Dense BFGS with Armijo backtracking. For small n (TreeGenome SR rarely
+exceeds 20 constants) the dense inverse-Hessian is cheap.
+"""
+function _bfgs_minimize(f_and_grad::F, x0::Vector{T};
+                        max_iter::Int, tol::Float64) where {F, T}
+    x = copy(x0)
+    n = length(x)
+    H = Matrix{Float64}(undef, n, n)
+    @inbounds for i in 1:n, j in 1:n
+        H[i, j] = (i == j) ? 1.0 : 0.0
+    end
+
+    f, g = f_and_grad(x)
+    (isfinite(f) && all(isfinite, g)) || return (x, f)
+    best_x = copy(x)
+    best_f = f
+
+    for _ in 1:max_iter
+        gnorm = sqrt(sum(v -> v * v, g))
+        gnorm < tol && break
+
+        p = -H * g
+        # Safeguard: non-descent direction → reset Hessian, use steepest descent.
+        if _co_dot(g, p) >= 0.0
+            p = -Vector{Float64}(g)
+            @inbounds for i in 1:n, j in 1:n
+                H[i, j] = (i == j) ? 1.0 : 0.0
+            end
+        end
+
+        alpha = 1.0
+        c1 = 1e-4
+        x_trial = copy(x)
+        f_new = f
+        g_new = g
+        accepted = false
+        for _ in 1:30
+            @inbounds for i in 1:n
+                x_trial[i] = x[i] + T(alpha * p[i])
+            end
+            f_new, g_new = f_and_grad(x_trial)
+            if isfinite(f_new) && f_new <= f + c1 * alpha * _co_dot(g, p)
+                accepted = true
+                break
+            end
+            alpha *= 0.5
+        end
+        accepted || break
+
+        # BFGS inverse-Hessian rank-2 update.
+        s = Vector{Float64}(undef, n)
+        y = Vector{Float64}(undef, n)
+        @inbounds for i in 1:n
+            s[i] = Float64(x_trial[i] - x[i])
+            y[i] = g_new[i] - g[i]
+        end
+        sy = _co_dot(s, y)
+        if sy > 1e-12
+            rho = 1.0 / sy
+            Hy = H * y
+            sHy = _co_dot(s, Hy)
+            @inbounds for i in 1:n, j in 1:n
+                H[i, j] += (rho + rho * rho * sHy) * s[i] * s[j] -
+                           rho * (Hy[i] * s[j] + s[i] * Hy[j])
+            end
+        end
+
+        @inbounds for i in 1:n
+            x[i] = x_trial[i]
+        end
+        f = f_new
+        g = g_new
+        if f < best_f
+            best_f = f
+            @inbounds for i in 1:n
+                best_x[i] = x[i]
+            end
+        end
+    end
+
+    return (best_x, best_f)
+end
+
+# Dot product local to the constant-opt module — avoids a LinearAlgebra dep.
+function _co_dot(a::AbstractVector, b::AbstractVector)
+    s = 0.0
+    @inbounds for i in eachindex(a, b)
+        s += Float64(a[i]) * Float64(b[i])
+    end
+    return s
+end
+
+"""
+    _maybe_optimize_constants!(genomes, fitnesses, evaluator, algorithm, gen, bp)
+
+If `algorithm.constant_optimization` is non-nothing and this generation is a
+multiple of its `frequency`, run `optimize_constants!` on the top-K individuals.
+Mutates `genomes[top-K]` and `fitnesses[top-K]` in place; preserves them
+otherwise. Zero overhead when disabled.
+"""
+function _maybe_optimize_constants!(genomes::Vector{TreeGenome{T}},
+                                    fitnesses::Vector{Float64},
+                                    evaluator::TreeFitnessEvaluator{T},
+                                    algorithm::GeneticProgramming,
+                                    gen::Int,
+                                    bp::Float64) where T
+    cfg = algorithm.constant_optimization
+    cfg === nothing && return nothing
+    gen % cfg.frequency == 0 || return nothing
+
+    order = sortperm(fitnesses)
+    k = min(cfg.top_k, length(genomes))
+    for rank in 1:k
+        i = order[rank]
+        g_copy = deepcopy(genomes[i])
+        raw_after = optimize_constants!(g_copy, evaluator;
+                                        max_iter=cfg.max_iter,
+                                        tol=cfg.tol,
+                                        fd_step=cfg.fd_step)
+        fit_after = (bp > 0.0 && isfinite(raw_after)) ?
+            raw_after + bp * complexity(g_copy) : raw_after
+        if isfinite(fit_after) && fit_after < fitnesses[i]
+            genomes[i] = g_copy
+            fitnesses[i] = fit_after
+        end
+    end
+    return nothing
 end
 
 """

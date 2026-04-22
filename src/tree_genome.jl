@@ -465,6 +465,10 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
                                                   algorithm.speciation, species_state, rng;
                                                   snapshot=species_snapshot)
 
+        case_fitnesses = needs_cases(algorithm.selection) ?
+            _compute_case_fitnesses(genomes, evaluator, algorithm.parallel) :
+            nothing
+
         if log !== nothing
             record!(log, gen, fitnesses, genomes, time() - t0;
                     snapshot=species_snapshot)
@@ -480,7 +484,8 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
         end
 
         _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
-                                 algorithm, rng, algorithm.elitism + 1)
+                                 algorithm, rng, algorithm.elitism + 1;
+                                 case_fitnesses=case_fitnesses)
 
         # Evaluate new individuals.
         for i in (algorithm.elitism + 1):pop_size

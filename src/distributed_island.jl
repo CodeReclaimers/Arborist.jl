@@ -131,8 +131,13 @@ function _evolve_one_gen_local!(id::Int)
         next_fitnesses[i] = fitnesses[i]
     end
 
+    case_fitnesses = needs_cases(alg.selection) ?
+        _compute_case_fitnesses(genomes, island.evaluator, alg.parallel) :
+        nothing
+
     _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
-                             alg, rng, alg.elitism + 1)
+                             alg, rng, alg.elitism + 1;
+                             case_fitnesses=case_fitnesses)
 
     # Evaluate new individuals
     for i in (alg.elitism + 1):pop_size

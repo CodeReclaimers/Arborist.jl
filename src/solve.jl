@@ -105,27 +105,16 @@ function _validate_ops(mutation_ops::Vector{AbstractMutationOperator},
 end
 
 """
-    _tournament_select(fitnesses, tournament_size, rng) -> Int
+    _breed_next_generation!(next_genomes, genomes, selection_fitnesses, alg, rng, start_idx;
+                             case_fitnesses=nothing)
 
-Perform tournament selection. Returns the index of the selected individual.
-"""
-function _tournament_select(fitnesses::Vector{Float64}, tournament_size::Int, rng::AbstractRNG)
-    n = length(fitnesses)
-    best_idx = rand(rng, 1:n)
-    for _ in 2:tournament_size
-        idx = rand(rng, 1:n)
-        if fitnesses[idx] < fitnesses[best_idx]
-            best_idx = idx
-        end
-    end
-    return best_idx
-end
+Fill `next_genomes[start_idx:end]` via selection and genetic operators
+(crossover, mutation, or copy). Shared across all solve paths.
 
-"""
-    _breed_next_generation!(next_genomes, genomes, selection_fitnesses, alg, rng, start_idx)
-
-Fill `next_genomes[start_idx:end]` via tournament selection and genetic
-operators (crossover, mutation, or copy). Shared across all solve paths.
+Parent selection dispatches through `select_parent(alg.selection, ...)`:
+`TournamentSelection` uses `selection_fitnesses` only; lexicase strategies
+consume `case_fitnesses`. The solve loop materializes `case_fitnesses`
+when `needs_cases(alg.selection)` is true.
 
 Crossover and mutation dispatch through operator objects from `alg.crossover_ops`
 and `alg.mutation_ops`. Genome types that use direct dispatch (AntGenome,
@@ -136,32 +125,57 @@ function _breed_next_generation!(next_genomes::Vector{G},
                                   selection_fitnesses::Vector{Float64},
                                   alg::GeneticProgramming,
                                   rng::AbstractRNG,
-                                  start_idx::Int) where G
+                                  start_idx::Int;
+                                  case_fitnesses = nothing) where G
     pop_size = length(next_genomes)
-    t_size = alg.selection.tournament_size
+    sel = alg.selection
     idx = start_idx
     while idx <= pop_size
         r = rand(rng)
         if r < alg.crossover_rate && idx + 1 <= pop_size
-            p1 = _tournament_select(selection_fitnesses, t_size, rng)
-            p2 = _tournament_select(selection_fitnesses, t_size, rng)
+            p1 = select_parent(sel, selection_fitnesses, case_fitnesses, rng)
+            p2 = select_parent(sel, selection_fitnesses, case_fitnesses, rng)
             op = rand(rng, alg.crossover_ops)
             (c1, c2) = crossover(op, genomes[p1], genomes[p2], rng)
             next_genomes[idx] = c1
             next_genomes[idx + 1] = c2
             idx += 2
         elseif r < alg.crossover_rate + alg.mutation_rate
-            p_idx = _tournament_select(selection_fitnesses, t_size, rng)
+            p_idx = select_parent(sel, selection_fitnesses, case_fitnesses, rng)
             op = rand(rng, alg.mutation_ops)
             _set_parent_context!(alg.mutation_ops, p_idx, selection_fitnesses)
             next_genomes[idx] = mutate(op, genomes[p_idx], rng)
             idx += 1
         else
-            p_idx = _tournament_select(selection_fitnesses, t_size, rng)
+            p_idx = select_parent(sel, selection_fitnesses, case_fitnesses, rng)
             next_genomes[idx] = deepcopy(genomes[p_idx])
             idx += 1
         end
     end
+end
+
+"""
+    _compute_case_fitnesses(genomes, evaluator, parallel) -> Vector{Vector{Float64}}
+
+Populate a per-individual per-case loss matrix by calling `evaluate_cases`
+on each genome. Used by lexicase-family selection strategies. Each inner
+vector has length equal to `length(evaluate_cases(genomes[1], evaluator))`.
+"""
+function _compute_case_fitnesses(genomes::AbstractVector,
+                                 evaluator::AbstractEvaluator,
+                                 parallel::Bool)
+    n = length(genomes)
+    out = Vector{Vector{Float64}}(undef, n)
+    if parallel && Threads.nthreads() > 1
+        Threads.@threads for i in 1:n
+            out[i] = evaluate_cases(genomes[i], evaluator)
+        end
+    else
+        for i in 1:n
+            out[i] = evaluate_cases(genomes[i], evaluator)
+        end
+    end
+    return out
 end
 
 """
@@ -253,6 +267,11 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
                                                   algorithm.speciation, species_state, rng;
                                                   snapshot=species_snapshot)
 
+        # Materialize case-fitness matrix for lexicase-family selection.
+        case_fitnesses = needs_cases(algorithm.selection) ?
+            _compute_case_fitnesses(genomes, problem.evaluator, algorithm.parallel) :
+            nothing
+
         if log !== nothing
             record!(log, gen, fitnesses, genomes, time() - t0;
                     snapshot=species_snapshot)
@@ -272,9 +291,10 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
             next_fitnesses[i] = fitnesses[i]
         end
 
-        # Fill the rest via tournament selection + genetic operators.
+        # Fill the rest via selection + genetic operators.
         _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
-                                 algorithm, rng, algorithm.elitism + 1)
+                                 algorithm, rng, algorithm.elitism + 1;
+                                 case_fitnesses=case_fitnesses)
 
         # Evaluate new individuals (skip elites which already have fitness).
         _parallel_evaluate!(next_fitnesses, next_genomes, problem.evaluator, bp,
@@ -602,6 +622,11 @@ function solve(problem::GPProblem{G,E},
             # (IslandModel log aggregates across all islands; per-island snapshots
             #  are not plumbed through here in F.0.)
 
+            # Case fitnesses for lexicase-family selection (per-island).
+            case_fitnesses_isle = needs_cases(alg.selection) ?
+                _compute_case_fitnesses(genomes, problem.evaluator, alg.parallel) :
+                nothing
+
             # Update LLM operator contexts with this island's population state.
             _update_llm_contexts!(alg.mutation_ops, gen, alg.generations,
                                    fitnesses, genomes)
@@ -616,9 +641,10 @@ function solve(problem::GPProblem{G,E},
                 next_fitnesses[i] = fitnesses[i]
             end
 
-            # Fill rest via tournament selection + genetic operators.
+            # Fill rest via selection + genetic operators.
             _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
-                                     alg, state.rng, alg.elitism + 1)
+                                     alg, state.rng, alg.elitism + 1;
+                                     case_fitnesses=case_fitnesses_isle)
 
             # Evaluate new individuals.
             for i in (alg.elitism + 1):pop_size

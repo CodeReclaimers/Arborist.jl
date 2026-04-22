@@ -84,9 +84,41 @@ abstract type AbstractCrossoverOperator end
 """
     AbstractSelectionStrategy
 
-Base type for parent selection strategies (e.g., tournament selection).
+Base type for parent selection strategies (e.g., tournament selection,
+lexicase selection).
+
+Concrete subtypes must implement:
+
+- `select_parent(s::S, selection_fitnesses::Vector{Float64}, case_fitnesses, rng)`
+  returning the integer index of the selected parent in `genomes` /
+  `selection_fitnesses`. Case-based strategies (lexicase) use the matrix;
+  scalar-fitness strategies (tournament) ignore it.
+- `needs_cases(s::S) -> Bool` (default `false`). Strategies that return
+  `true` cause the solve loop to materialize a per-case fitness vector
+  for every individual each generation via `evaluate_cases`. Returning
+  `true` requires the evaluator to implement `evaluate_cases`; otherwise
+  the solve loop raises `MethodError` the first time it tries.
 """
 abstract type AbstractSelectionStrategy end
+
+"""
+    select_parent(s::AbstractSelectionStrategy, selection_fitnesses, case_fitnesses, rng) -> Int
+
+Select a parent index. `selection_fitnesses::Vector{Float64}` is the
+sharing-adjusted scalar fitness used by classical strategies (lower is
+better). `case_fitnesses::Union{Nothing, Vector{Vector{Float64}}}` is the
+per-individual per-case loss matrix used by lexicase strategies (same
+convention: lower is better; `nothing` when `needs_cases(s) == false`).
+"""
+function select_parent end
+
+"""
+    needs_cases(s::AbstractSelectionStrategy) -> Bool
+
+Return `true` if the strategy requires per-case fitnesses
+(`evaluate_cases`-derived). Default: `false`.
+"""
+needs_cases(::AbstractSelectionStrategy) = false
 
 """
     AbstractSpeciation

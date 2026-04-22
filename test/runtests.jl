@@ -27,6 +27,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
     include("unit/test_behavioral_init.jl")
     include("unit/test_run_log.jl")
     include("unit/test_evaluate_cases.jl")
+    include("unit/test_lexicase.jl")
 
     # Integration tests — always run, target < 60s total
     include("integration/test_llm_operator.jl")
@@ -61,6 +62,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
         include("benchmarks/mackey_glass_neat.jl")
         include("benchmarks/retina_nsga2_neat.jl")
         include("benchmarks/lorenz_recovery.jl")
+        include("benchmarks/lexicase_modal_regression.jl")
     else
         @info "Skipping benchmarks (set ARBORIST_RUN_BENCHMARKS=true to run)"
     end

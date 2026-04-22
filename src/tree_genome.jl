@@ -411,9 +411,16 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
                        algorithm::GeneticProgramming;
                        verbose::Bool = false,
                        callback = nothing,
-                       log::Union{Nothing, RunLog} = nothing) where {T, E<:TreeFitnessEvaluator}
-    rng = problem.seed === nothing ? Random.default_rng() :
-          Random.MersenneTwister(problem.seed)
+                       log::Union{Nothing, RunLog} = nothing,
+                       checkpoint_every::Int = 0,
+                       checkpoint_path::Union{Nothing, AbstractString} = nothing,
+                       resume_from::Union{Nothing, AbstractString} = nothing,
+                       allow_signature_mismatch::Bool = false,
+                       ) where {T, E<:TreeFitnessEvaluator}
+    checkpoint_every >= 0 || throw(ArgumentError("checkpoint_every must be >= 0"))
+    if checkpoint_every > 0 && checkpoint_path === nothing
+        throw(ArgumentError("checkpoint_every > 0 requires a checkpoint_path"))
+    end
 
     evaluator = problem.evaluator
     ops = evaluator.operators
@@ -421,30 +428,64 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
     pop_size = algorithm.pop_size
     bp = algorithm.bloat_penalty
 
-    # Initialize population with ramped half-and-half.
-    genomes = Vector{TreeGenome{T}}(undef, pop_size)
-    for i in 1:pop_size
-        method = i <= pop_size ÷ 2 ? :full : :grow
-        depth = 2 + (i % 3)  # depths 2, 3, 4
-        tree = _random_tree(rng, ops, n_feat, T, depth, method)
-        genomes[i] = TreeGenome{T}(tree, ops, n_feat)
+    # Resume-or-init branch.
+    start_gen = 1
+    start_wall = 0.0
+    fitness_history = Float64[]
+    mean_history = Float64[]
+    best_genome_all_time = nothing
+    best_fitness_all_time = Inf
+    rng_local = nothing
+    genomes = nothing
+    fitnesses = nothing
+
+    if resume_from !== nothing
+        ckpt = load_checkpoint(resume_from)
+        ckpt.population isa Vector{TreeGenome{T}} || throw(ArgumentError(
+            "checkpoint population type $(eltype(ckpt.population)) does not match " *
+            "current genome type TreeGenome{$T}"))
+        expected_sig = _algorithm_signature(algorithm)
+        if ckpt.algorithm_signature != expected_sig && !allow_signature_mismatch
+            throw(ArgumentError(
+                "algorithm signature mismatch on resume. Pass " *
+                "`allow_signature_mismatch=true` to override intentionally."))
+        end
+        rng_local = deepcopy(ckpt.rng_state)
+        genomes = deepcopy(ckpt.population)
+        fitnesses = copy(ckpt.fitnesses)
+        start_gen = ckpt.generation + 1
+        start_wall = ckpt.wall_time
+        fitness_history = copy(ckpt.fitness_history)
+        mean_history = copy(ckpt.mean_history)
+        best_genome_all_time = deepcopy(ckpt.best_genome)
+        best_fitness_all_time = ckpt.best_fitness
+    else
+        rng_local = problem.seed === nothing ? Random.default_rng() :
+                    Random.MersenneTwister(problem.seed)
+        # Initialize population with ramped half-and-half.
+        genomes = Vector{TreeGenome{T}}(undef, pop_size)
+        for i in 1:pop_size
+            method = i <= pop_size ÷ 2 ? :full : :grow
+            depth = 2 + (i % 3)  # depths 2, 3, 4
+            tree = _random_tree(rng_local, ops, n_feat, T, depth, method)
+            genomes[i] = TreeGenome{T}(tree, ops, n_feat)
+        end
+        fitnesses = fill(Inf, pop_size)
+        for i in 1:pop_size
+            raw = evaluate(evaluator, genomes[i])
+            fitnesses[i] = (bp > 0.0 && isfinite(raw)) ? raw + bp * complexity(genomes[i]) : raw
+        end
+        best_genome_all_time = genomes[1]
     end
 
-    # Evaluate initial population.
-    fitnesses = fill(Inf, pop_size)
-    for i in 1:pop_size
-        raw = evaluate(evaluator, genomes[i])
-        fitnesses[i] = (bp > 0.0 && isfinite(raw)) ? raw + bp * complexity(genomes[i]) : raw
-    end
+    rng = rng_local
 
     # Initialize speciation state.
     species_state = _init_species_state(algorithm.speciation)
 
-    fitness_history = Float64[]
-    mean_history = Float64[]
-    t0 = time()
+    t0 = time() - start_wall
 
-    for gen in 1:algorithm.generations
+    for gen in start_gen:algorithm.generations
         # Sort by fitness.
         order = sortperm(fitnesses)
         genomes = genomes[order]
@@ -484,9 +525,11 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
             next_fitnesses[i] = fitnesses[i]
         end
 
+        op_track = log === nothing ? nothing : fill(:elitism, pop_size)
         _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
                                  algorithm, rng, algorithm.elitism + 1;
-                                 case_fitnesses=case_fitnesses)
+                                 case_fitnesses=case_fitnesses,
+                                 op_track=op_track)
 
         # Evaluate new individuals.
         for i in (algorithm.elitism + 1):pop_size
@@ -494,14 +537,41 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
             next_fitnesses[i] = (bp > 0.0 && isfinite(raw)) ? raw + bp * complexity(next_genomes[i]) : raw
         end
 
-        # Periodic constant-optimization pass on top-K individuals. Refines
-        # numeric literals against the dataset via BFGS with FD gradients; see
-        # `src/constant_optimization.jl`. Zero overhead when disabled.
+        # Operator attempt / success tally into the generation log entry.
+        if log !== nothing && !isempty(entries(log))
+            last_entry = log.entries[end]
+            for i in (algorithm.elitism + 1):pop_size
+                name = op_track[i]
+                last_entry.operator_attempted[name] =
+                    get(last_entry.operator_attempted, name, 0) + 1
+                if isfinite(next_fitnesses[i])
+                    last_entry.operator_success[name] =
+                        get(last_entry.operator_success, name, 0) + 1
+                end
+            end
+        end
+
+        # Periodic constant-optimization pass on top-K individuals.
         _maybe_optimize_constants!(next_genomes, next_fitnesses, evaluator,
                                    algorithm, gen, bp)
 
+        # All-time-best tracking (survives elitism loss).
+        cur_best = argmin(next_fitnesses)
+        if next_fitnesses[cur_best] < best_fitness_all_time
+            best_fitness_all_time = next_fitnesses[cur_best]
+            best_genome_all_time = deepcopy(next_genomes[cur_best])
+        end
+
         genomes = next_genomes
         fitnesses = next_fitnesses
+
+        # Periodic checkpoint.
+        if checkpoint_every > 0 && checkpoint_path !== nothing &&
+           gen % checkpoint_every == 0
+            _save_ckpt(genomes, fitnesses, rng, best_genome_all_time,
+                       best_fitness_all_time, fitness_history, mean_history,
+                       time() - t0, gen, algorithm, checkpoint_path)
+        end
     end
 
     order = sortperm(fitnesses)
@@ -510,11 +580,15 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
 
     wall_time = time() - t0
 
+    final_best_genome  = best_fitness_all_time < fitnesses[1] ?
+        best_genome_all_time : genomes[1]
+    final_best_fitness = min(best_fitness_all_time, fitnesses[1])
+
     return GPResult{TreeGenome{T}}(
-        genomes[1], fitnesses[1], genomes,
+        final_best_genome, final_best_fitness, genomes,
         fitness_history, mean_history,
         algorithm.generations, wall_time,
-        fitnesses[1] < algorithm.convergence_threshold
+        final_best_fitness < algorithm.convergence_threshold
     )
 end
 

@@ -19,15 +19,46 @@ function solve(problem::GPProblem{G,E},
                algorithm::GeneticProgramming;
                verbose::Bool = false,
                callback = nothing,
-               log::Union{Nothing, RunLog} = nothing) where {G,E}
-    # Create a dedicated RNG from the seed, or use the default RNG.
-    # All stochastic operations use this RNG explicitly — no global rand().
+               log::Union{Nothing, RunLog} = nothing,
+               checkpoint_every::Int = 0,
+               checkpoint_path::Union{Nothing, AbstractString} = nothing,
+               resume_from::Union{Nothing, AbstractString} = nothing,
+               allow_signature_mismatch::Bool = false) where {G,E}
+    checkpoint_every >= 0 || throw(ArgumentError("checkpoint_every must be >= 0"))
+    if checkpoint_every > 0 && checkpoint_path === nothing
+        throw(ArgumentError("checkpoint_every > 0 requires a checkpoint_path"))
+    end
+
+    # Resume path: load the checkpoint, validate the algorithm signature,
+    # and hand the prior state to _run_evolution!. Seed RNG from the checkpoint.
+    if resume_from !== nothing
+        ckpt = load_checkpoint(resume_from)
+        ckpt.population isa Vector{G} || throw(ArgumentError(
+            "checkpoint population type $(eltype(ckpt.population)) does not match " *
+            "current genome type $G"))
+        expected_sig = _algorithm_signature(algorithm)
+        if ckpt.algorithm_signature != expected_sig && !allow_signature_mismatch
+            throw(ArgumentError(
+                "algorithm signature mismatch on resume. " *
+                "Checkpoint signature 0x$(string(ckpt.algorithm_signature, base=16)), " *
+                "current algorithm 0x$(string(expected_sig, base=16)). " *
+                "Pass `allow_signature_mismatch=true` to override intentionally."))
+        end
+        return _run_evolution!(ckpt, problem, algorithm;
+                               verbose=verbose, callback=callback, log=log,
+                               checkpoint_every=checkpoint_every,
+                               checkpoint_path=checkpoint_path)
+    end
+
+    # Fresh start.
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
     pop = _initialize_population(problem, algorithm, rng)
     return _run_evolution!(pop, problem, algorithm, rng;
-                           verbose=verbose, callback=callback, log=log)
+                           verbose=verbose, callback=callback, log=log,
+                           checkpoint_every=checkpoint_every,
+                           checkpoint_path=checkpoint_path)
 end
 
 """
@@ -126,7 +157,9 @@ function _breed_next_generation!(next_genomes::Vector{G},
                                   alg::GeneticProgramming,
                                   rng::AbstractRNG,
                                   start_idx::Int;
-                                  case_fitnesses = nothing) where G
+                                  case_fitnesses = nothing,
+                                  op_track::Union{Nothing, Vector{Symbol}} = nothing,
+                                  ) where G
     pop_size = length(next_genomes)
     sel = alg.selection
     idx = start_idx
@@ -139,19 +172,115 @@ function _breed_next_generation!(next_genomes::Vector{G},
             (c1, c2) = crossover(op, genomes[p1], genomes[p2], rng)
             next_genomes[idx] = c1
             next_genomes[idx + 1] = c2
+            if op_track !== nothing
+                name = operator_name(op)
+                op_track[idx] = name
+                op_track[idx + 1] = name
+            end
             idx += 2
         elseif r < alg.crossover_rate + alg.mutation_rate
             p_idx = select_parent(sel, selection_fitnesses, case_fitnesses, rng)
             op = rand(rng, alg.mutation_ops)
             _set_parent_context!(alg.mutation_ops, p_idx, selection_fitnesses)
             next_genomes[idx] = mutate(op, genomes[p_idx], rng)
+            if op_track !== nothing
+                op_track[idx] = operator_name(op)
+            end
             idx += 1
         else
             p_idx = select_parent(sel, selection_fitnesses, case_fitnesses, rng)
             next_genomes[idx] = deepcopy(genomes[p_idx])
+            if op_track !== nothing
+                op_track[idx] = :reproduction
+            end
             idx += 1
         end
     end
+end
+
+"""
+    _save_ckpt(genomes, fitnesses, rng, best_genome, best_fitness,
+               fitness_history, mean_history, wall_time, gen, algorithm, path)
+
+Build a `Checkpoint` from the current evolution state and atomically persist
+it to `path`. Invoked from `_run_evolution!` at `checkpoint_every` boundaries.
+"""
+function _save_ckpt(genomes::Vector{G}, fitnesses::Vector{Float64},
+                    rng::AbstractRNG, best_genome::G, best_fitness::Float64,
+                    fitness_history::Vector{Float64},
+                    mean_history::Vector{Float64},
+                    wall_time::Float64, gen::Int,
+                    algorithm::GeneticProgramming,
+                    path::AbstractString) where {G}
+    sig = _algorithm_signature(algorithm)
+    ckpt = Checkpoint{G}(
+        CHECKPOINT_FORMAT_VERSION,
+        _arborist_version(),
+        VERSION,
+        gen,
+        deepcopy(genomes),
+        copy(fitnesses),
+        copy(rng),
+        deepcopy(best_genome),
+        best_fitness,
+        copy(fitness_history),
+        copy(mean_history),
+        wall_time,
+        sig,
+    )
+    save_checkpoint(ckpt, path)
+    return nothing
+end
+
+# Read the running project's version from Project.toml. Falls back to v0.0.0
+# if the file is unreachable (e.g. under unusual test harnesses).
+const _ARBORIST_VERSION_CACHE = Ref{Union{Nothing, VersionNumber}}(nothing)
+function _arborist_version()
+    _ARBORIST_VERSION_CACHE[] !== nothing && return _ARBORIST_VERSION_CACHE[]
+    v = try
+        proj = joinpath(dirname(@__DIR__), "Project.toml")
+        m = match(r"^version\s*=\s*\"([^\"]+)\""m, read(proj, String))
+        m === nothing ? v"0.0.0" : VersionNumber(m.captures[1])
+    catch
+        v"0.0.0"
+    end
+    _ARBORIST_VERSION_CACHE[] = v
+    return v
+end
+
+"""
+    _run_evolution!(ckpt::Checkpoint{G}, problem, algorithm; kwargs...) -> GPResult{G}
+
+Resume dispatch: reconstructs the state carrier from a checkpoint and calls
+the main `_run_evolution!` with `start_gen = ckpt.generation + 1` and the
+prior RNG, population, fitnesses, histories, and best-so-far.
+"""
+function _run_evolution!(ckpt::Checkpoint{G},
+                         problem::GPProblem{G,E},
+                         algorithm::GeneticProgramming;
+                         verbose::Bool = false,
+                         callback = nothing,
+                         log::Union{Nothing, RunLog} = nothing,
+                         checkpoint_every::Int = 0,
+                         checkpoint_path::Union{Nothing, AbstractString} = nothing,
+                         ) where {G,E}
+    rng = deepcopy(ckpt.rng_state)
+    # Rebuild the per-genome state carrier (GenState for ExprGenome, etc).
+    # For ExprGenome, we need a fresh GenState sharing the same RNG.
+    fresh_pop = _initialize_population(problem, algorithm, rng)
+    state = fresh_pop[2]  # keep the state carrier; discard its population
+    pop = (deepcopy(ckpt.population), state)
+
+    return _run_evolution!(pop, problem, algorithm, rng;
+                           verbose=verbose, callback=callback, log=log,
+                           checkpoint_every=checkpoint_every,
+                           checkpoint_path=checkpoint_path,
+                           start_gen=ckpt.generation + 1,
+                           start_wall=ckpt.wall_time,
+                           initial_fitness_history=ckpt.fitness_history,
+                           initial_mean_history=ckpt.mean_history,
+                           initial_best=(ckpt.best_genome, ckpt.best_fitness),
+                           initial_fitnesses=ckpt.fitnesses)
 end
 
 """
@@ -224,24 +353,45 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
                          rng::AbstractRNG;
                          verbose::Bool = false,
                          callback = nothing,
-                         log::Union{Nothing, RunLog} = nothing) where {G,E}
+                         log::Union{Nothing, RunLog} = nothing,
+                         checkpoint_every::Int = 0,
+                         checkpoint_path::Union{Nothing, AbstractString} = nothing,
+                         start_gen::Int = 1,
+                         start_wall::Float64 = 0.0,
+                         initial_fitness_history::Vector{Float64} = Float64[],
+                         initial_mean_history::Vector{Float64} = Float64[],
+                         initial_best::Union{Nothing, Tuple{G, Float64}} = nothing,
+                         initial_fitnesses::Union{Nothing, Vector{Float64}} = nothing,
+                         ) where {G,E}
     genomes, state = pop
     pop_size = algorithm.pop_size
-    fitnesses = fill(Inf, pop_size)
     bp = algorithm.bloat_penalty
 
-    # Evaluate initial population (with bloat penalty).
-    _parallel_evaluate!(fitnesses, genomes, problem.evaluator, bp, 1:pop_size, algorithm.parallel)
+    # Initial fitnesses: use what the checkpoint provided if resuming;
+    # otherwise evaluate the fresh initial population.
+    fitnesses = if initial_fitnesses === nothing
+        fits = fill(Inf, pop_size)
+        _parallel_evaluate!(fits, genomes, problem.evaluator, bp, 1:pop_size, algorithm.parallel)
+        fits
+    else
+        copy(initial_fitnesses)
+    end
 
-    # Initialize speciation state.
     species_state = _init_species_state(algorithm.speciation)
 
-    fitness_history = Float64[]
-    mean_history = Float64[]
+    fitness_history = copy(initial_fitness_history)
+    mean_history    = copy(initial_mean_history)
 
-    t0 = time()
+    # Wall-clock reference: a fresh run starts at now; a resumed run continues
+    # accumulating on top of the prior run's wall time.
+    t0 = time() - start_wall
 
-    for gen in 1:algorithm.generations
+    # Track the all-time best — resume hands this in; fresh runs take it from
+    # the first sorted population.
+    best_genome_all_time  = initial_best === nothing ? genomes[1] : initial_best[1]
+    best_fitness_all_time = initial_best === nothing ? Inf         : initial_best[2]
+
+    for gen in start_gen:algorithm.generations
         # Sort by fitness ascending (best first).
         order = sortperm(fitnesses)
         genomes = genomes[order]
@@ -291,17 +441,49 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
             next_fitnesses[i] = fitnesses[i]
         end
 
-        # Fill the rest via selection + genetic operators.
+        # Fill the rest via selection + genetic operators. Track per-child
+        # operator identity only when a RunLog is listening — zero overhead otherwise.
+        op_track = log === nothing ? nothing :
+            fill(:elitism, pop_size)  # elites default to :elitism; _breed overwrites
         _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
                                  algorithm, rng, algorithm.elitism + 1;
-                                 case_fitnesses=case_fitnesses)
+                                 case_fitnesses=case_fitnesses,
+                                 op_track=op_track)
 
         # Evaluate new individuals (skip elites which already have fitness).
         _parallel_evaluate!(next_fitnesses, next_genomes, problem.evaluator, bp,
                            (algorithm.elitism + 1):pop_size, algorithm.parallel)
 
+        # Operator success/attempt tally for the most recent log entry.
+        if log !== nothing && !isempty(entries(log))
+            last = log.entries[end]
+            for i in (algorithm.elitism + 1):pop_size
+                name = op_track[i]
+                last.operator_attempted[name] = get(last.operator_attempted, name, 0) + 1
+                if isfinite(next_fitnesses[i])
+                    last.operator_success[name] = get(last.operator_success, name, 0) + 1
+                end
+            end
+        end
+
+        # Update the all-time best across the whole run (not just the
+        # current generation). This survives elitism loss.
+        cur_best = argmin(next_fitnesses)
+        if next_fitnesses[cur_best] < best_fitness_all_time
+            best_fitness_all_time = next_fitnesses[cur_best]
+            best_genome_all_time  = deepcopy(next_genomes[cur_best])
+        end
+
         genomes = next_genomes
         fitnesses = next_fitnesses
+
+        # Periodic checkpoint — writes the just-completed generation's state.
+        if checkpoint_every > 0 && checkpoint_path !== nothing &&
+           gen % checkpoint_every == 0
+            _save_ckpt(genomes, fitnesses, rng, best_genome_all_time,
+                       best_fitness_all_time, fitness_history, mean_history,
+                       time() - t0, gen, algorithm, checkpoint_path)
+        end
     end
 
     # Final sort.
@@ -311,15 +493,20 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
 
     wall_time = time() - t0
 
+    # Prefer the all-time best over the final-population best.
+    final_best_genome  = best_fitness_all_time < fitnesses[1] ?
+        best_genome_all_time : genomes[1]
+    final_best_fitness = min(best_fitness_all_time, fitnesses[1])
+
     return GPResult{G}(
-        genomes[1],
-        fitnesses[1],
+        final_best_genome,
+        final_best_fitness,
         genomes,
         fitness_history,
         mean_history,
         algorithm.generations,
         wall_time,
-        fitnesses[1] < algorithm.convergence_threshold
+        final_best_fitness < algorithm.convergence_threshold
     )
 end
 

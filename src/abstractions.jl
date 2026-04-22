@@ -69,8 +69,20 @@ function evaluate_cases end
 Base type for mutation operators.
 
 Concrete subtypes define `mutate(op, g::AbstractGenome, rng::AbstractRNG) -> AbstractGenome`.
+Concrete subtypes may also override `operator_name(op) -> Symbol` to expose a
+friendly key for RunLog's per-operator tallies. The default derives the name
+from the struct type.
 """
 abstract type AbstractMutationOperator end
+
+"""
+    operator_name(op) -> Symbol
+
+Stable name for an operator, used as the key in `GenerationLog.operator_attempted`
+/ `operator_success`. Default: the concrete type's `nameof`.
+"""
+operator_name(op::AbstractMutationOperator) = Symbol(nameof(typeof(op)))
+operator_name(op) = Symbol(nameof(typeof(op)))
 
 """
     AbstractCrossoverOperator
@@ -78,6 +90,7 @@ abstract type AbstractMutationOperator end
 Base type for crossover operators.
 
 Concrete subtypes define `crossover(op, g1::AbstractGenome, g2::AbstractGenome, rng::AbstractRNG) -> Tuple`.
+May also override `operator_name(op) -> Symbol` for RunLog tallies.
 """
 abstract type AbstractCrossoverOperator end
 

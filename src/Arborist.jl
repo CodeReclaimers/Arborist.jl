@@ -66,6 +66,9 @@ include("constant_optimization.jl")
 # --- Algorithm configuration (needs operator types) ---
 include("algorithm.jl")
 
+# --- Checkpoint struct + save/load (referenced inside solve.jl) ---
+include("checkpoint.jl")
+
 # --- Solve entry point ---
 include("solve.jl")
 
@@ -126,6 +129,11 @@ export
     # Constant optimization
     ConstantOptimization,
     optimize_constants!,
+
+    # Checkpointing
+    Checkpoint,
+    save_checkpoint,
+    load_checkpoint,
 
     # Novelty Search
     NoveltyArchive,

@@ -224,10 +224,123 @@ function serialize(g::GraphGenome)
     return String(take!(io))
 end
 
-function deserialize(::Type{GraphGenome}, s::String,
-                     n_inputs::Int, n_outputs::Int)
-    @warn "GraphGenome deserialization is not yet implemented"
-    return nothing
+"""
+    deserialize(::Type{GraphGenome}, s::AbstractString, n_inputs, n_outputs;
+                reassign_innovations=false) -> Union{GraphGenome, Nothing}
+
+Parse the text emitted by `serialize(::GraphGenome)` back into a
+`GraphGenome`. The format is line-oriented:
+
+- `N <id> <type> <activation>` — node line
+- `C <in>-><out> w=<weight> en=<true|false> i=<innovation>` — connection line
+
+Lines not starting with `N` or `C` are skipped (tolerates LLM commentary,
+code fences, etc). Returns `nothing` when a malformed line is encountered,
+when a connection references an undefined node, or when `n_inputs` /
+`n_outputs` disagree with the decoded node set.
+
+Preserves node IDs and innovation numbers verbatim — required for
+content-aware distributed migration and NEAT crossover alignment. Pass
+`reassign_innovations=true` to issue a fresh innovation ID to every
+connection via `_next_innovation!()`; the LLM mutation path uses this to
+prevent LLM-generated IDs from colliding with the parent pool's history.
+"""
+function deserialize(::Type{GraphGenome}, s::AbstractString,
+                     n_inputs::Int, n_outputs::Int;
+                     reassign_innovations::Bool = false)
+    nodes = Dict{Int, NodeGene}()
+    connections = Dict{Int, ConnectionGene}()
+
+    for raw_line in split(s, '\n')
+        line = strip(raw_line)
+        isempty(line) && continue
+        c0 = first(line)
+        if c0 == 'N'
+            node = _parse_node_line(line)
+            node === nothing && return nothing
+            haskey(nodes, node.id) && return nothing
+            nodes[node.id] = node
+        elseif c0 == 'C'
+            conn = _parse_conn_line(line)
+            conn === nothing && return nothing
+            haskey(connections, conn.innovation) && return nothing
+            connections[conn.innovation] = conn
+        else
+            # Ignore everything else — markdown fences, LLM preamble, blank runs, etc.
+            continue
+        end
+    end
+
+    # Validate that every connection points at defined nodes.
+    for c in values(connections)
+        haskey(nodes, c.in_node) || return nothing
+        haskey(nodes, c.out_node) || return nothing
+    end
+
+    # Validate declared input/output counts match the decoded node set.
+    n_in_decoded  = count(n -> n.type == :input,  values(nodes))
+    n_out_decoded = count(n -> n.type == :output, values(nodes))
+    n_in_decoded  == n_inputs  || return nothing
+    n_out_decoded == n_outputs || return nothing
+
+    if reassign_innovations && !isempty(connections)
+        new_conns = Dict{Int, ConnectionGene}()
+        for c in values(connections)
+            fresh = _next_innovation!()
+            new_conns[fresh] = ConnectionGene(c.in_node, c.out_node,
+                                              c.weight, c.enabled, fresh)
+        end
+        connections = new_conns
+    end
+
+    return GraphGenome(nodes, connections, n_inputs, n_outputs, Inf)
+end
+
+# Line parsers. Return `nothing` on any mismatch.
+
+function _parse_node_line(line::AbstractString)
+    # "N <id> <type> <activation>"
+    parts = split(line)
+    length(parts) == 4 || return nothing
+    parts[1] == "N" || return nothing
+    id = tryparse(Int, parts[2])
+    id === nothing && return nothing
+    nt  = Symbol(parts[3])
+    act = Symbol(parts[4])
+    nt in (:input, :hidden, :output, :bias) || return nothing
+    return NodeGene(id, nt, act)
+end
+
+function _parse_conn_line(line::AbstractString)
+    # "C <in>-><out> w=<weight> en=<true|false> i=<innovation>"
+    parts = split(line)
+    length(parts) == 5 || return nothing
+    parts[1] == "C" || return nothing
+
+    m_edge = match(r"^(\-?\d+)->(\-?\d+)$", parts[2])
+    m_edge === nothing && return nothing
+    in_node  = tryparse(Int, m_edge.captures[1])
+    out_node = tryparse(Int, m_edge.captures[2])
+    (in_node === nothing || out_node === nothing) && return nothing
+
+    startswith(parts[3], "w=") || return nothing
+    weight = tryparse(Float64, SubString(parts[3], 3))
+    weight === nothing && return nothing
+
+    startswith(parts[4], "en=") || return nothing
+    enabled = if parts[4] == "en=true"
+        true
+    elseif parts[4] == "en=false"
+        false
+    else
+        return nothing
+    end
+
+    startswith(parts[5], "i=") || return nothing
+    innovation = tryparse(Int, SubString(parts[5], 3))
+    innovation === nothing && return nothing
+
+    return ConnectionGene(in_node, out_node, weight, enabled, innovation)
 end
 
 # =============================================================================
@@ -1002,6 +1115,10 @@ function solve(problem::GPProblem{GraphGenome, E},
                                                   algorithm.speciation, species_state, rng;
                                                   snapshot=species_snapshot)
 
+        case_fitnesses = needs_cases(algorithm.selection) ?
+            _compute_case_fitnesses(genomes, evaluator, algorithm.parallel) :
+            nothing
+
         if log !== nothing
             record!(log, gen, fitnesses, genomes, time() - t0;
                     snapshot=species_snapshot)
@@ -1016,7 +1133,8 @@ function solve(problem::GPProblem{GraphGenome, E},
         end
 
         _breed_next_generation!(next_genomes, genomes, selection_fitnesses,
-                                 algorithm, rng, algorithm.elitism + 1)
+                                 algorithm, rng, algorithm.elitism + 1;
+                                 case_fitnesses=case_fitnesses)
 
         for i in (algorithm.elitism + 1):pop_size
             next_fitnesses[i] = evaluate_genome(next_genomes[i], evaluator)

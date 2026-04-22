@@ -99,6 +99,114 @@
         @test length(s) > 0
     end
 
+    @testset "deserialize round-trip (structural + functional)" begin
+        reset_innovation_counter!()
+        rng = Random.MersenneTwister(17)
+        g = initialize(GraphGenome, 2, 1, rng)
+        # Grow the topology a bit so it's non-trivial.
+        for _ in 1:5
+            Arborist._mutate_weights!(g, rng)
+        end
+        Arborist._mutate_add_node!(g, rng)
+        Arborist._mutate_add_connection!(g, rng)
+
+        s = serialize(g)
+        g2 = deserialize(GraphGenome, s, g.n_inputs, g.n_outputs)
+        @test g2 !== nothing
+
+        # Structural equality.
+        @test keys(g.nodes) == keys(g2.nodes)
+        for (id, n) in g.nodes
+            n2 = g2.nodes[id]
+            @test n2.type == n.type
+            @test n2.activation == n.activation
+        end
+        @test keys(g.connections) == keys(g2.connections)
+        for (inn, c) in g.connections
+            c2 = g2.connections[inn]
+            @test c2.in_node == c.in_node
+            @test c2.out_node == c.out_node
+            @test c2.weight == c.weight
+            @test c2.enabled == c.enabled
+            @test c2.innovation == c.innovation
+        end
+
+        # Functional equivalence on a small input set.
+        input_data = Float64[0 0 1 1; 0 1 0 1]
+        output_data = Float64[0 1 1 0]
+        evaluator = GraphEvaluator(input_data, output_data)
+        f1 = evaluate_genome(g, evaluator)
+        f2 = evaluate_genome(g2, evaluator)
+        @test f1 == f2
+    end
+
+    @testset "deserialize with reassign_innovations" begin
+        reset_innovation_counter!()
+        rng = Random.MersenneTwister(33)
+        g = initialize(GraphGenome, 2, 1, rng)
+        s = serialize(g)
+        # Bump the global counter so fresh IDs would differ.
+        reset_innovation_counter!()
+        Arborist.init_innovation_range!(1000)
+
+        g2 = deserialize(GraphGenome, s, g.n_inputs, g.n_outputs;
+                         reassign_innovations=true)
+        @test g2 !== nothing
+        # Node IDs unchanged.
+        @test keys(g.nodes) == keys(g2.nodes)
+        # Connection count preserved but innovation keys are fresh.
+        @test length(g2.connections) == length(g.connections)
+        for c in values(g2.connections)
+            @test c.innovation > 1000
+        end
+    end
+
+    @testset "deserialize tolerates whitespace + preamble" begin
+        reset_innovation_counter!()
+        rng = Random.MersenneTwister(51)
+        g = initialize(GraphGenome, 2, 1, rng)
+        s = serialize(g)
+        messy = "Here's the mutated genome:\n\n```\n" * s * "\n```\n"
+        g2 = deserialize(GraphGenome, messy, g.n_inputs, g.n_outputs)
+        @test g2 !== nothing
+        @test keys(g.connections) == keys(g2.connections)
+    end
+
+    @testset "deserialize rejects malformed input" begin
+        # Missing node reference.
+        bad = """
+        N 1 input identity
+        N 3 output sigmoid
+        C 1->2 w=0.5 en=true i=1
+        """
+        @test deserialize(GraphGenome, bad, 1, 1) === nothing
+
+        # Wrong input count.
+        ok = """
+        N 1 input identity
+        N 2 output sigmoid
+        C 1->2 w=0.5 en=true i=1
+        """
+        @test deserialize(GraphGenome, ok, 2, 1) === nothing  # only 1 input decoded
+
+        # Duplicate innovation ID.
+        dup = """
+        N 1 input identity
+        N 2 output sigmoid
+        C 1->2 w=0.5 en=true i=1
+        C 1->2 w=0.6 en=true i=1
+        """
+        @test deserialize(GraphGenome, dup, 1, 1) === nothing
+
+        # Garbled weight.
+        garbled = """
+        N 1 input identity
+        N 2 output sigmoid
+        C 1->2 w=NaNsense en=true i=1
+        """
+        @test deserialize(GraphGenome, garbled, 1, 1) === nothing
+    end
+
     @testset "evaluation" begin
         rng = Random.MersenneTwister(42)
         reset_innovation_counter!()

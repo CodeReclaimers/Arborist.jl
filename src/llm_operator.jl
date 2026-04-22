@@ -297,6 +297,114 @@ function mutate(op::LLMMutationOperator, g::ExprGenome,
     return result
 end
 
+"""
+    mutate(op::LLMMutationOperator, g::GraphGenome, rng::AbstractRNG) -> GraphGenome
+
+LLM-driven semantic mutation of a NEAT-style `GraphGenome`. Serializes the
+genome via the node-and-connection text format, queries the LLM, and parses
+the response back with `deserialize(GraphGenome, ...; reassign_innovations=true)`
+so LLM-generated innovation IDs never collide with the parent pool's
+innovation history (content-aware alignment is a later phase).
+
+Falls back to `op.fallback_op` on any failure. The fallback operator must
+dispatch on `GraphGenome` — typically a NEAT operator from `neat_defaults()`
+or `NEATDefaultMutation()`. If the default `SubtreeMutation()` fallback is
+left in place the fallback will itself raise `MethodError`; callers using
+LLM on GraphGenome should explicitly set `fallback_op=NEATDefaultMutation()`.
+"""
+function mutate(op::LLMMutationOperator, g::GraphGenome,
+                rng::AbstractRNG)::GraphGenome
+    stats = op.stats
+
+    source = serialize(g)
+
+    api_key = ""
+    if !isempty(op.api_key_env)
+        if haskey(ENV, op.api_key_env)
+            api_key = ENV[op.api_key_env]
+        else
+            @warn "LLMMutationOperator: API key env var '$(op.api_key_env)' not set, falling back"
+            stats.total_calls += 1
+            stats.fallback_skips += 1
+            return mutate(op.fallback_op, g, rng)
+        end
+    end
+
+    is_anthropic = occursin("anthropic.com", op.endpoint)
+    headers = Pair{String,String}["Content-Type" => "application/json"]
+    if is_anthropic
+        push!(headers, "x-api-key" => api_key)
+        push!(headers, "anthropic-version" => "2023-06-01")
+    elseif !isempty(api_key)
+        push!(headers, "Authorization" => "Bearer $api_key")
+    end
+
+    body, user_content_len = _build_request_body(op, source, is_anthropic)
+
+    t0 = time_ns()
+    response_text = try
+        _http_post[](op.endpoint, headers, body, op.timeout_seconds)
+    catch e
+        dt = (time_ns() - t0) / 1e9
+        @warn "LLMMutationOperator: HTTP request failed" exception=e
+        stats.total_calls += 1
+        stats.llm_failures += 1
+        stats.total_latency += dt
+        stats.input_chars += user_content_len
+        return mutate(op.fallback_op, g, rng)
+    end
+    dt = (time_ns() - t0) / 1e9
+    stats.total_latency += dt
+    stats.input_chars += user_content_len
+
+    in_tok, out_tok = _extract_usage(response_text, is_anthropic)
+    stats.input_tokens += in_tok
+    stats.output_tokens += out_tok
+
+    text = _extract_response_text(response_text, is_anthropic)
+    if text === nothing
+        @warn "LLMMutationOperator: failed to extract text from response"
+        stats.total_calls += 1
+        stats.llm_failures += 1
+        return mutate(op.fallback_op, g, rng)
+    end
+    stats.output_chars += length(text)
+
+    outcome = "success"
+    result = try
+        r = deserialize(GraphGenome, text, g.n_inputs, g.n_outputs;
+                        reassign_innovations=true)
+        if r === nothing
+            @warn "LLMMutationOperator: deserialize returned nothing, falling back"
+            outcome = "deserialize_nothing"
+            nothing
+        else
+            r
+        end
+    catch e
+        e isa InterruptException && rethrow()
+        @warn "LLMMutationOperator: deserialize threw, falling back" exception=e
+        outcome = "deserialize_threw"
+        nothing
+    end
+
+    stats.total_calls += 1
+    if result === nothing
+        stats.llm_failures += 1
+    else
+        stats.llm_successes += 1
+    end
+
+    if op.debug_log !== nothing
+        _write_debug_entry(op.debug_log, source, text, outcome, stats.total_calls)
+    end
+
+    if result === nothing
+        return mutate(op.fallback_op, g, rng)
+    end
+    return result
+end
+
 
 # =============================================================================
 # Internal helpers

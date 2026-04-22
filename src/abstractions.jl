@@ -41,8 +41,27 @@ Any concrete subtype `E <: AbstractEvaluator` must implement:
 - `evaluate(e::E, f::Function) -> Float64` (lower is better)
 - `input_signature(e::E) -> Dict{Symbol, DataType}`
 - `output_signature(e::E) -> Dict{Symbol, DataType}`
+
+Optionally, evaluators that can decompose fitness into independent per-case
+losses (e.g. per-row MSE, per-sample squared error) may implement
+`evaluate_cases(g::AbstractGenome, e::E) -> Vector{Float64}`. This is
+required for lexicase selection; evaluators that cannot meaningfully
+decompose (e.g. `AntEvaluator`, `EpisodicEvaluator`) should leave it
+unimplemented — lexicase will then raise a clear `MethodError`.
 """
 abstract type AbstractEvaluator end
+
+"""
+    evaluate_cases(g::AbstractGenome, e::AbstractEvaluator) -> Vector{Float64}
+
+Per-case loss vector (lower = better) for evaluators that can decompose
+their fitness into independent cases (per-row, per-sample). Used by
+lexicase selection.
+
+No default implementation: evaluators that can support lexicase must opt in
+explicitly. If not implemented, calling it raises `MethodError`.
+"""
+function evaluate_cases end
 
 """
     AbstractMutationOperator

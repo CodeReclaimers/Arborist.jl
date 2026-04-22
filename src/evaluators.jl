@@ -114,3 +114,54 @@ function evaluate(fe::TableFitnessEvaluator, f::Function)
 
     return total_se / n_success
 end
+
+"""
+    evaluate_cases(e::TableFitnessEvaluator, f::Function) -> Vector{Float64}
+
+Return per-row squared error (Inf for rows that raised, timed out, or
+produced non-finite output). One entry per input row, in row order.
+Used by lexicase selection.
+"""
+function evaluate_cases(e::TableFitnessEvaluator, f::Function)
+    n_rows = length(e.input_rows)
+    case_fitnesses = fill(Inf, n_rows)
+
+    sorted_inputs = sort(collect(e.input_cols), by=first)
+    sorted_outputs = sort(collect(e.output_cols), by=first)
+    n_outputs = length(sorted_outputs)
+
+    for (row_idx, (in_row, out_row)) in enumerate(zip(e.input_rows, e.output_rows))
+        t0 = time_ns()
+        result = try
+            args = [in_row[name] for (name, _) in sorted_inputs]
+            Base.invokelatest(f, args...)
+        catch err
+            err isa InterruptException && rethrow()
+            nothing
+        end
+        elapsed_ns = time_ns() - t0
+
+        (result === nothing || elapsed_ns > e.time_limit_ns) && continue
+
+        se = 0.0
+        try
+            if n_outputs == 1
+                expected = out_row[sorted_outputs[1][1]]
+                se = (Float64(result) - Float64(expected))^2
+            else
+                for (k, (name, _)) in enumerate(sorted_outputs)
+                    expected = out_row[name]
+                    se += (Float64(result[k]) - Float64(expected))^2
+                end
+            end
+        catch err
+            err isa InterruptException && rethrow()
+            continue
+        end
+
+        isfinite(se) || continue
+        case_fitnesses[row_idx] = se
+    end
+
+    return case_fitnesses
+end

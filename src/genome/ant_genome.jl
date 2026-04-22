@@ -355,7 +355,8 @@ Run GP evolution with AntGenome for side-effectful program synthesis.
 function solve(problem::GPProblem{AntGenome, E},
                algorithm::GeneticProgramming;
                verbose::Bool = false,
-               callback = nothing) where {E<:AntEvaluator}
+               callback = nothing,
+               log::Union{Nothing, RunLog} = nothing) where {E<:AntEvaluator}
     if algorithm.parallel
         error("AntGenome uses module-level simulator state (_ant_sim_ref) that is " *
               "not thread-safe. Set parallel=false in GeneticProgramming. " *
@@ -402,8 +403,15 @@ function solve(problem::GPProblem{AntGenome, E},
 
         callback !== nothing && callback(gen, fitnesses[1], genomes[1])
 
+        species_snapshot = log === nothing ? nothing : SpeciationSnapshot()
         selection_fitnesses = _apply_speciation!(genomes, fitnesses,
-                                                  algorithm.speciation, species_state, rng)
+                                                  algorithm.speciation, species_state, rng;
+                                                  snapshot=species_snapshot)
+
+        if log !== nothing
+            record!(log, gen, fitnesses, genomes, time() - t0;
+                    snapshot=species_snapshot)
+        end
 
         next_genomes = Vector{AntGenome}(undef, pop_size)
         next_fitnesses = fill(Inf, pop_size)

@@ -157,7 +157,14 @@ _init_species_state(::BehavioralSpeciation) = _SpeciesInfo[]
 
 No-op for NoSpeciation: return raw fitnesses unchanged.
 """
-_apply_speciation!(genomes, fitnesses, ::NoSpeciation, ::Nothing, rng) = fitnesses
+function _apply_speciation!(genomes, fitnesses, ::NoSpeciation, ::Nothing, rng;
+                            snapshot::Union{Nothing, SpeciationSnapshot} = nothing)
+    if snapshot !== nothing
+        snapshot.n_species = 1
+        snapshot.sizes = [length(genomes)]
+    end
+    return fitnesses
+end
 
 """
     _apply_speciation!(genomes, fitnesses, spec::ThresholdSpeciation, species_list, rng)
@@ -168,7 +175,8 @@ cull stagnant species, and return shared fitnesses for selection.
 function _apply_speciation!(genomes::Vector{G}, fitnesses::Vector{Float64},
                             spec::ThresholdSpeciation,
                             species_list::Vector{_SpeciesInfo},
-                            rng::AbstractRNG) where {G}
+                            rng::AbstractRNG;
+                            snapshot::Union{Nothing, SpeciationSnapshot} = nothing) where {G}
     n = length(genomes)
 
     # Build member lists for each existing species.
@@ -200,6 +208,11 @@ function _apply_speciation!(genomes::Vector{G}, fitnesses::Vector{Float64},
                    spec.stagnation_limit, spec.min_species_size, global_best_species, n)
     _remove_empty_species!(species_list, member_lists)
 
+    if snapshot !== nothing
+        snapshot.n_species = length(species_list)
+        snapshot.sizes = [length(m) for m in member_lists]
+    end
+
     return _compute_shared_fitnesses(fitnesses, member_lists, spec.sharing_formula)
 end
 
@@ -216,7 +229,8 @@ Unlike ThresholdSpeciation, the representative stored is a *fingerprint*
 function _apply_speciation!(genomes::Vector{G}, fitnesses::Vector{Float64},
                             spec::BehavioralSpeciation,
                             species_list::Vector{_SpeciesInfo},
-                            rng::AbstractRNG) where {G}
+                            rng::AbstractRNG;
+                            snapshot::Union{Nothing, SpeciationSnapshot} = nothing) where {G}
     n = length(genomes)
 
     # Compute fingerprints for all individuals.
@@ -305,6 +319,11 @@ function _apply_speciation!(genomes::Vector{G}, fitnesses::Vector{Float64},
     end
 
     _remove_empty_species!(species_list, member_lists)
+
+    if snapshot !== nothing
+        snapshot.n_species = length(species_list)
+        snapshot.sizes = [length(m) for m in member_lists]
+    end
 
     return _compute_shared_fitnesses(fitnesses, member_lists, spec.sharing_formula)
 end

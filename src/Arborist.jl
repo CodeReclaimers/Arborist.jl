@@ -38,6 +38,10 @@ include("defaults.jl")
 # --- AST sanitizer ---
 include("sanitizer.jl")
 
+# --- Structured run-log (loaded before speciation so its optional
+#     SpeciationSnapshot kwarg resolves at parse time) ---
+include("run_log.jl")
+
 # --- Speciation strategies ---
 include("speciation.jl")
 
@@ -182,9 +186,17 @@ export
     init_innovation_range!,
     GraphGenomeContext,
 
+    # Structured run log
+    RunLog,
+    GenerationLog,
+    record!,
+    entries,
+    SpeciationSnapshot,
+
     # Interface functions
     solve,
     evaluate,
+    evaluate_cases,
     evaluate_genome,
     evaluate_multi,
     objective_names,

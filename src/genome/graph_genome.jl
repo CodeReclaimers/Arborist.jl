@@ -503,6 +503,76 @@ function evaluate_genome(g::GraphGenome, e::GraphEvaluator)
     end
 end
 
+"""
+    evaluate_cases(g::GraphGenome, e::GraphEvaluator) -> Vector{Float64}
+
+Return per-sample mean squared error (averaged across outputs) as a
+`Vector{Float64}` of length `size(e.input_data, 2)`. Any sample that
+raises or produces a non-finite squared error is reported as `Inf`.
+Used by lexicase selection.
+
+Feedforward mode only: recurrent evaluators have persistent state across
+samples (samples form a time sequence) so per-sample cases are not
+independent. Calling this on a recurrent evaluator raises `ArgumentError`.
+"""
+function evaluate_cases(g::GraphGenome, e::GraphEvaluator)
+    e.allow_recurrent && throw(ArgumentError(
+        "evaluate_cases is not defined for recurrent GraphEvaluator: " *
+        "samples are not independent when node state persists across them. " *
+        "Lexicase selection requires per-case independence."))
+
+    n_samples = size(e.input_data, 2)
+    case_fitnesses = fill(Inf, n_samples)
+
+    eval_order = try
+        _topological_sort(g)
+    catch err
+        err isa InterruptException && rethrow()
+        return case_fitnesses
+    end
+    eval_order === nothing && return case_fitnesses
+
+    input_ids = sort!([n.id for n in values(g.nodes) if n.type == :input])
+    output_ids = sort!([n.id for n in values(g.nodes) if n.type == :output])
+    bias_ids = [n.id for n in values(g.nodes) if n.type == :bias]
+    ff_order = [nid for nid in eval_order
+                if haskey(g.nodes, nid) && !(g.nodes[nid].type in (:input, :bias))]
+    n_outputs = length(output_ids)
+
+    for s in 1:n_samples
+        se_total = 0.0
+        ok = true
+        try
+            node_vals = Dict{Int, Float64}()
+            for (idx, nid) in enumerate(input_ids)
+                node_vals[nid] = e.input_data[idx, s]
+            end
+            for nid in bias_ids
+                node_vals[nid] = 1.0
+            end
+            _apply_node_activations!(node_vals, node_vals, ff_order, g, e.activation_fns)
+            for (idx, nid) in enumerate(output_ids)
+                predicted = get(node_vals, nid, 0.0)
+                expected = e.output_data[idx, s]
+                se = (predicted - expected)^2
+                if !isfinite(se)
+                    ok = false
+                    break
+                end
+                se_total += se
+            end
+        catch err
+            err isa InterruptException && rethrow()
+            ok = false
+        end
+        if ok && n_outputs > 0
+            case_fitnesses[s] = se_total / n_outputs
+        end
+    end
+
+    return case_fitnesses
+end
+
 # ---------------------------------------------------------------------------
 # Shared forward-pass helper (used by _evaluate_feedforward, _evaluate_recurrent,
 # and EpisodicEvaluator). For each node in `update_order`, sums weighted inputs
@@ -883,7 +953,8 @@ intended network dimensions — `GraphEvaluator` for table-based tasks,
 function solve(problem::GPProblem{GraphGenome, E},
                algorithm::GeneticProgramming;
                verbose::Bool = false,
-               callback = nothing) where {E<:AbstractEvaluator}
+               callback = nothing,
+               log::Union{Nothing, RunLog} = nothing) where {E<:AbstractEvaluator}
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
@@ -926,8 +997,15 @@ function solve(problem::GPProblem{GraphGenome, E},
 
         callback !== nothing && callback(gen, fitnesses[1], genomes[1])
 
+        species_snapshot = log === nothing ? nothing : SpeciationSnapshot()
         selection_fitnesses = _apply_speciation!(genomes, fitnesses,
-                                                  algorithm.speciation, species_state, rng)
+                                                  algorithm.speciation, species_state, rng;
+                                                  snapshot=species_snapshot)
+
+        if log !== nothing
+            record!(log, gen, fitnesses, genomes, time() - t0;
+                    snapshot=species_snapshot)
+        end
 
         next_genomes = Vector{GraphGenome}(undef, pop_size)
         next_fitnesses = fill(Inf, pop_size)

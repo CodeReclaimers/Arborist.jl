@@ -388,6 +388,7 @@ coordinated generation-by-generation from the main process.
 """
 function _distributed_sync_solve(problem::GPProblem{G,E}, algorithm::IslandModel;
                                   verbose::Bool=false, callback=nothing,
+                                  log::Union{Nothing, RunLog} = nothing,
                                   auto_addprocs::Bool=false,
                                   auto_rmprocs::Bool=false) where {G,E}
     rng = problem.seed === nothing ? Random.default_rng() :
@@ -458,6 +459,18 @@ function _distributed_sync_solve(problem::GPProblem{G,E}, algorithm::IslandModel
 
             if callback !== nothing
                 callback(gen, global_best_fitness, nothing)
+            end
+
+            if log !== nothing
+                # Aggregate stats from the per-worker result summaries. No global
+                # population materialization here (workers retain state) — so
+                # `unique_structures` is reported as 0 via an empty genome vector.
+                all_fits_gen = Float64[]
+                for r in results
+                    push!(all_fits_gen, r.best_fitness)
+                    push!(all_fits_gen, r.mean_fitness)
+                end
+                record!(log, gen, all_fits_gen, Any[], time() - t0)
             end
 
             # Migration
@@ -556,6 +569,7 @@ async — there is no well-defined global generation counter.
 """
 function _distributed_async_solve(problem::GPProblem{G,E}, algorithm::IslandModel;
                                    verbose::Bool=false, callback=nothing,
+                                   log::Union{Nothing, RunLog} = nothing,
                                    auto_addprocs::Bool=false,
                                    auto_rmprocs::Bool=false) where {G,E}
     rng = problem.seed === nothing ? Random.default_rng() :
@@ -650,6 +664,14 @@ function _distributed_async_solve(problem::GPProblem{G,E}, algorithm::IslandMode
                         "global_best=$(round(global_best_fitness, digits=6)), " *
                         "elapsed=$(elapsed)s")
                 flush(stdout)
+            end
+
+            if log !== nothing && any(g -> g > 0, island_gen)
+                # Async log: aggregate status messages since last tick. We record
+                # once per monitor poll using the status-message bests/means as
+                # the fitness vector. Genome list is empty (workers own state).
+                fits_snapshot = [f for f in island_best if isfinite(f)]
+                record!(log, minimum(island_gen), fits_snapshot, Any[], time() - t0)
             end
 
             if callback !== nothing && any(g -> g > 0, island_gen)

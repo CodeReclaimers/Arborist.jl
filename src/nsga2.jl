@@ -608,7 +608,8 @@ Pareto front, fitness vectors, and hypervolume history.
 function solve(problem::GPProblem{G, E},
                algorithm::NSGAII;
                verbose::Bool = false,
-               callback = nothing) where {G, E<:AbstractMultiObjectiveEvaluator}
+               callback = nothing,
+               log::Union{Nothing, RunLog} = nothing) where {G, E<:AbstractMultiObjectiveEvaluator}
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
@@ -661,6 +662,14 @@ function solve(problem::GPProblem{G, E},
         if callback !== nothing
             front1_size = count(r -> r == 1, ranks)
             callback(gen, front1_size, hv)
+        end
+
+        if log !== nothing
+            # Scalar summary = best first-objective fitness; matches the plan's
+            # agreement that richer NSGA-II metrics (per-front hypervolume,
+            # crowding) are a future phase.
+            scalar_fits = Float64[f[1] for f in fitnesses]
+            record!(log, gen, scalar_fits, genomes, time() - t0)
         end
 
         # Update LLM operator contexts — use first objective as scalar fitness proxy.

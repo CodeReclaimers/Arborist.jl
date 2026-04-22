@@ -1,5 +1,5 @@
 """
-    solve(problem::GPProblem{G,E}, algorithm::GeneticProgramming; verbose=false, callback=nothing) -> GPResult{G}
+    solve(problem::GPProblem{G,E}, algorithm::GeneticProgramming; verbose=false, callback=nothing, log=nothing) -> GPResult{G}
 
 Run a genetic programming evolution using the specified problem and algorithm configuration.
 Returns a `GPResult` containing the best genome, fitness history, and run metadata.
@@ -11,18 +11,23 @@ Returns a `GPResult` containing the best genome, fitness history, and run metada
 # Keyword Arguments
 - `verbose::Bool=false`: if true, print generation statistics
 - `callback`: optional callback function `(gen::Int, best_fitness::Float64, best_genome::G) -> nothing`
+- `log::Union{Nothing, RunLog}=nothing`: optional structured per-generation log.
+  When provided, `record!` is called once per generation with aggregate fitness,
+  speciation snapshot, structural diversity, and wall-time.
 """
 function solve(problem::GPProblem{G,E},
                algorithm::GeneticProgramming;
                verbose::Bool = false,
-               callback = nothing) where {G,E}
+               callback = nothing,
+               log::Union{Nothing, RunLog} = nothing) where {G,E}
     # Create a dedicated RNG from the seed, or use the default RNG.
     # All stochastic operations use this RNG explicitly — no global rand().
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
     pop = _initialize_population(problem, algorithm, rng)
-    return _run_evolution!(pop, problem, algorithm, rng; verbose=verbose, callback=callback)
+    return _run_evolution!(pop, problem, algorithm, rng;
+                           verbose=verbose, callback=callback, log=log)
 end
 
 """
@@ -204,7 +209,8 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
                          algorithm::GeneticProgramming,
                          rng::AbstractRNG;
                          verbose::Bool = false,
-                         callback = nothing) where {G,E}
+                         callback = nothing,
+                         log::Union{Nothing, RunLog} = nothing) where {G,E}
     genomes, state = pop
     pop_size = algorithm.pop_size
     fitnesses = fill(Inf, pop_size)
@@ -242,8 +248,15 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
         end
 
         # Apply speciation and compute selection fitnesses (fitness sharing).
+        species_snapshot = log === nothing ? nothing : SpeciationSnapshot()
         selection_fitnesses = _apply_speciation!(genomes, fitnesses,
-                                                  algorithm.speciation, species_state, rng)
+                                                  algorithm.speciation, species_state, rng;
+                                                  snapshot=species_snapshot)
+
+        if log !== nothing
+            record!(log, gen, fitnesses, genomes, time() - t0;
+                    snapshot=species_snapshot)
+        end
 
         # Update LLM operator contexts with current population state.
         _update_llm_contexts!(algorithm.mutation_ops, gen, algorithm.generations,
@@ -501,17 +514,18 @@ function solve(problem::GPProblem{G,E},
                algorithm::IslandModel;
                verbose::Bool = false,
                callback = nothing,
+               log::Union{Nothing, RunLog} = nothing,
                auto_addprocs::Bool = false,
                auto_rmprocs::Bool = false) where {G,E}
     # Dispatch to distributed solvers if requested
     if algorithm.distributed && !algorithm.async
         return _distributed_sync_solve(problem, algorithm;
-                                        verbose=verbose, callback=callback,
+                                        verbose=verbose, callback=callback, log=log,
                                         auto_addprocs=auto_addprocs,
                                         auto_rmprocs=auto_rmprocs)
     elseif algorithm.distributed && algorithm.async
         return _distributed_async_solve(problem, algorithm;
-                                         verbose=verbose, callback=callback,
+                                         verbose=verbose, callback=callback, log=log,
                                          auto_addprocs=auto_addprocs,
                                          auto_rmprocs=auto_rmprocs)
     end
@@ -585,6 +599,8 @@ function solve(problem::GPProblem{G,E},
             # Apply speciation.
             selection_fitnesses = _apply_speciation!(genomes, fitnesses,
                                                       alg.speciation, species_st, state.rng)
+            # (IslandModel log aggregates across all islands; per-island snapshots
+            #  are not plumbed through here in F.0.)
 
             # Update LLM operator contexts with this island's population state.
             _update_llm_contexts!(alg.mutation_ops, gen, alg.generations,
@@ -636,6 +652,11 @@ function solve(problem::GPProblem{G,E},
 
         if callback !== nothing
             callback(gen, global_best_fitness, global_best_genome)
+        end
+
+        if log !== nothing
+            all_genomes_so_far = reduce(vcat, island_genomes)
+            record!(log, gen, all_fits, all_genomes_so_far, time() - t0)
         end
 
         # Migration: ring topology, every migration_interval generations.

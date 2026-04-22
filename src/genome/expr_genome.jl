@@ -422,3 +422,22 @@ function evaluate_genome(g::ExprGenome, evaluator::AbstractEvaluator)
         return Inf
     end
 end
+
+"""
+    evaluate_cases(g::ExprGenome, e::TableFitnessEvaluator) -> Vector{Float64}
+
+Compile the genome and return per-row squared error via the
+`TableFitnessEvaluator` case evaluator. All rows `Inf` on compilation failure.
+"""
+function evaluate_cases(g::ExprGenome, e::TableFitnessEvaluator)
+    fname = gensym("evolved")
+    try
+        checked_body = add_loop_checks(g.body)
+        harness = create_harness(g.state, checked_body, fname)
+        f = @eval $harness
+        return evaluate_cases(e, f)
+    catch err
+        err isa InterruptException && rethrow()
+        return fill(Inf, length(e.input_rows))
+    end
+end

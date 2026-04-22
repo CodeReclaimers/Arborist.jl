@@ -102,6 +102,31 @@ function evaluate_genome(g::TreeGenome{T}, e::TreeFitnessEvaluator{T}) where T
     evaluate(e, g)
 end
 
+"""
+    evaluate_cases(g::TreeGenome{T}, e::TreeFitnessEvaluator{T}) -> Vector{Float64}
+
+Return per-sample squared error as a `Vector{Float64}` of length
+`length(e.y)`. Non-finite samples (NaN/Inf after vectorised evaluation)
+are reported as `Inf`. All samples `Inf` on evaluation failure.
+Used by lexicase selection.
+"""
+function evaluate_cases(g::TreeGenome{T}, e::TreeFitnessEvaluator{T}) where T
+    n = length(e.y)
+    case_fitnesses = fill(Inf, n)
+    try
+        predictions = g.tree(e.X, e.operators)
+        @inbounds for i in 1:n
+            d = Float64(predictions[i]) - Float64(e.y[i])
+            se = d * d
+            case_fitnesses[i] = isfinite(se) ? se : Inf
+        end
+    catch err
+        err isa InterruptException && rethrow()
+        # leave as Inf
+    end
+    return case_fitnesses
+end
+
 # =============================================================================
 # Version-safe operator accessors
 # =============================================================================
@@ -384,7 +409,8 @@ for fast vectorized evaluation without `@eval`.
 function solve(problem::GPProblem{TreeGenome{T}, E},
                        algorithm::GeneticProgramming;
                        verbose::Bool = false,
-                       callback = nothing) where {T, E<:TreeFitnessEvaluator}
+                       callback = nothing,
+                       log::Union{Nothing, RunLog} = nothing) where {T, E<:TreeFitnessEvaluator}
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
@@ -434,8 +460,15 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
 
         callback !== nothing && callback(gen, fitnesses[1], genomes[1])
 
+        species_snapshot = log === nothing ? nothing : SpeciationSnapshot()
         selection_fitnesses = _apply_speciation!(genomes, fitnesses,
-                                                  algorithm.speciation, species_state, rng)
+                                                  algorithm.speciation, species_state, rng;
+                                                  snapshot=species_snapshot)
+
+        if log !== nothing
+            record!(log, gen, fitnesses, genomes, time() - t0;
+                    snapshot=species_snapshot)
+        end
 
         next_genomes = Vector{TreeGenome{T}}(undef, pop_size)
         next_fitnesses = fill(Inf, pop_size)

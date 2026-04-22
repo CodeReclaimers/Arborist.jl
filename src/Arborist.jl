@@ -94,6 +94,9 @@ include("llm_operator.jl")
 # --- TreeGenome (DynamicExpressions.jl) ---
 include("tree_genome.jl")
 
+# --- ADFGenome (Koza-style Automatically Defined Functions on TreeGenome) ---
+include("genome/adf_genome.jl")
+
 # --- NSGA-II multi-objective optimization ---
 include("nsga2.jl")
 
@@ -120,6 +123,12 @@ export
     AntGenome,
     GraphGenome,
     TreeGenome,
+    ADFGenome,
+    initialize_adf,
+    expand_adfs,
+    augmented_operators,
+    base_operators,
+    evaluate_adf,
     GPProblem,
     GPResult,
     TableFitnessEvaluator,

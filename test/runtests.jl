@@ -29,6 +29,8 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
     include("unit/test_evaluate_cases.jl")
     include("unit/test_lexicase.jl")
     include("unit/test_constant_optimization.jl")
+    include("unit/test_novelty.jl")
+    include("unit/test_map_elites.jl")
 
     # Integration tests — always run, target < 60s total
     include("integration/test_llm_operator.jl")

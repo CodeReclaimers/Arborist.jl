@@ -94,6 +94,12 @@ include("tree_genome.jl")
 # --- NSGA-II multi-objective optimization ---
 include("nsga2.jl")
 
+# --- Novelty search (behavior-based evaluator + archive) ---
+include("novelty.jl")
+
+# --- MAP-Elites quality-diversity algorithm ---
+include("map_elites.jl")
+
 # --- Public API exports ---
 export
     # Abstract types
@@ -120,6 +126,17 @@ export
     # Constant optimization
     ConstantOptimization,
     optimize_constants!,
+
+    # Novelty Search
+    NoveltyArchive,
+    NoveltySearchEvaluator,
+
+    # MAP-Elites
+    MAPElites,
+    MAPElitesArchive,
+    MAPElitesResult,
+    coverage,
+    qd_score,
 
     # Concrete types — algorithms
     GeneticProgramming,

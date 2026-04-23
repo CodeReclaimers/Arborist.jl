@@ -7,7 +7,10 @@ docs/Manifest.toml
 # Documenter.jl build output
 docs/build/
 
-# Per-experiment bin packing run artifacts; tier-A synthesis files are tracked
+# Per-experiment bin packing and sorting run artifacts.
+# Tier-A synthesis files (bin_packing_overnight_results.md,
+# bin_packing_combined_results.md) are explicitly tracked; everything else
+# is a per-run side effect that should not ship with the public release.
 examples/bin_packing_results.md
 examples/bin_packing_results_a*.md
 examples/bin_packing_results_b*.md
@@ -17,6 +20,12 @@ examples/bin_packing_results_extended_*.md
 examples/bin_packing_results_llm.md
 examples/bin_packing_results_timenorm.md
 examples/bin_packing_results_multiseed*.md
+examples/bin_packing_results_debug_*.md
+examples/bin_packing_results_scaling_*.md
+examples/bin_packing_results_unseeded_*.md
+examples/bin_packing_results_ablation_*.md
+examples/bin_packing_results_aux_*.md
+examples/sorting_results_*.md
 
 # Run logs and TSV training histories
 examples/*.log

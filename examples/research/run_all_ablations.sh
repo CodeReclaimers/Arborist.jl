@@ -2,7 +2,7 @@
 # Driver script that runs all NSGA-II bin-packing ablations sequentially,
 # skipping any that fail and continuing with the rest. Each ablation's
 # stdout/stderr is captured in its own log file. Keep this list in sync
-# with ABLATION_NAMES in examples/run_nsga2_ablations.jl.
+# with ABLATION_NAMES in examples/research/run_nsga2_ablations.jl.
 
 set -u  # catch unset vars, but do NOT set -e (we want to continue on failure)
 
@@ -21,7 +21,7 @@ for a in "${ABLATIONS[@]}"; do
     echo "    log: $LOG" | tee -a "$DRIVER_LOG"
 
     START=$(date +%s)
-    julia --project=. -t auto examples/run_nsga2_ablations.jl --ablation="$a" \
+    julia --project=. -t auto examples/research/run_nsga2_ablations.jl --ablation="$a" \
         > "$LOG" 2>&1
     RC=$?
     END=$(date +%s)

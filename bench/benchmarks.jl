@@ -12,7 +12,7 @@
 #
 # Wrapping discipline (CLAUDE.md): the entry points call into the project's
 # existing benchmark surfaces without tuning them. The editable surface
-# remains examples/nsga2_tuning_config.jl; this file is protocol plumbing.
+# remains examples/research/nsga2_tuning_config.jl; this file is protocol plumbing.
 
 using Arborist
 using Random
@@ -24,7 +24,7 @@ using TOML
 # main() behind `abspath(PROGRAM_FILE) == @__FILE__` or have no top-level
 # side-effects, so include() is side-effect-free here.
 include(joinpath(@__DIR__, "..", "examples", "bin_packing.jl"))
-include(joinpath(@__DIR__, "..", "examples", "nsga2_tuning_config.jl"))
+include(joinpath(@__DIR__, "..", "examples", "research", "nsga2_tuning_config.jl"))
 
 # ---------------------------------------------------------------------------
 # Minimal JSON I/O

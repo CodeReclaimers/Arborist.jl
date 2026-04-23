@@ -29,7 +29,7 @@ the test-seed fitness of the lowest-primary-fitness Pareto member. Mirrors the
 2026-04-18 Karpathy-loop setup (pop_size=200, 200 generations, behavioral init
 with pool=10000 via `BP_POOL_SIZE`).
 
-Editable surface for the autoloop: `examples/nsga2_tuning_config.jl`
+Editable surface for the autoloop: `examples/research/nsga2_tuning_config.jl`
 (`build_tuning_algorithm` kwargs only). Do not edit `bench/benchmarks.jl` to
 tune — it is wrapping code, not a tuning target.
 

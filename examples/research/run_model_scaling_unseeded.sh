@@ -10,8 +10,8 @@
 # All local (no API cost). Runs sequentially (GPU contention).
 #
 # Usage:
-#   bash examples/run_model_scaling_unseeded.sh              # all models
-#   bash examples/run_model_scaling_unseeded.sh qwen3_30b    # single model
+#   bash examples/research/run_model_scaling_unseeded.sh              # all models
+#   bash examples/research/run_model_scaling_unseeded.sh qwen3_30b    # single model
 set -u
 
 JULIA="julia --project -t auto"

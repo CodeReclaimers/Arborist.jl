@@ -3,7 +3,7 @@
 #
 # This file is the single editable surface for overnight NSGA-II hyperparameter
 # tuning. It returns an NSGAII algorithm + the operator list + num_temps. The
-# metric harness (examples/nsga2_tuning_metric.jl) calls build_tuning_algorithm
+# metric harness (examples/research/nsga2_tuning_metric.jl) calls build_tuning_algorithm
 # once per seed and measures mean test fitness across 3 seeds.
 #
 # Allowed edits: any NSGAII kwarg (pop_size [must be even, ≥4], mutation_rate,

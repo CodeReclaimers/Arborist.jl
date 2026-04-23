@@ -15,14 +15,14 @@
 #
 # All ablations use 200 generations, seed 42, same evaluation parameters.
 #
-# Usage: julia --project -t auto examples/run_nsga2_ablations.jl --ablation=no_llm
-#        julia --project -t auto examples/run_nsga2_ablations.jl --ablation=all
+# Usage: julia --project -t auto examples/research/run_nsga2_ablations.jl --ablation=no_llm
+#        julia --project -t auto examples/research/run_nsga2_ablations.jl --ablation=all
 
 using Arborist
 using Random
 using Dates
 
-include(joinpath(@__DIR__, "bin_packing.jl"))
+include(joinpath(@__DIR__, "..", "bin_packing.jl"))
 
 # =============================================================================
 # Neutral system prompt — describes the problem without hinting at Best Fit
@@ -547,7 +547,7 @@ function parse_ablation()
             return m[1]
         end
     end
-    println("Usage: julia --project -t auto examples/run_nsga2_ablations.jl --ablation=<name>")
+    println("Usage: julia --project -t auto examples/research/run_nsga2_ablations.jl --ablation=<name>")
     println("  Available ablations: $(join(ABLATION_NAMES, ", ")), all")
     exit(1)
 end

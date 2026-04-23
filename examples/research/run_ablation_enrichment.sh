@@ -11,8 +11,8 @@
 #   full         — FitnessSection + ElitesSection(3) + GenerationSection
 #
 # Usage:
-#   bash examples/run_ablation_enrichment.sh           # all variants
-#   bash examples/run_ablation_enrichment.sh elites_3  # single variant
+#   bash examples/research/run_ablation_enrichment.sh           # all variants
+#   bash examples/research/run_ablation_enrichment.sh elites_3  # single variant
 set -u
 
 JULIA="julia --project -t auto"

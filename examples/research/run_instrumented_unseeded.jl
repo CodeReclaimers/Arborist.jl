@@ -2,13 +2,13 @@
 # Instrumented unseeded bin-packing run with qwen3-coder:30b.
 # Uses behavioral_initialize (10k pool) and debug logging.
 #
-# Usage: julia --project -t auto examples/run_instrumented_unseeded.jl
+# Usage: julia --project -t auto examples/research/run_instrumented_unseeded.jl
 
 using Arborist
 using Random
 using Dates
 
-include(joinpath(@__DIR__, "bin_packing.jl"))
+include(joinpath(@__DIR__, "..", "bin_packing.jl"))
 
 function main()
     _ensure_bp_states()

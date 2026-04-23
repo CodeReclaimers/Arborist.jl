@@ -11,8 +11,8 @@
 #   API:    claude-haiku-4-5, claude-sonnet-4-6
 #
 # Usage:
-#   ANTHROPIC_API_KEY=sk-... bash examples/run_model_scaling.sh
-#   ANTHROPIC_API_KEY=sk-... bash examples/run_model_scaling.sh gemma4_e2b  # single model
+#   ANTHROPIC_API_KEY=sk-... bash examples/research/run_model_scaling.sh
+#   ANTHROPIC_API_KEY=sk-... bash examples/research/run_model_scaling.sh gemma4_e2b  # single model
 set -u
 
 if [ -z "${ANTHROPIC_API_KEY:-}" ]; then

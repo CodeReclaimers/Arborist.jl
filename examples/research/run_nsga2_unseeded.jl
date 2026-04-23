@@ -8,13 +8,13 @@
 # Behavioral initialization (10k pool).
 # LLM mutation with ElitesSection(3) enrichment + debug logging.
 #
-# Usage: julia --project -t auto examples/run_nsga2_unseeded.jl
+# Usage: julia --project -t auto examples/research/run_nsga2_unseeded.jl
 
 using Arborist
 using Random
 using Dates
 
-include(joinpath(@__DIR__, "bin_packing.jl"))
+include(joinpath(@__DIR__, "..", "bin_packing.jl"))
 
 function main()
     _ensure_bp_states()

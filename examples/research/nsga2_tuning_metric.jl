@@ -2,14 +2,14 @@
 # NSGA-II bin packing tuning metric harness — OFF-LIMITS for autoloop subagent.
 #
 # This file is the measurement harness. It compiles the candidate NSGAII
-# algorithm from examples/nsga2_tuning_config.jl (which IS the editable
+# algorithm from examples/research/nsga2_tuning_config.jl (which IS the editable
 # surface), runs three training seeds, evaluates each run's best Pareto
 # member on the held-out test seed (train_seed + 1000), and prints the mean
 # test fitness as the single scalar on the last non-empty line of stdout.
 #
 # Usage:
-#   BP_POOL_SIZE=2000 julia --project=. -t 32 examples/nsga2_tuning_metric.jl
-#   BP_POOL_SIZE=10000 julia --project=. -t 32 examples/nsga2_tuning_metric.jl --holdout
+#   BP_POOL_SIZE=2000 julia --project=. -t 32 examples/research/nsga2_tuning_metric.jl
+#   BP_POOL_SIZE=10000 julia --project=. -t 32 examples/research/nsga2_tuning_metric.jl --holdout
 #
 # Flags:
 #   --holdout    Use 10k-pool behavioral init + 200 gen (full reproduction).
@@ -22,7 +22,7 @@ using Arborist
 using Random
 using Statistics
 
-include(joinpath(@__DIR__, "bin_packing.jl"))
+include(joinpath(@__DIR__, "..", "bin_packing.jl"))
 include(joinpath(@__DIR__, "nsga2_tuning_config.jl"))
 
 function parse_args()

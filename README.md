@@ -92,8 +92,11 @@ using Arborist
 
 llm_op = LLMMutationOperator(
     endpoint    = "http://localhost:11434/v1/chat/completions",
-    model       = "qwen2.5-coder:7b",
-    api_key_env = "",   # local Ollama: no Authorization header
+    model       = "qwen2.5-coder:7b",  # lightweight default; runs on ~16 GB RAM.
+                                        # The 2026-04-09 bin packing study used
+                                        # "qwen3-coder:30b" — see
+                                        # examples/bin_packing_overnight_results.md.
+    api_key_env = "",                   # local Ollama: no Authorization header
 )
 
 algorithm = GeneticProgramming(

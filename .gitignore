@@ -25,3 +25,13 @@ examples/data/
 
 # autoloop skill bookkeeping (durable artifacts live on autoloop/* git branches)
 autoloop/
+
+# Per-session progress logs (project uses refstore session notes as of 2026-04-22;
+# historical logs are preserved in git history prior to the 2026-04-23 cleanup)
+/progress-*.md
+
+# Plan checkpoint / scratch files at repo root
+/.plan-checkpoint.md
+
+# Stray docs build output at repo root (real build lives in docs/build/)
+/build/

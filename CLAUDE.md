@@ -1,5 +1,12 @@
 # Arborist.jl
 
+> **Note to human readers:** this file is internal guidance for Claude Code
+> agents working on the Arborist.jl codebase. It is not user-facing
+> documentation — for that, see `README.md`, `docs/src/`, or the hosted
+> documentation site. The file is tracked in the public repo so that future
+> agent sessions inherit consistent project conventions, known limitations,
+> and deferred-work context.
+
 Generic, extensible genetic programming framework for Julia. Problem/Algorithm/Solve pattern modeled on SciML/DiffEq.
 
 ## Session Notes
@@ -10,9 +17,11 @@ Session updates for this project go to **refstore session notes**, not to
 rules in `CLAUDE.shared.md` still apply (record every commit, include
 decisions + rejected alternatives, verification evidence, what was not done).
 
-Existing `progress-YYYYMMDD.md` files at the repo root remain as historical
-record — do not append to them. Read them when you need pre-migration
-context; write new updates only via refstore.
+The pre-migration `progress-YYYYMMDD.md` files were removed from the repo
+tree on 2026-04-23 (Item 2a of the release-readiness plan) but remain
+recoverable from git history — use `git log --all --diff-filter=D
+--name-only` to rediscover paths, then `git show <sha>:<path>` to retrieve
+content.
 
 ## Project Status
 

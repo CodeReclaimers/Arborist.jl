@@ -202,3 +202,20 @@ The env var `GENPROG_RUN_BENCHMARKS` is also accepted for backward compatibility
 Direct dependencies: DynamicExpressions.jl (TreeGenome), Downloads.jl (LLM HTTP, stdlib), Distributed.jl (island model, stdlib), Random.jl (stdlib), Serialization.jl (checkpointing, stdlib), LinearAlgebra.jl (CMA-ES, stdlib).
 
 Weak dependencies (extensions): RecipesBase.jl (`ext/ArboristRecipesBaseExt.jl` for plotting). Loaded automatically when both Arborist and any RecipesBase consumer (Plots.jl, Makie, etc.) are imported.
+
+## Deferred Release-Readiness Items
+
+The release-readiness plan at
+`~/.claude/plans/great-review-thanks-please-smooth-parrot.md` enumerates 21
+pre-registration cleanup items. Items deferred during execution are tracked
+here so they are not lost between sessions.
+
+- **Item 2d — bench/ directory cleanup (deferred 2026-04-23).** The
+  `bench/` directory is an integration layer for a personal benchstone
+  harness (`/home/alan/benchstone`); its `README.md` and `manifest.toml`
+  reference that path. Owner decision: leave as-is for now because
+  benchstone itself may be publicly released in time for Arborist's
+  formal publication. Revisit: if benchstone is not published by the
+  time the Arborist Registrator PR is opened, either sanitize the
+  `/home/alan/` paths out of `bench/` or remove the directory from the
+  public repo.

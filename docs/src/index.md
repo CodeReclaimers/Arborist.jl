@@ -2,7 +2,15 @@
 
 **Generic genetic programming for Julia.**
 
-Arborist.jl is an extensible GP framework built on the Problem/Algorithm/Solve pattern from the SciML ecosystem. It provides four genome types, composable genetic operators, LLM-as-mutation-operator support, NEAT-style and behavioral speciation, NSGA-II multi-objective optimization, and a sequential/sync/async distributed island model — all with explicit RNG seeding for reproducible research.
+Arborist.jl is an extensible GP framework from the maintainer of
+[neat-python](https://github.com/CodeReclaimers/neat-python), built on
+the Problem/Algorithm/Solve pattern familiar from the SciML ecosystem.
+It provides five genome types (`ExprGenome`, `TreeGenome`, `GraphGenome`,
+`AntGenome`, `ADFGenome`), composable genetic operators,
+LLM-as-mutation-operator support, NEAT-style and behavioral speciation,
+NSGA-II multi-objective optimization, quality-diversity search (Novelty
+Search, MAP-Elites), CMA-ES, and a sequential/sync/async distributed
+island model — all with explicit RNG seeding for reproducible research.
 
 ## Who is this for?
 
@@ -18,12 +26,21 @@ Arborist.jl is an extensible GP framework built on the Problem/Algorithm/Solve p
 
 ## Benchmarks
 
-| Problem | Genome | Generations | Pop Size | Convergence |
-|---|---|---|---|---|
-| Koza-1 (x⁴+x³+x²+x) | TreeGenome | 300 | 100 | 5/5 seeds |
-| Koza-2 (x⁵−2x³+x) | TreeGenome | 300 | 100 | 5/5 seeds |
-| Koza-3 (x⁶−2x⁴+x²) | TreeGenome | 300 | 100 | 5/5 seeds |
-| XOR (NEAT) | GraphGenome | 150 | 150 | 4/5 seeds |
-| Max Ones | ExprGenome | 100 | 100 | 5/5 seeds |
+The `test/benchmarks/` tier (enabled via `ARBORIST_RUN_BENCHMARKS=true`)
+exercises ~25 problems spanning:
+
+- **Symbolic regression** — Koza-1/2/3, Nguyen-1..10, Keijzer-4/11,
+  Lorenz attractor recovery.
+- **Boolean synthesis** — parity-3 (NEAT), 6- and 11-bit multiplexer.
+- **Classification** — XOR (NEAT), UCI Iris, two-spirals.
+- **Control tasks** — cart-pole, double-pole (Markovian), mountain
+  car, acrobot swing-up, all via `GraphGenome` + `EpisodicEvaluator`.
+- **Modularity and time series** — retina left-and-right (NEAT),
+  Mackey-Glass τ=17.
+- **Multi-objective (NSGA-II)** — two-spirals and retina with
+  hypervolume histories.
+
+See [the README's Benchmarks section](https://github.com/CodeReclaimers/Arborist.jl#benchmarks)
+for the per-problem convergence gates.
 
 Get started with the [Quick Start](@ref).

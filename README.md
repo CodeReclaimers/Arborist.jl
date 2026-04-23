@@ -7,6 +7,14 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
+Arborist.jl is a generic, extensible genetic programming framework for
+Julia from the maintainer of
+[neat-python](https://github.com/CodeReclaimers/neat-python). It follows
+the Problem/Algorithm/Solve pattern familiar from the SciML ecosystem
+and offers first-class support for NEAT neural topology evolution,
+LLM-as-operator, multi-objective optimization, and quality-diversity
+search.
+
 ## Installation
 
 ```julia
@@ -123,16 +131,63 @@ An **island model** with ring/complete/random migration topologies supports popu
 
 ## Benchmarks
 
-| Problem | Genome | Generations | Pop Size | Convergence |
-|---|---|---|---|---|
-| Koza-1 (x⁴+x³+x²+x) | TreeGenome | 300 | 100 | 5/5 seeds |
-| Koza-2 (x⁵−2x³+x) | TreeGenome | 300 | 100 | 5/5 seeds |
-| Koza-3 (x⁶−2x⁴+x²) | TreeGenome | 300 | 100 | 5/5 seeds |
-| XOR (NEAT) | GraphGenome | 150 | 150 | 4/5 seeds |
-| Max Ones | ExprGenome | 100 | 100 | 5/5 seeds |
-| 4-bit Even Parity | TreeGenome | 500 | 200 | 1/5 seeds |
+Convergence gates below are what CI verifies when the benchmark tier is
+enabled (`ARBORIST_RUN_BENCHMARKS=true julia --project=. -e 'using Pkg;
+Pkg.test()'`; ~27 min wall time). Each gate is a minimum expected-pass
+threshold across 5 independent seeds.
 
-TreeGenome evaluates 8.4x faster than ExprGenome on the Koza suite (1000-point dataset).
+### Symbolic regression (TreeGenome)
+
+| Problem | Gate | Passing |
+|---|---|---|
+| Koza-1 / Koza-2 / Koza-3 | fitness < 0.1 | 3/5 each |
+| Nguyen-1..6, -8..10 | fitness < 0.01 | 3/5 |
+| Nguyen-7 | fitness < 0.01 | 2/5 |
+| Keijzer-4 | train MSE < 0.01 | 3/5 |
+| Keijzer-11 | train fit | forward progress |
+| Lorenz attractor (dx, dy, dz) | fitness < 0.1 | 3/5 each |
+
+### Boolean synthesis
+
+| Problem | Genome | Gate | Passing |
+|---|---|---|---|
+| Parity-3 | GraphGenome (NEAT) | fitness < 0.05 | 4/5 |
+| 6-bit multiplexer | TreeGenome | perfect + fit < 0.3 | 1/5 + 3/5 |
+| 11-bit multiplexer | TreeGenome | forward progress | — |
+
+### Classification
+
+| Problem | Genome | Gate | Passing |
+|---|---|---|---|
+| XOR | GraphGenome (NEAT) | fitness < 0.01 | 4/5 |
+| UCI Iris (one-vs-rest) | TreeGenome | test acc ≥ 90% | 4/5 |
+| Two-spirals | GraphGenome (NEAT) | fitness < 0.95 | 3/5 |
+
+### Control tasks (GraphGenome + `EpisodicEvaluator`)
+
+| Problem | Gate | Passing |
+|---|---|---|
+| Cart-pole | ≥ 195 steps mean | 4/5 |
+| Double-pole (Markovian) | fitness < 150 | 3/5 |
+| Mountain car | reaches goal | ≥ 2/5 |
+| Acrobot swing-up | fitness < 150 | 3/5 |
+
+### Modularity and time series (GraphGenome)
+
+| Problem | Gate | Passing |
+|---|---|---|
+| Retina left-and-right | MSE < 0.055 | 3/5 |
+| Mackey-Glass τ=17 | recurrent ≤ feedforward | smoke |
+
+### Multi-objective (NSGA-II)
+
+| Problem | Gate |
+|---|---|
+| Two-spirals | best-front error < 1.0; hypervolume > 0 |
+| Retina | best-front error < 0.055; hypervolume > 0 |
+
+TreeGenome evaluates 8.4× faster than ExprGenome on the Koza suite
+(1000-point dataset).
 
 ## Documentation
 
@@ -152,7 +207,7 @@ End-to-end runnable scripts live in [`examples/`](examples/), including:
 
 Arborist.jl fills a gap left by [Wallace.jl](https://github.com/WallaceLab/Wallace.jl), which was the most ambitious Julia evolutionary computation framework (2014–2015) but died at Julia 0.3 due to reliance on runtime type generation via compiler internals. Arborist.jl avoids this by using only stable public APIs — no `Base.Compiler.*`, no runtime struct generation.
 
-TreeGenome is backed by [DynamicExpressions.jl](https://github.com/MilesCranmer/DynamicExpressions.jl). The LLM mutation operator is inspired by [FunSearch](https://deepmind.google/discover/blog/funsearch-making-new-discoveries-in-mathematical-sciences-using-large-language-models/) (Romera-Paredes et al., 2024) and [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/) (DeepMind, 2025). GraphGenome follows the NEAT encoding from Stanley & Miikkulainen (2002). Benchmark problems follow [Koza (1992)](https://mitpress.mit.edu/9780262111706/genetic-programming/). The same author maintains [neat-python](https://github.com/CodeReclaimers/neat-python).
+TreeGenome is backed by [DynamicExpressions.jl](https://github.com/MilesCranmer/DynamicExpressions.jl). The LLM mutation operator is inspired by [FunSearch](https://deepmind.google/discover/blog/funsearch-making-new-discoveries-in-mathematical-sciences-using-large-language-models/) (Romera-Paredes et al., 2024) and [AlphaEvolve](https://deepmind.google/discover/blog/alphaevolve-a-gemini-powered-coding-agent-for-designing-advanced-algorithms/) (DeepMind, 2025). GraphGenome follows the NEAT encoding from Stanley & Miikkulainen (2002). Benchmark problems follow [Koza (1992)](https://mitpress.mit.edu/9780262111706/genetic-programming/).
 
 ## License
 

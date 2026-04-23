@@ -24,7 +24,13 @@ makedocs(
             "Reproducibility" => "reproducibility.md",
             "Security"        => "security.md",
         ],
-        "API Reference" => "api.md",
+        "API Reference" => [
+            "Overview"        => "api.md",
+            "Genome Types"    => "api/genome.md",
+            "Algorithms"      => "api/algorithms.md",
+            "Operators"       => "api/operators.md",
+            "Infrastructure"  => "api/infrastructure.md",
+        ],
         "Changelog"     => "changelog.md",
     ]
 )

@@ -118,6 +118,9 @@ include("map_elites.jl")
 # --- Graphviz DOT export (no runtime dep on the `dot` binary) ---
 include("dot_export.jl")
 
+# --- Cross-cutting utilities (train/test split, summary stats, multi-seed) ---
+include("utilities.jl")
+
 # --- Canonical benchmark problem generators (Arborist.Benchmarks submodule) ---
 include("benchmarks/Benchmarks.jl")
 
@@ -301,6 +304,11 @@ export
 
     # Graphviz DOT export
     to_dot,
+
+    # Utilities
+    train_test_split,
+    summarize,
+    run_multi_seed,
 
     # Initialization strategies
     behavioral_initialize,

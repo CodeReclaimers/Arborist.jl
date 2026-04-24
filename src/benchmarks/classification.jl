@@ -106,35 +106,25 @@ function iris(; rng::AbstractRNG=MersenneTwister(20260421),
     0 < test_ratio < 1 || throw(ArgumentError(
         "iris: test_ratio must be in (0, 1), got $test_ratio"))
 
-    n_per_class = 50
-    n_test_per_class = round(Int, test_ratio * n_per_class)
-    n_train_per_class = n_per_class - n_test_per_class
-
-    train_idx = Int[]
-    test_idx  = Int[]
-    for cls in 1:3
-        class_rows = findall(r -> r[5] == cls, _IRIS_DATA)
-        perm = class_rows[randperm(rng, length(class_rows))]
-        append!(train_idx, perm[1:n_train_per_class])
-        append!(test_idx,  perm[(n_train_per_class + 1):n_per_class])
+    # Materialize the full X, y from the inline tuple data.
+    n = length(_IRIS_DATA)
+    X = Matrix{T}(undef, 4, n)
+    y = Vector{Int}(undef, n)
+    for (col, r) in enumerate(_IRIS_DATA)
+        X[1, col] = T(r[1]); X[2, col] = T(r[2])
+        X[3, col] = T(r[3]); X[4, col] = T(r[4])
+        y[col] = r[5]
     end
 
-    function _feat_mat(idxs)
-        X = Matrix{T}(undef, 4, length(idxs))
-        for (col, i) in enumerate(idxs)
-            r = _IRIS_DATA[i]
-            X[1, col] = T(r[1]); X[2, col] = T(r[2])
-            X[3, col] = T(r[3]); X[4, col] = T(r[4])
-        end
-        return X
-    end
-    _lbls(idxs) = Int[_IRIS_DATA[i][5] for i in idxs]
+    # Stratify by class label via the shared train_test_split utility.
+    X_train, y_train, X_test, y_test = train_test_split(
+        X, y; test_size=test_ratio, rng=rng, stratify=y)
 
     return (;
-        X_train = _feat_mat(train_idx),
-        y_train = _lbls(train_idx),
-        X_test  = _feat_mat(test_idx),
-        y_test  = _lbls(test_idx),
+        X_train = X_train,
+        y_train = y_train,
+        X_test  = X_test,
+        y_test  = y_test,
         feature_names = ["sepal_length", "sepal_width",
                          "petal_length", "petal_width"],
         class_names = ["setosa", "versicolor", "virginica"],

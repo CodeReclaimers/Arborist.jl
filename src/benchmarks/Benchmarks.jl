@@ -60,6 +60,12 @@ module Benchmarks
 
 using Random
 
+# Pull `train_test_split` from the parent `Arborist` module so
+# `classification.jl::iris` can delegate its stratified split.
+# Load order: `utilities.jl` is included in Arborist before this submodule
+# (see `src/Arborist.jl`).
+using ..Arborist: train_test_split
+
 # Protected Nguyen-flavor operators (matches the historical benchmark
 # semantics — division-by-zero lifted to 1.0 at threshold 1e-6 rather
 # than the library's more conservative 1e-10). Re-exported here so

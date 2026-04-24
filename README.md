@@ -2,6 +2,7 @@
 
 <p align="center">
   <a href="https://github.com/CodeReclaimers/Arborist.jl/actions"><img src="https://github.com/CodeReclaimers/Arborist.jl/workflows/CI/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/CodeReclaimers/Arborist.jl"><img src="https://codecov.io/gh/CodeReclaimers/Arborist.jl/branch/master/graph/badge.svg" alt="Codecov"></a>
   <a href="https://codereclaimers.github.io/Arborist.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg" alt="Documentation"></a>
   <a href="https://julialang.org"><img src="https://img.shields.io/badge/Julia-1.10+-blue.svg" alt="Julia"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>

@@ -473,6 +473,7 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
                        resume_from::Union{Nothing, AbstractString} = nothing,
                        allow_signature_mismatch::Bool = false,
                        initial_population::Union{Nothing, Vector{<:AbstractGenome}} = nothing,
+                       hall_of_fame_size::Int = 0,
                        ) where {T, E<:TreeFitnessEvaluator}
     checkpoint_every >= 0 || throw(ArgumentError("checkpoint_every must be >= 0"))
     if checkpoint_every > 0 && checkpoint_path === nothing
@@ -485,6 +486,9 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
     if initial_population !== nothing
         _validate_initial_population(initial_population, algorithm.pop_size, TreeGenome{T})
     end
+    hall_of_fame_size >= 0 || throw(ArgumentError(
+        "hall_of_fame_size must be >= 0, got $hall_of_fame_size"))
+    hof = hall_of_fame_size > 0 ? HallOfFame{TreeGenome{T}}(hall_of_fame_size) : nothing
 
     # Dynamically scope the constant sampler for this solve. Read by
     # _random_terminal via task_local_storage. Setting nothing explicitly
@@ -639,6 +643,13 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
             best_genome_all_time = deepcopy(next_genomes[cur_best])
         end
 
+        # Hall-of-Fame update: push every individual from this generation.
+        if hof !== nothing
+            for i in 1:pop_size
+                push!(hof, next_genomes[i], next_fitnesses[i])
+            end
+        end
+
         genomes = next_genomes
         fitnesses = next_fitnesses
 
@@ -665,7 +676,8 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
         final_best_genome, final_best_fitness, genomes,
         fitness_history, mean_history,
         algorithm.generations, wall_time,
-        final_best_fitness < algorithm.convergence_threshold
+        final_best_fitness < algorithm.convergence_threshold,
+        hof,
     )
 end
 

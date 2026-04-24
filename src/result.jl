@@ -13,6 +13,9 @@ and metadata about the evolutionary run.
 - `generations_run::Int`: number of generations completed
 - `wall_time::Float64`: elapsed wall-clock time in seconds
 - `converged::Bool`: whether the run met the convergence criterion
+- `hall_of_fame::Union{Nothing, HallOfFame{G}}`: top-K archive across all
+  generations when `solve(... ; hall_of_fame_size=K)` was passed with
+  `K > 0`. `nothing` otherwise.
 """
 mutable struct GPResult{G<:AbstractGenome} <: AbstractEvolutionResult
     best_genome::G
@@ -23,6 +26,22 @@ mutable struct GPResult{G<:AbstractGenome} <: AbstractEvolutionResult
     generations_run::Int
     wall_time::Float64
     converged::Bool
+    hall_of_fame::Union{Nothing, Any}  # HallOfFame{G} when populated; loose
+                                       # type here because HallOfFame is
+                                       # defined in a file loaded after result.jl.
+end
+
+# Backward-compatible constructor: older call sites that positionally passed
+# 8 args (no hall_of_fame) continue to work with a nil archive.
+function GPResult{G}(best_genome::G, best_fitness::Float64,
+                     population::Vector{G},
+                     fitness_history::Vector{Float64},
+                     mean_history::Vector{Float64},
+                     generations_run::Int, wall_time::Float64,
+                     converged::Bool) where {G<:AbstractGenome}
+    return GPResult{G}(best_genome, best_fitness, population,
+                       fitness_history, mean_history,
+                       generations_run, wall_time, converged, nothing)
 end
 
 # --- Display ---------------------------------------------------------------

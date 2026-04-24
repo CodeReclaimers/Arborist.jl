@@ -54,6 +54,9 @@ include("topology.jl")
 # --- Result type ---
 include("result.jl")
 
+# --- Hall-of-Fame top-K archive (referenced by GPResult.hall_of_fame) ---
+include("hall_of_fame.jl")
+
 # --- ExprGenome wrapper and GPProblem (struct definitions needed by operators) ---
 include("genome/expr_genome.jl")
 
@@ -158,6 +161,9 @@ export
     Checkpoint,
     save_checkpoint,
     load_checkpoint,
+
+    # Hall-of-Fame
+    HallOfFame,
 
     # Novelty Search
     NoveltyArchive,

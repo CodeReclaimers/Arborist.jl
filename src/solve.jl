@@ -24,7 +24,8 @@ function solve(problem::GPProblem{G,E},
                checkpoint_path::Union{Nothing, AbstractString} = nothing,
                resume_from::Union{Nothing, AbstractString} = nothing,
                allow_signature_mismatch::Bool = false,
-               initial_population::Union{Nothing, Vector{<:AbstractGenome}} = nothing) where {G,E}
+               initial_population::Union{Nothing, Vector{<:AbstractGenome}} = nothing,
+               hall_of_fame_size::Int = 0) where {G,E}
     checkpoint_every >= 0 || throw(ArgumentError("checkpoint_every must be >= 0"))
     if checkpoint_every > 0 && checkpoint_path === nothing
         throw(ArgumentError("checkpoint_every > 0 requires a checkpoint_path"))
@@ -33,6 +34,8 @@ function solve(problem::GPProblem{G,E},
         throw(ArgumentError(
             "solve: pass either `resume_from` or `initial_population`, not both"))
     end
+    hall_of_fame_size >= 0 || throw(ArgumentError(
+        "hall_of_fame_size must be >= 0, got $hall_of_fame_size"))
 
     # Resume path: load the checkpoint, validate the algorithm signature,
     # and hand the prior state to _run_evolution!. Seed RNG from the checkpoint.
@@ -49,10 +52,12 @@ function solve(problem::GPProblem{G,E},
                 "current algorithm 0x$(string(expected_sig, base=16)). " *
                 "Pass `allow_signature_mismatch=true` to override intentionally."))
         end
+        hof_resume = hall_of_fame_size > 0 ? HallOfFame{G}(hall_of_fame_size) : nothing
         return _run_evolution!(ckpt, problem, algorithm;
                                verbose=verbose, callback=callback, log=log,
                                checkpoint_every=checkpoint_every,
-                               checkpoint_path=checkpoint_path)
+                               checkpoint_path=checkpoint_path,
+                               hall_of_fame=hof_resume)
     end
 
     # Fresh start.
@@ -68,10 +73,12 @@ function solve(problem::GPProblem{G,E},
         # _initialize_population but swap in the user-provided genomes.
         (deepcopy(Vector{G}(initial_population)), fresh[2])
     end
+    hof = hall_of_fame_size > 0 ? HallOfFame{G}(hall_of_fame_size) : nothing
     return _run_evolution!(pop, problem, algorithm, rng;
                            verbose=verbose, callback=callback, log=log,
                            checkpoint_every=checkpoint_every,
-                           checkpoint_path=checkpoint_path)
+                           checkpoint_path=checkpoint_path,
+                           hall_of_fame=hof)
 end
 
 """
@@ -297,6 +304,7 @@ function _run_evolution!(ckpt::Checkpoint{G},
                          log::Union{Nothing, RunLog} = nothing,
                          checkpoint_every::Int = 0,
                          checkpoint_path::Union{Nothing, AbstractString} = nothing,
+                         hall_of_fame::Union{Nothing, HallOfFame{G}} = nothing,
                          ) where {G,E}
     rng = deepcopy(ckpt.rng_state)
     # Rebuild the per-genome state carrier (GenState for ExprGenome, etc).
@@ -314,7 +322,8 @@ function _run_evolution!(ckpt::Checkpoint{G},
                            initial_fitness_history=ckpt.fitness_history,
                            initial_mean_history=ckpt.mean_history,
                            initial_best=(ckpt.best_genome, ckpt.best_fitness),
-                           initial_fitnesses=ckpt.fitnesses)
+                           initial_fitnesses=ckpt.fitnesses,
+                           hall_of_fame=hall_of_fame)
 end
 
 """
@@ -396,6 +405,7 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
                          initial_mean_history::Vector{Float64} = Float64[],
                          initial_best::Union{Nothing, Tuple{G, Float64}} = nothing,
                          initial_fitnesses::Union{Nothing, Vector{Float64}} = nothing,
+                         hall_of_fame::Union{Nothing, HallOfFame{G}} = nothing,
                          ) where {G,E}
     genomes, state = pop
     pop_size = algorithm.pop_size
@@ -508,6 +518,14 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
             best_genome_all_time  = deepcopy(next_genomes[cur_best])
         end
 
+        # Hall-of-Fame update: offer every individual from this generation.
+        # push! filters by finiteness, dedup, and capacity internally.
+        if hall_of_fame !== nothing
+            for i in 1:pop_size
+                push!(hall_of_fame, next_genomes[i], next_fitnesses[i])
+            end
+        end
+
         genomes = next_genomes
         fitnesses = next_fitnesses
 
@@ -540,7 +558,8 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
         mean_history,
         algorithm.generations,
         wall_time,
-        final_best_fitness < algorithm.convergence_threshold
+        final_best_fitness < algorithm.convergence_threshold,
+        hall_of_fame
     )
 end
 

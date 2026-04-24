@@ -262,6 +262,7 @@ export
     crossover,
     distance,
     complexity,
+    tree_depth,
     serialize,
     deserialize,
     default_function_set,

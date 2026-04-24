@@ -228,6 +228,23 @@ function complexity(g::ADFGenome)
     Float64(count_nodes(g.main) + sum(count_nodes(adf) for adf in g.adfs; init=0))
 end
 
+"""
+    tree_depth(g::ADFGenome) -> Int
+
+Maximum of `count_depth` across the main tree and every ADF body. This
+captures the worst-case depth a caller might evaluate post-expansion; it
+does not account for expansion-driven inlining, which can compose depths
+up to `depth(main) + depth(any_adf) - 1` in the fully expanded form.
+"""
+function tree_depth(g::ADFGenome)
+    d = count_depth(g.main)
+    for adf in g.adfs
+        dd = count_depth(adf)
+        dd > d && (d = dd)
+    end
+    return d
+end
+
 function distance(a::ADFGenome, b::ADFGenome)
     # Sum of per-tree node-count differences. Coarse but symmetric.
     d = abs(count_nodes(a.main) - count_nodes(b.main))
@@ -263,21 +280,22 @@ Pick uniformly among (main, adf_1, ..., adf_N) and apply subtree mutation
 to that tree. ADF bodies use the base operator set and may reference ARG
 slots; main tree uses augmented operators and references only real features.
 """
-function mutate(::SubtreeMutation, g::ADFGenome{T}, rng::AbstractRNG) where T
+function mutate(op::SubtreeMutation, g::ADFGenome{T}, rng::AbstractRNG) where T
     target = rand(rng, 0:g.n_adfs)  # 0 == main; 1..n_adfs == adfs[i]
-    if target == 0
+    child = if target == 0
         new_main = _adf_subtree_mutate(g.main, rng, g.operators, g.n_features, T)
-        return ADFGenome{T}(new_main, [copy_node(a) for a in g.adfs],
-                            g.arity, g.operators, g.n_features, g.n_adfs)
+        ADFGenome{T}(new_main, [copy_node(a) for a in g.adfs],
+                     g.arity, g.operators, g.n_features, g.n_adfs)
     else
         # ADF body — use base operators only, extended feature range.
         base_ops = _strip_adf_placeholders(g.operators, g.n_adfs)
         new_adfs = [copy_node(a) for a in g.adfs]
         new_adfs[target] = _adf_subtree_mutate(g.adfs[target], rng, base_ops,
                                                g.n_features + g.arity, T)
-        return ADFGenome{T}(copy_node(g.main), new_adfs,
-                            g.arity, g.operators, g.n_features, g.n_adfs)
+        ADFGenome{T}(copy_node(g.main), new_adfs,
+                     g.arity, g.operators, g.n_features, g.n_adfs)
     end
+    return _respect_caps(op, g, child)
 end
 
 # Subtree mutation that respects the n_features (features above this index
@@ -326,7 +344,7 @@ Same-index subtree crossover: pick uniformly among (main, adf_1, ..., adf_N)
 and swap subtrees within the chosen tree pair. Requires both genomes to
 share `n_features` and `n_adfs`.
 """
-function crossover(::SubtreeCrossover, g1::ADFGenome{T}, g2::ADFGenome{T},
+function crossover(op::SubtreeCrossover, g1::ADFGenome{T}, g2::ADFGenome{T},
                    rng::AbstractRNG) where T
     g1.n_adfs == g2.n_adfs || throw(ArgumentError(
         "ADFGenome crossover requires matching n_adfs (got $(g1.n_adfs) and $(g2.n_adfs))"))
@@ -334,25 +352,24 @@ function crossover(::SubtreeCrossover, g1::ADFGenome{T}, g2::ADFGenome{T},
         "ADFGenome crossover requires matching n_features"))
 
     target = rand(rng, 0:g1.n_adfs)
-    if target == 0
+    (c1, c2) = if target == 0
         c1_main, c2_main = _swap_subtrees(g1.main, g2.main, rng, T)
-        c1 = ADFGenome{T}(c1_main, [copy_node(a) for a in g1.adfs],
-                          g1.arity, g1.operators, g1.n_features, g1.n_adfs)
-        c2 = ADFGenome{T}(c2_main, [copy_node(a) for a in g2.adfs],
-                          g2.arity, g2.operators, g2.n_features, g2.n_adfs)
-        return (c1, c2)
+        (ADFGenome{T}(c1_main, [copy_node(a) for a in g1.adfs],
+                      g1.arity, g1.operators, g1.n_features, g1.n_adfs),
+         ADFGenome{T}(c2_main, [copy_node(a) for a in g2.adfs],
+                      g2.arity, g2.operators, g2.n_features, g2.n_adfs))
     else
         new_adfs1 = [copy_node(a) for a in g1.adfs]
         new_adfs2 = [copy_node(a) for a in g2.adfs]
         adf1, adf2 = _swap_subtrees(g1.adfs[target], g2.adfs[target], rng, T)
         new_adfs1[target] = adf1
         new_adfs2[target] = adf2
-        c1 = ADFGenome{T}(copy_node(g1.main), new_adfs1,
-                          g1.arity, g1.operators, g1.n_features, g1.n_adfs)
-        c2 = ADFGenome{T}(copy_node(g2.main), new_adfs2,
-                          g2.arity, g2.operators, g2.n_features, g2.n_adfs)
-        return (c1, c2)
+        (ADFGenome{T}(copy_node(g1.main), new_adfs1,
+                      g1.arity, g1.operators, g1.n_features, g1.n_adfs),
+         ADFGenome{T}(copy_node(g2.main), new_adfs2,
+                      g2.arity, g2.operators, g2.n_features, g2.n_adfs))
     end
+    return (_respect_caps(op, g1, c1), _respect_caps(op, g2, c2))
 end
 
 function _swap_subtrees(t1::Node{T}, t2::Node{T}, rng, ::Type{T}) where T

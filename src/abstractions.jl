@@ -64,6 +64,21 @@ explicitly. If not implemented, calling it raises `MethodError`.
 function evaluate_cases end
 
 """
+    tree_depth(g::AbstractGenome) -> Int
+
+Longest root-to-leaf path through the genome's expression tree. Defined for
+tree-structured genomes (`ExprGenome`, `TreeGenome`, `AntGenome`, `ADFGenome`)
+and used by mutation/crossover operators that enforce a `max_depth` cap.
+
+Graph-structured genomes (e.g. `GraphGenome`) do not define this — `MethodError`
+on those is intentional; depth is not a meaningful bound for a recurrent graph.
+
+Leaf convention: a bare leaf (symbol / number / feature node) has depth 1;
+each additional level of nesting increases depth by 1.
+"""
+function tree_depth end
+
+"""
     AbstractMutationOperator
 
 Base type for mutation operators.

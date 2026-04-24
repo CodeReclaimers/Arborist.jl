@@ -212,6 +212,14 @@ function complexity(g::TreeGenome{T}) where T
     Float64(count_nodes(g.tree))
 end
 
+"""
+    tree_depth(g::TreeGenome) -> Int
+
+Longest root-to-leaf path through the genome's expression tree, computed
+via `DynamicExpressions.count_depth`. A bare-leaf tree has depth 1.
+"""
+tree_depth(g::TreeGenome) = count_depth(g.tree)
+
 function serialize(g::TreeGenome{T}) where T
     string_tree(g.tree, g.operators)
 end
@@ -248,17 +256,18 @@ end
 
 # --- Operator dispatches for TreeGenome ---
 
-function mutate(::SubtreeMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
-    mutate(g, rng)
+function mutate(op::SubtreeMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
+    _respect_caps(op, g, mutate(g, rng))
 end
 
-function mutate(::PointMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
-    mutate(g, rng)
+function mutate(op::PointMutation, g::TreeGenome{T}, rng::AbstractRNG) where T
+    _respect_caps(op, g, mutate(g, rng))
 end
 
-function crossover(::SubtreeCrossover, g1::TreeGenome{T}, g2::TreeGenome{T},
+function crossover(op::SubtreeCrossover, g1::TreeGenome{T}, g2::TreeGenome{T},
                            rng::AbstractRNG) where T
-    crossover(g1, g2, rng)
+    (c1, c2) = crossover(g1, g2, rng)
+    return (_respect_caps(op, g1, c1), _respect_caps(op, g2, c2))
 end
 
 # =============================================================================

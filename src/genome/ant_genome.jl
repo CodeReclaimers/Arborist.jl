@@ -267,6 +267,17 @@ function complexity(g::AntGenome)
     Float64(length(unravel(g.program)))
 end
 
+"""
+    tree_depth(g::AntGenome) -> Int
+
+Longest root-to-leaf path through the ant program's `Expr` tree. Note:
+`AntGenome` also carries a `max_depth` field which is the *construction*
+ceiling used by `_random_ant_program` — it limits how deeply a fresh
+random program is generated but does not bound later mutation output.
+Use the mutation operator's `max_depth` kwarg for a post-mutation cap.
+"""
+tree_depth(g::AntGenome) = _expr_depth(g.program)
+
 function serialize(g::AntGenome)
     repr(g.program)
 end

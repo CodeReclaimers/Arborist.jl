@@ -118,6 +118,42 @@ function complexity(g::ExprGenome)
 end
 
 """
+    _expr_depth(e) -> Int
+
+Longest root-to-leaf path through a Julia `Expr` tree. Non-`Expr` arguments
+(Symbols, literal Numbers, etc.) count as leaves at depth 1. Only `Expr`
+children contribute to the depth — the function-name Symbol sitting in
+`args[1]` of a `:call` node is not counted, matching the convention used
+by `DynamicExpressions.count_depth`.
+"""
+_expr_depth(::Any) = 1
+function _expr_depth(e::Expr)
+    max_child = 0
+    for a in e.args
+        if a isa Expr
+            d = _expr_depth(a)
+            d > max_child && (max_child = d)
+        end
+    end
+    return 1 + max_child
+end
+
+"""
+    tree_depth(g::ExprGenome) -> Int
+
+Maximum depth over every statement in `g.body`. Empty bodies return `0`.
+"""
+function tree_depth(g::ExprGenome)
+    isempty(g.body) && return 0
+    d = 0
+    for stmt in g.body
+        dd = _expr_depth(stmt)
+        dd > d && (d = dd)
+    end
+    return d
+end
+
+"""
     serialize(g::ExprGenome) -> String
 
 Convert an ExprGenome body to a human-readable Julia source string

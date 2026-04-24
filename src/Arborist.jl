@@ -115,6 +115,9 @@ include("map_elites.jl")
 # --- Graphviz DOT export (no runtime dep on the `dot` binary) ---
 include("dot_export.jl")
 
+# --- Canonical benchmark problem generators (Arborist.Benchmarks submodule) ---
+include("benchmarks/Benchmarks.jl")
+
 # --- Public API exports ---
 export
     # Abstract types

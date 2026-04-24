@@ -4,6 +4,8 @@
 # process via Distributed.jl. This eliminates @eval contention between
 # islands: each process has its own compilation lock, world age counter,
 # and module-level state.
+
+using Distributed
 #
 # GraphGenome (NEAT) uses a process-local innovation counter. In
 # distributed mode, each worker initializes its counter to a disjoint range

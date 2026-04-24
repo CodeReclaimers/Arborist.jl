@@ -18,7 +18,6 @@ result    = solve(problem, algorithm; verbose=true)
 module Arborist
 
 using Random
-using Distributed
 
 # --- Abstract type hierarchy ---
 include("abstractions.jl")

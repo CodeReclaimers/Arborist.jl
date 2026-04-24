@@ -17,6 +17,7 @@ via keyword arguments with sensible defaults.
 - `crossover_ops::Vector{AbstractCrossoverOperator}`: crossover operators
 - `selection::AbstractSelectionStrategy`: selection strategy
 - `convergence_threshold::Float64`: best fitness below this value sets `converged=true` in result (default: `Inf`, meaning never converged)
+- `constant_sampler::Union{Function, Nothing}`: callable `(rng) -> T` used by `TreeGenome` when a new numeric-literal leaf is created (Koza-style Ephemeral Random Constants). `nothing` preserves the default `T(randn(rng))`. See `erc_uniform` for a helper that builds the canonical uniform-over-range sampler.
 """
 struct GeneticProgramming <: AbstractEvolutionaryAlgorithm
     pop_size::Int
@@ -32,6 +33,7 @@ struct GeneticProgramming <: AbstractEvolutionaryAlgorithm
     selection::AbstractSelectionStrategy
     convergence_threshold::Float64
     constant_optimization::Union{Nothing, ConstantOptimization}
+    constant_sampler::Union{Function, Nothing}
 end
 
 """
@@ -53,6 +55,7 @@ function GeneticProgramming(;
     selection::AbstractSelectionStrategy = TournamentSelection(3),
     convergence_threshold::Float64 = Inf,
     constant_optimization::Union{Nothing, ConstantOptimization} = nothing,
+    constant_sampler::Union{Function, Nothing} = nothing,
 )
     if crossover_rate + mutation_rate > 1.0
         throw(ArgumentError(
@@ -68,6 +71,7 @@ function GeneticProgramming(;
         convert(Vector{AbstractCrossoverOperator}, crossover_ops),
         selection, convergence_threshold,
         constant_optimization,
+        constant_sampler,
     )
 end
 

@@ -175,12 +175,45 @@ function _random_tree(rng::AbstractRNG, operators::OperatorEnum, n_features::Int
     end
 end
 
+"""
+Task-local storage key carrying an optional `(rng) -> T` callable that
+`_random_terminal` consults when sampling a new numeric-literal leaf. Set
+by `solve(::GPProblem{TreeGenome{T}}, ::GeneticProgramming)` from
+`algorithm.constant_sampler`. `nothing` (default, or unset) falls back to
+the historical `T(randn(rng))` behavior.
+"""
+const _ERC_TLS_KEY = :_arborist_erc_sampler
+
+function _erc_sample(rng::AbstractRNG, ::Type{T}) where T
+    tls = task_local_storage()
+    sampler = get(tls, _ERC_TLS_KEY, nothing)
+    return sampler === nothing ? T(randn(rng)) : T(sampler(rng))
+end
+
 function _random_terminal(rng::AbstractRNG, n_features::Int, ::Type{T}) where T
     if n_features > 0 && rand(rng, Bool)
         return Node{T}(; feature=UInt16(rand(rng, 1:n_features)))
     else
-        return Node{T}(; val=T(randn(rng)))
+        return Node{T}(; val=_erc_sample(rng, T))
     end
+end
+
+"""
+    erc_uniform(lo::T, hi::T) -> Function
+
+Return a callable `(rng::AbstractRNG) -> T` that samples uniformly from
+`[lo, hi]`. Pass the result as `GeneticProgramming(; constant_sampler=...)`
+to wire Koza-style Ephemeral Random Constants into TreeGenome creation
+and mutation.
+
+```julia
+alg = GeneticProgramming(; constant_sampler = erc_uniform(-5.0f0, 5.0f0))
+```
+"""
+function erc_uniform(lo::T, hi::T) where T
+    lo <= hi || throw(ArgumentError(
+        "erc_uniform: lo ($lo) must be <= hi ($hi)"))
+    return rng -> lo + (hi - lo) * rand(rng, T)
 end
 
 # =============================================================================
@@ -445,6 +478,11 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
         throw(ArgumentError("checkpoint_every > 0 requires a checkpoint_path"))
     end
 
+    # Dynamically scope the constant sampler for this solve. Read by
+    # _random_terminal via task_local_storage. Setting nothing explicitly
+    # lets nested solves override an outer one without surprise leakage.
+    task_local_storage(_ERC_TLS_KEY, algorithm.constant_sampler)
+
     evaluator = problem.evaluator
     ops = evaluator.operators
     n_feat = size(evaluator.X, 1)
@@ -631,6 +669,12 @@ function _initialize_population(problem::GPProblem{TreeGenome{T}, E},
     evaluator isa TreeFitnessEvaluator || error(
         "IslandModel with TreeGenome requires a TreeFitnessEvaluator " *
         "(got $(typeof(evaluator)))")
+
+    # Scope the ERC sampler for this island's task. Per-island init is
+    # called once per island in the sequential IslandModel path; in
+    # distributed mode each worker runs its own task. Setting here covers
+    # both the initial population and subsequent mutation calls on this task.
+    task_local_storage(_ERC_TLS_KEY, algorithm.constant_sampler)
 
     ops = evaluator.operators
     n_feat = size(evaluator.X, 1)

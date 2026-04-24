@@ -148,6 +148,9 @@ export
     ConstantOptimization,
     optimize_constants!,
 
+    # Ephemeral Random Constants (ERC)
+    erc_uniform,
+
     # Checkpointing
     Checkpoint,
     save_checkpoint,

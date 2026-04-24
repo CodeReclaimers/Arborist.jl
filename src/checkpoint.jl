@@ -136,7 +136,11 @@ function _algorithm_signature(alg::GeneticProgramming)
               length(alg.crossover_ops),
               typeof(alg.selection),
               typeof(alg.speciation),
-              alg.convergence_threshold))
+              alg.convergence_threshold,
+              # Presence (not identity) of the ERC sampler: closures hash by
+              # identity, so two equivalent user-rebuilt samplers would
+              # spuriously differ; resuming with ERC on/off stays detectable.
+              alg.constant_sampler === nothing))
     # Include operator-type identities so adding/removing an operator changes the signature.
     for op in alg.mutation_ops
         h = hash(typeof(op), h)

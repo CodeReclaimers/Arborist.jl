@@ -472,10 +472,18 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
                        checkpoint_path::Union{Nothing, AbstractString} = nothing,
                        resume_from::Union{Nothing, AbstractString} = nothing,
                        allow_signature_mismatch::Bool = false,
+                       initial_population::Union{Nothing, Vector{<:AbstractGenome}} = nothing,
                        ) where {T, E<:TreeFitnessEvaluator}
     checkpoint_every >= 0 || throw(ArgumentError("checkpoint_every must be >= 0"))
     if checkpoint_every > 0 && checkpoint_path === nothing
         throw(ArgumentError("checkpoint_every > 0 requires a checkpoint_path"))
+    end
+    if resume_from !== nothing && initial_population !== nothing
+        throw(ArgumentError(
+            "solve: pass either `resume_from` or `initial_population`, not both"))
+    end
+    if initial_population !== nothing
+        _validate_initial_population(initial_population, algorithm.pop_size, TreeGenome{T})
     end
 
     # Dynamically scope the constant sampler for this solve. Read by
@@ -523,13 +531,21 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
     else
         rng_local = problem.seed === nothing ? Random.default_rng() :
                     Random.MersenneTwister(problem.seed)
-        # Initialize population with ramped half-and-half.
         genomes = Vector{TreeGenome{T}}(undef, pop_size)
-        for i in 1:pop_size
-            method = i <= pop_size ÷ 2 ? :full : :grow
-            depth = 2 + (i % 3)  # depths 2, 3, 4
-            tree = _random_tree(rng_local, ops, n_feat, T, depth, method)
-            genomes[i] = TreeGenome{T}(tree, ops, n_feat)
+        if initial_population === nothing
+            # Initialize population with ramped half-and-half.
+            for i in 1:pop_size
+                method = i <= pop_size ÷ 2 ? :full : :grow
+                depth = 2 + (i % 3)  # depths 2, 3, 4
+                tree = _random_tree(rng_local, ops, n_feat, T, depth, method)
+                genomes[i] = TreeGenome{T}(tree, ops, n_feat)
+            end
+        else
+            # Warm-start: adopt the caller-provided genomes verbatim (deepcopy
+            # so the caller's vector is unaffected by in-place evolution steps).
+            for i in 1:pop_size
+                genomes[i] = deepcopy(initial_population[i])
+            end
         end
         fitnesses = fill(Inf, pop_size)
         for i in 1:pop_size

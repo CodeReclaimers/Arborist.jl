@@ -627,7 +627,9 @@ function solve(problem::GPProblem{G, E},
                algorithm::NSGAII;
                verbose::Bool = false,
                callback = nothing,
-               log::Union{Nothing, RunLog} = nothing) where {G, E<:AbstractMultiObjectiveEvaluator}
+               log::Union{Nothing, RunLog} = nothing,
+               initial_population::Union{Nothing, Vector{<:AbstractGenome}} = nothing
+               ) where {G, E<:AbstractMultiObjectiveEvaluator}
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
@@ -644,8 +646,13 @@ function solve(problem::GPProblem{G, E},
     pop_size = algorithm.pop_size
     n_objectives = length(objective_names(evaluator))
 
-    # Initialize population.
-    genomes = _nsga2_init_population(problem, algorithm, rng)
+    # Initialize population (warm-start or fresh).
+    genomes = if initial_population === nothing
+        _nsga2_init_population(problem, algorithm, rng)
+    else
+        _validate_initial_population(initial_population, pop_size, G)
+        Vector{G}(deepcopy.(initial_population))
+    end
 
     # Evaluate initial population.
     fitnesses = [fill(Inf, n_objectives) for _ in 1:pop_size]

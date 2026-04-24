@@ -34,6 +34,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
     include("unit/test_lexicase.jl")
     include("unit/test_constant_optimization.jl")
     include("unit/test_erc.jl")
+    include("unit/test_warm_start.jl")
     include("unit/test_novelty.jl")
     include("unit/test_map_elites.jl")
     include("unit/test_checkpoint.jl")

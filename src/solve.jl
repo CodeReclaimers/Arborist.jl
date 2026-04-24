@@ -23,10 +23,15 @@ function solve(problem::GPProblem{G,E},
                checkpoint_every::Int = 0,
                checkpoint_path::Union{Nothing, AbstractString} = nothing,
                resume_from::Union{Nothing, AbstractString} = nothing,
-               allow_signature_mismatch::Bool = false) where {G,E}
+               allow_signature_mismatch::Bool = false,
+               initial_population::Union{Nothing, Vector{<:AbstractGenome}} = nothing) where {G,E}
     checkpoint_every >= 0 || throw(ArgumentError("checkpoint_every must be >= 0"))
     if checkpoint_every > 0 && checkpoint_path === nothing
         throw(ArgumentError("checkpoint_every > 0 requires a checkpoint_path"))
+    end
+    if resume_from !== nothing && initial_population !== nothing
+        throw(ArgumentError(
+            "solve: pass either `resume_from` or `initial_population`, not both"))
     end
 
     # Resume path: load the checkpoint, validate the algorithm signature,
@@ -54,11 +59,40 @@ function solve(problem::GPProblem{G,E},
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
-    pop = _initialize_population(problem, algorithm, rng)
+    pop = if initial_population === nothing
+        _initialize_population(problem, algorithm, rng)
+    else
+        _validate_initial_population(initial_population, algorithm.pop_size, G)
+        fresh = _initialize_population(problem, algorithm, rng)
+        # Keep the state carrier (GenState / TreeGenomeContext / ...) built by
+        # _initialize_population but swap in the user-provided genomes.
+        (deepcopy(Vector{G}(initial_population)), fresh[2])
+    end
     return _run_evolution!(pop, problem, algorithm, rng;
                            verbose=verbose, callback=callback, log=log,
                            checkpoint_every=checkpoint_every,
                            checkpoint_path=checkpoint_path)
+end
+
+"""
+    _validate_initial_population(pop, pop_size, ::Type{G})
+
+Throw `ArgumentError` when a user-supplied warm-start population does
+not match the algorithm's population size or genome type. Called from
+every `solve()` method that accepts `initial_population`.
+"""
+function _validate_initial_population(pop::AbstractVector,
+                                      pop_size::Int,
+                                      ::Type{G}) where {G}
+    length(pop) == pop_size || throw(ArgumentError(
+        "initial_population length ($(length(pop))) must equal " *
+        "algorithm.pop_size ($pop_size). Warm-start does not pad or truncate."))
+    for (i, g) in enumerate(pop)
+        g isa G || throw(ArgumentError(
+            "initial_population[$i] has type $(typeof(g)); " *
+            "expected $G to match the problem's genome type."))
+    end
+    return nothing
 end
 
 """
@@ -723,7 +757,15 @@ function solve(problem::GPProblem{G,E},
                callback = nothing,
                log::Union{Nothing, RunLog} = nothing,
                auto_addprocs::Bool = false,
-               auto_rmprocs::Bool = false) where {G,E}
+               auto_rmprocs::Bool = false,
+               initial_population::Union{Nothing, Vector{<:AbstractGenome}} = nothing) where {G,E}
+    if initial_population !== nothing && algorithm.distributed
+        throw(ArgumentError(
+            "IslandModel warm-start (`initial_population`) is currently " *
+            "supported only for the sequential path (`distributed=false`). " *
+            "For distributed runs, bootstrap each worker's population manually."))
+    end
+
     # Dispatch to distributed solvers if requested
     if algorithm.distributed && !algorithm.async
         return _distributed_sync_solve(problem, algorithm;
@@ -756,6 +798,10 @@ function solve(problem::GPProblem{G,E},
     pop_size = alg.pop_size
     bp = alg.bloat_penalty
 
+    if initial_population !== nothing
+        _validate_initial_population(initial_population, n * pop_size, G)
+    end
+
     # Initialize n independent islands, each with its own per-island state
     # (GenState for ExprGenome, TreeGenomeContext for TreeGenome, ...).
     # Both state types expose `.rng` so the island loop can read state.rng
@@ -770,7 +816,18 @@ function solve(problem::GPProblem{G,E},
         island_rng_seed = rand(rng, UInt64)
         island_rng = Random.MersenneTwister(island_rng_seed)
         pop = _initialize_population(problem, alg, island_rng)
-        island_genomes[i], island_states[i] = pop
+        # Swap in the i-th slice of the warm-start vector if provided. State
+        # carrier from _initialize_population is retained so operators that
+        # consult it (e.g., ExprGenome's GenState) continue to work.
+        if initial_population !== nothing
+            slice_lo = (i - 1) * pop_size + 1
+            slice_hi = i * pop_size
+            seeded = Vector{G}(deepcopy.(initial_population[slice_lo:slice_hi]))
+            island_genomes[i] = seeded
+            island_states[i] = pop[2]
+        else
+            island_genomes[i], island_states[i] = pop
+        end
         island_fitnesses[i] = fill(Inf, pop_size)
         island_species[i] = _init_species_state(alg.speciation)
     end

@@ -255,7 +255,9 @@ alongside the standard fitness stats (best from archive as a scalar).
 """
 function solve(problem::GPProblem{G,E}, alg::MAPElites;
                verbose::Bool = false,
-               log::Union{Nothing, RunLog} = nothing) where {G, E}
+               log::Union{Nothing, RunLog} = nothing,
+               initial_population::Union{Nothing, Vector{<:AbstractGenome}} = nothing
+               ) where {G, E}
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
@@ -273,8 +275,13 @@ function solve(problem::GPProblem{G,E}, alg::MAPElites;
             convert(Vector{AbstractCrossoverOperator}, alg.crossover_ops),
         selection = TournamentSelection(2),
     )
-    pop_tuple = _initialize_population(problem, throwaway_alg, rng)
-    init_genomes = pop_tuple[1]
+    init_genomes = if initial_population === nothing
+        pop_tuple = _initialize_population(problem, throwaway_alg, rng)
+        pop_tuple[1]
+    else
+        _validate_initial_population(initial_population, alg.n_init, G)
+        Vector{G}(deepcopy.(initial_population))
+    end
 
     archive = MAPElitesArchive{G}(alg.n_bins)
     coverage_history = Float64[]

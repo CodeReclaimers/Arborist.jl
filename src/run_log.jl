@@ -80,6 +80,87 @@ Base.lastindex(log::RunLog) = lastindex(log.entries)
 Base.iterate(log::RunLog, state...) = iterate(log.entries, state...)
 Base.isempty(log::RunLog) = isempty(log.entries)
 
+# --- Display ---------------------------------------------------------------
+# Uses `_fmt_fitness` and `_fmt_wall` from result.jl.
+
+function Base.show(io::IO, g::GenerationLog)
+    print(io, "GenerationLog(gen=", g.generation,
+              ", best=", _fmt_fitness(g.best_fitness),
+              ", species=", g.n_species, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", g::GenerationLog)
+    println(io, "GenerationLog")
+    println(io, "  generation:       ", g.generation)
+    println(io, "  fitness:          best=", _fmt_fitness(g.best_fitness),
+                ", mean=", _fmt_fitness(g.mean_fitness),
+                ", median=", _fmt_fitness(g.median_fitness),
+                ", worst=", _fmt_fitness(g.worst_fitness))
+    if g.n_species > 0
+        shown = g.species_sizes[1:min(8, end)]
+        more = length(g.species_sizes) > length(shown) ? ", ..." : ""
+        println(io, "  species:          ", g.n_species,
+                    " (sizes: ", join(shown, ", "), more, ")")
+    else
+        println(io, "  species:          (speciation disabled)")
+    end
+    println(io, "  unique structures: ", g.unique_structures)
+    if !isempty(g.operator_attempted)
+        ops = sort!(collect(keys(g.operator_attempted)))
+        parts = String[]
+        for k in ops
+            a = g.operator_attempted[k]
+            s = get(g.operator_success, k, 0)
+            push!(parts, string(k, "=", s, "/", a))
+        end
+        println(io, "  operators (ok/try): ", join(parts, ", "))
+    end
+    print(io,   "  wall time:        ", _fmt_wall(g.wall_time))
+end
+
+function Base.show(io::IO, log::RunLog)
+    print(io, "RunLog(", length(log), " generations)")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", log::RunLog)
+    n = length(log)
+    if n == 0
+        print(io, "RunLog (empty)")
+        return
+    end
+    last = log[end]
+    op_try = Dict{Symbol,Int}()
+    op_ok  = Dict{Symbol,Int}()
+    total_wall = 0.0
+    for gen in log.entries
+        total_wall += gen.wall_time
+        for (k, v) in gen.operator_attempted
+            op_try[k] = get(op_try, k, 0) + v
+        end
+        for (k, v) in gen.operator_success
+            op_ok[k] = get(op_ok, k, 0) + v
+        end
+    end
+    println(io, "RunLog: ", n, " generations")
+    println(io, "  final fitness:    best=", _fmt_fitness(last.best_fitness),
+                ", mean=", _fmt_fitness(last.mean_fitness),
+                ", median=", _fmt_fitness(last.median_fitness))
+    println(io, "  final species:    ", last.n_species)
+    println(io, "  final structures: ", last.unique_structures)
+    if !isempty(op_try)
+        ops = sort!(collect(keys(op_try)))
+        parts = String[]
+        for k in ops
+            a = op_try[k]
+            s = get(op_ok, k, 0)
+            rate = a == 0 ? 0.0 : 100.0 * s / a
+            push!(parts, string(k, " ", _fmt_fitness(rate), "%"))
+        end
+        println(io, "  operator success: ", join(parts, ", "))
+    end
+    print(io,   "  total wall time:  ", _fmt_wall(total_wall))
+end
+
 """
     SpeciationSnapshot
 

@@ -39,6 +39,30 @@ MAPElitesArchive{G}(n_bins::Vector{Int}) where G =
 Base.length(a::MAPElitesArchive) = length(a.grid)
 Base.isempty(a::MAPElitesArchive) = isempty(a.grid)
 
+function Base.show(io::IO, a::MAPElitesArchive{G}) where G
+    total = prod(a.n_bins)
+    print(io, "MAPElitesArchive{", G, "}(", length(a.grid), "/", total, " cells)")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", a::MAPElitesArchive{G}) where G
+    total = prod(a.n_bins)
+    filled = length(a.grid)
+    cov = total == 0 ? 0.0 : filled / total
+    println(io, "MAPElitesArchive{", G, "}")
+    println(io, "  dimensions: ", a.n_dims)
+    println(io, "  bins:       ", a.n_bins, " (", total, " cells total)")
+    println(io, "  filled:     ", filled, " (", _fmt_fitness(100.0 * cov), "% coverage)")
+    if filled > 0
+        fitnesses = [pair.second for pair in values(a.grid)]
+        fmin = minimum(fitnesses)
+        fmax = maximum(fitnesses)
+        print(io, "  fitness:    best=", _fmt_fitness(fmin),
+                  ", worst=", _fmt_fitness(fmax))
+    else
+        print(io, "  fitness:    (archive empty)")
+    end
+end
+
 """
     coverage(a::MAPElitesArchive) -> Float64
 
@@ -159,6 +183,27 @@ struct MAPElitesResult{G} <: AbstractEvolutionResult
     best_fitness::Float64
     wall_time::Float64
     generations_run::Int
+end
+
+# --- Display ---------------------------------------------------------------
+
+function Base.show(io::IO, r::MAPElitesResult{G}) where G
+    final_cov = isempty(r.coverage_history) ? 0.0 : r.coverage_history[end]
+    print(io, "MAPElitesResult{", G, "}(coverage=", _fmt_fitness(final_cov),
+              ", gens=", r.generations_run, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", r::MAPElitesResult{G}) where G
+    final_cov = isempty(r.coverage_history) ? 0.0 : r.coverage_history[end]
+    final_qd  = isempty(r.qd_score_history) ? 0.0 : r.qd_score_history[end]
+    total = prod(r.archive.n_bins)
+    println(io, "MAPElitesResult{", G, "}")
+    println(io, "  generations run: ", r.generations_run)
+    println(io, "  wall time:       ", _fmt_wall(r.wall_time))
+    println(io, "  coverage:        ", _fmt_fitness(final_cov),
+                " (", length(r.archive), "/", total, " cells)")
+    println(io, "  QD score:        ", _fmt_fitness(final_qd))
+    print(io,   "  best fitness:    ", _fmt_fitness(r.best_fitness))
 end
 
 # ---------------------------------------------------------------------------

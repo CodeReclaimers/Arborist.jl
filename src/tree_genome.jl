@@ -220,6 +220,20 @@ via `DynamicExpressions.count_depth`. A bare-leaf tree has depth 1.
 """
 tree_depth(g::TreeGenome) = count_depth(g.tree)
 
+# --- Display ---------------------------------------------------------------
+
+function Base.show(io::IO, g::TreeGenome{T}) where T
+    print(io, "TreeGenome{", T, "}(size=", Int(complexity(g)),
+              ", depth=", tree_depth(g), ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", g::TreeGenome{T}) where T
+    println(io, "TreeGenome{", T, "} (size=", Int(complexity(g)),
+                ", depth=", tree_depth(g),
+                ", n_features=", g.n_features, ")")
+    print(io, "  ", string_tree(g.tree, g.operators))
+end
+
 function serialize(g::TreeGenome{T}) where T
     string_tree(g.tree, g.operators)
 end

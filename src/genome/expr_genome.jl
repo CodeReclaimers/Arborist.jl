@@ -153,6 +153,31 @@ function tree_depth(g::ExprGenome)
     return d
 end
 
+# --- Display ---------------------------------------------------------------
+
+function Base.show(io::IO, g::ExprGenome)
+    print(io, "ExprGenome(size=", Int(complexity(g)),
+              ", depth=", tree_depth(g),
+              ", stmts=", length(g.body), ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", g::ExprGenome)
+    println(io, "ExprGenome (size=", Int(complexity(g)),
+                ", depth=", tree_depth(g),
+                ", stmts=", length(g.body), ")")
+    # Print up to 8 statements verbatim; tail-truncate with "..." if longer.
+    shown = min(8, length(g.body))
+    for i in 1:shown
+        print(io, "  ")
+        show(io, g.body[i])
+        i < shown && println(io)
+    end
+    if length(g.body) > shown
+        println(io)
+        print(io, "  ...", length(g.body) - shown, " more statements")
+    end
+end
+
 """
     serialize(g::ExprGenome) -> String
 

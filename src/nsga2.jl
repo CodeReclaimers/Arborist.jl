@@ -167,6 +167,24 @@ struct NSGAIIResult{G<:AbstractGenome} <: AbstractEvolutionResult
     objective_names::Vector{String}
 end
 
+# --- Display ---------------------------------------------------------------
+
+function Base.show(io::IO, r::NSGAIIResult{G}) where G
+    print(io, "NSGAIIResult{", G, "}(front=", length(r.pareto_front),
+              ", gens=", r.generations_run, ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", r::NSGAIIResult{G}) where G
+    println(io, "NSGAIIResult{", G, "}")
+    println(io, "  generations run: ", r.generations_run)
+    println(io, "  wall time:       ", _fmt_wall(r.wall_time))
+    println(io, "  front size:      ", length(r.pareto_front))
+    println(io, "  population size: ", length(r.population))
+    println(io, "  objectives:      ", join(r.objective_names, ", "))
+    final_hv = isempty(r.hypervolume_history) ? NaN : r.hypervolume_history[end]
+    print(io,   "  final HV:        ", _fmt_fitness(final_hv))
+end
+
 # =============================================================================
 # Core NSGA-II algorithms
 # =============================================================================

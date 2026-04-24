@@ -14,6 +14,7 @@ const RUN_BENCHMARKS = get(ENV, "ARBORIST_RUN_BENCHMARKS",
     include("unit/test_genome.jl")
     include("unit/test_operators.jl")
     include("unit/test_tree_caps.jl")
+    include("unit/test_show_methods.jl")
     include("unit/test_speciation.jl")
     include("unit/test_bloat_penalty.jl")
     include("unit/test_island_model.jl")

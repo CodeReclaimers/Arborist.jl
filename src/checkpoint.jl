@@ -64,6 +64,25 @@ struct Checkpoint{G}
     algorithm_signature::UInt64
 end
 
+# --- Display ---------------------------------------------------------------
+
+function Base.show(io::IO, c::Checkpoint{G}) where G
+    print(io, "Checkpoint{", G, "}(gen=", c.generation,
+              ", pop=", length(c.population),
+              ", best=", _fmt_fitness(c.best_fitness), ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", c::Checkpoint{G}) where G
+    println(io, "Checkpoint{", G, "}")
+    println(io, "  generation:       ", c.generation)
+    println(io, "  population:       ", length(c.population), " genomes")
+    println(io, "  best fitness:     ", _fmt_fitness(c.best_fitness))
+    println(io, "  wall time:        ", _fmt_wall(c.wall_time))
+    println(io, "  arborist version: ", c.arborist_version)
+    println(io, "  julia version:    ", c.julia_version)
+    print(io,   "  format version:   ", c.format_version)
+end
+
 """
     save_checkpoint(ckpt::Checkpoint, path::AbstractString)
 

@@ -245,6 +245,30 @@ function tree_depth(g::ADFGenome)
     return d
 end
 
+# --- Display ---------------------------------------------------------------
+
+function Base.show(io::IO, g::ADFGenome{T}) where T
+    print(io, "ADFGenome{", T, "}(adfs=", g.n_adfs,
+              ", size=", Int(complexity(g)),
+              ", depth=", tree_depth(g), ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", g::ADFGenome{T}) where T
+    base_ops = base_operators(g)
+    println(io, "ADFGenome{", T, "} (n_features=", g.n_features,
+                ", arity=", g.arity,
+                ", n_adfs=", g.n_adfs, ")")
+    println(io, "  main [size=", count_nodes(g.main),
+                ", depth=", count_depth(g.main), "]: ",
+                string_tree(g.main, g.operators))
+    for (i, adf) in enumerate(g.adfs)
+        print(io, "  ADF", i - 1, " [size=", count_nodes(adf),
+                  ", depth=", count_depth(adf), "]: ",
+                  string_tree(adf, base_ops))
+        i < length(g.adfs) && println(io)
+    end
+end
+
 function distance(a::ADFGenome, b::ADFGenome)
     # Sum of per-tree node-count differences. Coarse but symmetric.
     d = abs(count_nodes(a.main) - count_nodes(b.main))

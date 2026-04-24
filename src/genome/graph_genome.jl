@@ -134,6 +134,41 @@ mutable struct GraphGenome <: AbstractGenome
     fitness::Float64
 end
 
+# --- Display ---------------------------------------------------------------
+
+function Base.show(io::IO, g::GraphGenome)
+    n_enabled = count(c -> c.enabled, values(g.connections))
+    print(io, "GraphGenome(nodes=", length(g.nodes),
+              ", conns=", n_enabled, "/", length(g.connections), ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", g::GraphGenome)
+    types = Dict{Symbol, Int}()
+    activations = Dict{Symbol, Int}()
+    for n in values(g.nodes)
+        types[n.type] = get(types, n.type, 0) + 1
+        activations[n.activation] = get(activations, n.activation, 0) + 1
+    end
+    n_enabled = count(c -> c.enabled, values(g.connections))
+    n_disabled = length(g.connections) - n_enabled
+    println(io, "GraphGenome")
+    println(io, "  inputs:      ", get(types, :input, 0))
+    println(io, "  outputs:     ", get(types, :output, 0))
+    println(io, "  bias:        ", get(types, :bias, 0))
+    println(io, "  hidden:      ", get(types, :hidden, 0))
+    println(io, "  connections: ", length(g.connections),
+                " (", n_enabled, " enabled, ", n_disabled, " disabled)")
+    if !isempty(activations)
+        keys_sorted = sort!(collect(keys(activations)))
+        parts = String[]
+        for k in keys_sorted
+            push!(parts, string(k, "(", activations[k], ")"))
+        end
+        println(io, "  activations: ", join(parts, ", "))
+    end
+    print(io,   "  fitness:     ", _fmt_fitness(g.fitness))
+end
+
 # =============================================================================
 # Activation functions
 # =============================================================================

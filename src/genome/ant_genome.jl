@@ -278,6 +278,23 @@ Use the mutation operator's `max_depth` kwarg for a post-mutation cap.
 """
 tree_depth(g::AntGenome) = _expr_depth(g.program)
 
+# --- Display ---------------------------------------------------------------
+
+function Base.show(io::IO, g::AntGenome)
+    print(io, "AntGenome(size=", Int(complexity(g)),
+              ", depth=", tree_depth(g), ")")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", g::AntGenome)
+    println(io, "AntGenome (size=", Int(complexity(g)),
+                ", depth=", tree_depth(g),
+                ", max_depth=", g.max_depth, ")")
+    println(io, "  primitives: ", join(g.primitives, ", "))
+    println(io, "  conditions: ", join(g.conditions, ", "))
+    print(io,   "  program:    ")
+    show(io, g.program)
+end
+
 function serialize(g::AntGenome)
     repr(g.program)
 end

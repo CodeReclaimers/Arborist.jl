@@ -321,7 +321,9 @@ objective 1.
 The 2026-04-14 ablation study confirmed that a third success_rate
 objective is redundant given failed_placements — matching best
 fitness within 10⁻⁴ while producing a noisier Pareto front and
-hypervolume stuck at 0.0. See progress-20260414.md.
+hypervolume stuck at 0.0. The historical 3-objective formulation is
+still reachable via the `three_objective` variant in
+examples/research/run_nsga2_ablations.jl.
 """
 struct BPMultiObjectiveEvaluator <: Arborist.AbstractMultiObjectiveEvaluator
     inner::BinPackingEvaluator

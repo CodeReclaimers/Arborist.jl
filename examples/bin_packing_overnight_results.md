@@ -3,8 +3,9 @@
 Original data generated: 2026-03-24. LLM columns updated 2026-04-09
 after fixing two latent bugs in the LLM mutation pipeline (parser
 discarding control flow, sanitizer rejecting domain-specific function
-calls). See `progress-20260409.md` for full diagnosis. Classical,
-behavioral, and template results are unchanged from the original run.
+calls). See the "Fixed" entries under 0.1.0 in `CHANGELOG.md` for
+the landed fixes. Classical, behavioral, and template results are
+unchanged from the original run.
 
 ## 1. Multi-seed Comparison (5 seeds: 42, 123, 456, 789, 1337)
 

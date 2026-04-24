@@ -112,6 +112,9 @@ include("novelty.jl")
 # --- MAP-Elites quality-diversity algorithm ---
 include("map_elites.jl")
 
+# --- Graphviz DOT export (no runtime dep on the `dot` binary) ---
+include("dot_export.jl")
+
 # --- Public API exports ---
 export
     # Abstract types
@@ -280,6 +283,9 @@ export
     pexp,
     pinv,
     PROTECTED_EPS,
+
+    # Graphviz DOT export
+    to_dot,
 
     # Initialization strategies
     behavioral_initialize,

@@ -114,6 +114,17 @@ by innovation number.
 - `n_inputs::Int`: number of input nodes (not counting bias)
 - `n_outputs::Int`: number of output nodes
 - `fitness::Float64`: cached fitness value
+
+# Known limitations
+
+- **Distributed NEAT innovation matching is disjoint-range, not
+  content-aware.** Under `IslandModel(distributed=true)`, each worker
+  gets a unique innovation ID range via
+  `init_innovation_range!((island_id - 1) * INNOVATION_STRIDE)` so
+  IDs don't collide. The cost: structurally identical mutations on
+  different workers receive different IDs and are treated as disjoint
+  by NEAT crossover rather than aligned. Per-generation cross-worker
+  innovation dedup is not implemented.
 """
 mutable struct GraphGenome <: AbstractGenome
     nodes::Dict{Int, NodeGene}
@@ -917,6 +928,14 @@ memory/episodic_evaluator_design.md). For environments with heavy
 reusable state (physics-engine handle, loaded dataset), a future
 `StatefulEpisodicEvaluator` subtype can offer the `reset!`/`step!`
 idiom; it is intentionally not built yet.
+
+# Known limitations
+
+- **Not parallel-safe for stateful environments.** The declarative
+  API is structurally thread-safe when every callable is pure, but
+  a `dynamics` closure that captures mutable state will race under
+  `GeneticProgramming(; parallel=true)`. Use `parallel=false` for
+  stateful environments until `StatefulEpisodicEvaluator` lands.
 """
 struct EpisodicEvaluator{FInit,FDyn,FRew,FDone,FObs,FDec} <: AbstractEvaluator
     n_inputs::Int

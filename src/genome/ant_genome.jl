@@ -129,6 +129,14 @@ Suitable for the Santa Fe Ant Trail and similar control problems.
 - `primitives::Vector{Symbol}`: action primitives (consume moves)
 - `conditions::Vector{Symbol}`: condition primitives (sensors)
 - `max_depth::Int`: maximum program depth
+
+# Known limitations
+
+- **Not thread-safe.** The simulator uses a module-level `Ref` for
+  state. `GeneticProgramming(; parallel=true)` with `AntGenome`
+  raises a runtime error. Use `parallel=false` or refactor to a
+  thread-local-state pattern (as demonstrated in
+  `examples/bin_packing.jl` and `examples/sorting.jl`).
 """
 struct AntGenome <: AbstractGenome
     program::Expr

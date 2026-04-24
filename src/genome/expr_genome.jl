@@ -7,6 +7,18 @@ Genome representation based on Julia `Expr` trees. Wraps the existing
 # Fields
 - `body::Vector{Expr}`: body statements (not yet wrapped in a function harness)
 - `state::GenState`: type context carrying variable types, function set, etc.
+
+# Known limitations
+
+- **`serialize` / `deserialize` round-trip is ~80% reliable.**
+  `repr()`-style `Float32(literal)` forms produced by the Julia
+  printer fail type-checking on round-trip. The LLM operator falls
+  back silently to a classical operator, but checkpoint/resume or
+  cross-process migration can lose a fraction of individuals.
+- **`@eval` grows Julia's method table monotonically** across
+  generations. Long runs (thousands of generations × hundreds of
+  individuals) accumulate tens of thousands of methods, slowing
+  dispatch. Use `TreeGenome` for long runs where applicable.
 """
 struct ExprGenome <: AbstractGenome
     body::Vector{Expr}

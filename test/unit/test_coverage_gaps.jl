@@ -21,20 +21,10 @@
         flush(stdout)
     end
 
-    @testset "evolve! rejects rates summing > 1.0" begin
-        input_cols = Dict(:x => Float32)
-        output_cols = Dict(:y => Float32)
-        xs = Float32[-1.0, 0.0, 1.0]
-        input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
-        output_rows = [Dict{Symbol,Any}(:y => v^2) for v in xs]
-        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows)
-        pop = Population(Random.MersenneTwister(42), fe, 10, 3, 4)
-        @test_throws ArgumentError evolve!(pop, 1; crossover_rate=0.8, mutation_rate=0.5)
-        # Valid rates should work
-        evolve!(pop, 1; crossover_rate=0.3, mutation_rate=0.3)
-        println("  evolve! rate validation: invalid rejected, valid accepted")
-        flush(stdout)
-    end
+    # (The legacy evolve! rate-validation testset was removed in 0.1.0
+    # when the Individual / Population / evolve! API was retired; the
+    # equivalent validation now lives entirely inside GeneticProgramming
+    # and is covered by the testset above.)
 
     # =========================================================================
     # Callback mechanism
@@ -151,134 +141,12 @@
         println("  boolean function set: 50 random assignments generated successfully")
     end
 
-    # =========================================================================
-    # Legacy evolution API (Individual, Population, evolve!)
-    # =========================================================================
-
-    @testset "Individual and Population construction" begin
-        input_cols = Dict(:x => Float32)
-        output_cols = Dict(:y => Float32)
-        xs = Float32[1.0, 2.0, 3.0]
-        input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
-        output_rows = [Dict{Symbol,Any}(:y => v^2) for v in xs]
-        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
-                                    time_limit_ns=1_000_000_000)
-
-        rng = Random.MersenneTwister(42)
-        pop = Arborist.Population(rng, fe, 10, 3, 2)
-        @test length(pop.individuals) == 10
-        @test pop.generation == 0
-        @test all(ind -> ind.fitness == Inf, pop.individuals)
-        @test all(ind -> length(ind.expr) == 3, pop.individuals)
-        println("  Population: 10 individuals created, all unevaluated")
-    end
-
-    @testset "evaluate_individual!" begin
-        input_cols = Dict(:x => Float32)
-        output_cols = Dict(:y => Float32)
-        xs = Float32[1.0, 2.0, 3.0]
-        input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
-        output_rows = [Dict{Symbol,Any}(:y => v) for v in xs]
-        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
-                                    time_limit_ns=1_000_000_000)
-
-        rng = Random.MersenneTwister(42)
-        pop = Arborist.Population(rng, fe, 5, 3, 2)
-        ind = pop.individuals[1]
-        @test ind.fitness == Inf
-        Arborist.evaluate_individual!(pop, ind)
-        @test ind.fitness >= 0.0
-        @test ind.fitness < Inf || true  # May be Inf if program errors, that's valid
-        println("  evaluate_individual!: fitness=$(ind.fitness)")
-    end
-
-    @testset "evolve! runs and improves fitness" begin
-        input_cols = Dict(:x => Float32)
-        output_cols = Dict(:y => Float32)
-        xs = Float32[-2.0, -1.0, 0.0, 1.0, 2.0]
-        input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
-        output_rows = [Dict{Symbol,Any}(:y => v^2) for v in xs]
-        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
-                                    time_limit_ns=1_000_000_000)
-
-        rng = Random.MersenneTwister(42)
-        pop = Arborist.Population(rng, fe, 30, 3, 2)
-        pop = Arborist.evolve!(pop, 10; mutation_rate=0.3, crossover_rate=0.3, verbose=false)
-
-        @test pop.generation == 10
-        @test length(pop.individuals) == 30
-        # After evolution, best individual should have finite fitness.
-        best = pop.individuals[1]
-        @test best.fitness < Inf
-        @test best.fitness >= 0.0
-        println("  evolve!: 10 generations, best=$(best.fitness)")
-    end
-
-    @testset "tournament_select returns valid individual" begin
-        input_cols = Dict(:x => Float32)
-        output_cols = Dict(:y => Float32)
-        xs = Float32[1.0, 2.0]
-        input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
-        output_rows = [Dict{Symbol,Any}(:y => v) for v in xs]
-        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
-                                    time_limit_ns=1_000_000_000)
-
-        rng = Random.MersenneTwister(42)
-        pop = Arborist.Population(rng, fe, 10, 3, 2)
-        # Evaluate all so fitnesses are set.
-        for ind in pop.individuals
-            Arborist.evaluate_individual!(pop, ind)
-        end
-
-        for _ in 1:20
-            selected = Arborist.tournament_select(pop, 3)
-            @test selected isa Arborist.Individual
-            @test selected in pop.individuals
-        end
-    end
-
-    @testset "mutate_individual produces different individual" begin
-        input_cols = Dict(:x => Float32)
-        output_cols = Dict(:y => Float32)
-        xs = Float32[1.0]
-        input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
-        output_rows = [Dict{Symbol,Any}(:y => v) for v in xs]
-        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
-                                    time_limit_ns=1_000_000_000)
-
-        rng = Random.MersenneTwister(42)
-        pop = Arborist.Population(rng, fe, 5, 3, 2)
-        ind = pop.individuals[1]
-        original_str = string(ind.expr)
-
-        mutated = Arborist.mutate_individual(pop.state, ind)
-        @test mutated isa Arborist.Individual
-        @test mutated.fitness == Inf  # new individual starts unevaluated
-        @test mutated.age == 0
-        # Original should be unchanged.
-        @test string(ind.expr) == original_str
-    end
-
-    @testset "crossover_individuals produces offspring" begin
-        input_cols = Dict(:x => Float32)
-        output_cols = Dict(:y => Float32)
-        xs = Float32[1.0]
-        input_rows = [Dict{Symbol,Any}(:x => v) for v in xs]
-        output_rows = [Dict{Symbol,Any}(:y => v) for v in xs]
-        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
-                                    time_limit_ns=1_000_000_000)
-
-        rng = Random.MersenneTwister(42)
-        pop = Arborist.Population(rng, fe, 5, 3, 2)
-        a = pop.individuals[1]
-        b = pop.individuals[2]
-
-        (c1, c2) = Arborist.crossover_individuals(pop.state, a, b)
-        @test c1 isa Arborist.Individual
-        @test c2 isa Arborist.Individual
-        @test !isempty(c1.expr)
-        @test !isempty(c2.expr)
-    end
+    # (The legacy Individual / Population / evolve! / evaluate_individual! /
+    # tournament_select / mutate_individual / crossover_individuals tests
+    # were removed in 0.1.0 when the legacy imperative API was retired in
+    # favor of the Problem/Algorithm/Solve path. The canonical API is
+    # covered by test_operators.jl, test_genome.jl, and the integration
+    # tests in test/integration/.)
 
     # =========================================================================
     # _is_valid_call (was broken by field name typo, now fixed)

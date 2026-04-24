@@ -360,6 +360,13 @@ through F.8). All are folded into this single 0.1.0 entry below.
 - Dead `max_depth` field from `GeneticProgramming` (was never read).
 - Adversarial-loop scratch artifacts (after all 8 findings were
   addressed and committed).
+- **Legacy imperative API:** `Individual`, `Population`,
+  `evaluate_individual!`, `evolve!`, and the supporting
+  `tournament_select` / `mutate_individual` / `crossover_individuals`
+  helpers are removed. Callers should use the
+  Problem/Algorithm/Solve path: `solve(::GPProblem, ::GeneticProgramming)`.
+  The corresponding tests in `test/unit/test_coverage_gaps.jl` are
+  removed — the replacement API is covered by the other unit tests.
 - Pre-migration session progress logs (`progress-YYYYMMDD.md`, 20
   files) from the repo tree. Project migrated to refstore session
   notes on 2026-04-22. Logs remain recoverable via git history.

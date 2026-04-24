@@ -290,12 +290,6 @@ export
     FitnessSection,
     ElitesSection,
     GenerationSection,
-    render_enrichment,
-
-    # Legacy API (from evolution.jl)
-    Individual,
-    Population,
-    evaluate_individual!,
-    evolve!
+    render_enrichment
 
 end # module Arborist

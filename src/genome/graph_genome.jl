@@ -143,16 +143,37 @@ end
 
 Dictionary mapping activation `Symbol` names to their unary `Function`
 implementations, used by `GraphEvaluator` when propagating values through a
-`GraphGenome`. The default set is `:sigmoid` (NEAT-style steepened logistic),
-`:tanh`, `:relu`, and `:identity`. New activations can be added by assigning
-into this dict before solving; each `NodeGene` stores the activation as a
-`Symbol` and looks the function up here at evaluation time.
+`GraphGenome`. The built-in set is:
+
+- `:sigmoid`  — NEAT-style steepened logistic `1 / (1 + exp(-4.9·x))`.
+- `:tanh`     — hyperbolic tangent.
+- `:relu`     — rectified linear, `max(0, x)`.
+- `:identity` — `x` (pass-through).
+- `:gauss`    — Gaussian bump `exp(-x²)`. Common in CPPN / HyperNEAT work.
+- `:sin`      — plain `sin(x)`. Substrate or network is expected to supply any
+                frequency scaling.
+- `:abs`      — absolute value `|x|`.
+- `:step`     — Heaviside step, `1.0` for `x > 0`, else `0.0`.
+
+New activations can be added by assigning into this dict before solving; each
+`NodeGene` stores the activation as a `Symbol` and looks the function up here
+at evaluation time.
+
+Note: the NEAT mutation operators (`AddNodeMutation`, `NEATDefaultMutation`)
+only draw from `:sigmoid`, `:tanh`, `:relu` by default when adding a new
+hidden node. To make CPPN activations available to those operators, pass
+`hidden_activations=[:sigmoid, :tanh, :gauss, :sin, :abs]` (or similar) at
+construction.
 """
 const ACTIVATION_FNS = Dict{Symbol, Function}(
     :sigmoid  => x -> 1.0 / (1.0 + exp(-4.9 * x)),
     :tanh     => x -> tanh(x),
     :relu     => x -> max(0.0, x),
     :identity => x -> x,
+    :gauss    => x -> exp(-x * x),
+    :sin      => x -> sin(x),
+    :abs      => x -> abs(x),
+    :step     => x -> x > 0.0 ? 1.0 : 0.0,
 )
 
 # =============================================================================

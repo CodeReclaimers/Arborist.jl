@@ -515,4 +515,47 @@
                                                     allow_recurrent=true,
                                                     relaxation_passes=0)
     end
+
+    @testset "ACTIVATION_FNS CPPN additions" begin
+        fns = Arborist.ACTIVATION_FNS
+        # All eight documented activations must resolve and be callable.
+        for key in (:sigmoid, :tanh, :relu, :identity, :gauss, :sin, :abs, :step)
+            @test haskey(fns, key)
+            @test fns[key] isa Function
+        end
+
+        # Evaluate each CPPN-flavored activation at a grid of inputs and check
+        # the numeric value agrees with the defining formula to 1e-10.
+        xs = (-2.0, -0.5, 0.0, 0.5, 2.0)
+        for x in xs
+            @test fns[:gauss](x) ≈ exp(-x * x)   atol = 1e-10
+            @test fns[:sin](x)   ≈ sin(x)        atol = 1e-10
+            @test fns[:abs](x)   ≈ abs(x)        atol = 1e-10
+            @test fns[:step](x)  ≈ (x > 0.0 ? 1.0 : 0.0)
+        end
+
+        # The step function is discontinuous at 0; confirm the convention
+        # (strictly greater than 0 produces 1, so step(0) == 0).
+        @test fns[:step](0.0) == 0.0
+        @test fns[:step](-1.0e-12) == 0.0
+        @test fns[:step](1.0e-12) == 1.0
+
+        # End-to-end: a NodeGene carrying one of the new activations should
+        # evaluate correctly via the standard GraphEvaluator path. Use a
+        # gauss-activated output node with zero-weight edges so the pre-
+        # activation net is 0 and the output is gauss(0) = 1.0.
+        nodes = Dict(
+            1 => NodeGene(1, :input,  :identity),
+            2 => NodeGene(2, :bias,   :identity),
+            3 => NodeGene(3, :output, :gauss),
+        )
+        conns = Dict(
+            1 => ConnectionGene(1, 3, 0.0, true, 1),
+            2 => ConnectionGene(2, 3, 0.0, true, 2),
+        )
+        g = GraphGenome(nodes, conns, 1, 1, Inf)
+        ev = GraphEvaluator(reshape([0.0], 1, 1), reshape([1.0], 1, 1))
+        # Evaluator returns MSE; gauss(0) = 1, target = 1, MSE = 0.
+        @test evaluate_genome(g, ev) ≈ 0.0  atol = 1e-10
+    end
 end

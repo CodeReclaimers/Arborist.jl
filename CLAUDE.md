@@ -71,7 +71,7 @@ Surveyed gaps that Phase F did not implement, either because of scope caps per p
 - **HyperNEAT / CPPN / ES-HyperNEAT**. Dominant method for scaling neuroevolution past direct-encoded networks. Needs a CPPN genome, a substrate abstraction, and a HyperNEAT-specific evaluator. Significant surface; separate project.
 - **Deep-neuroevolution / policy-gradient hybrids**. Flux.jl integration for gradient-trained weights on evolved topologies. Would pair naturally with F.8's CMA-ES topology freeze.
 - **Age-layered population structure (ALPS)**. Deceptive-landscape diversity via age cohorts. Modest effort; complements F.4's QD approaches.
-- **HyperNEAT-specific activation sets**. `ACTIVATION_FNS` currently has {sigmoid, tanh, relu, identity}; HyperNEAT literature commonly uses gauss, sin, absolute_value, etc.
+- **HyperNEAT-specific activation sets (partial)**. `ACTIVATION_FNS` now has {sigmoid, tanh, relu, identity, gauss, sin, abs, step} — the common CPPN set. `AddNodeMutation` / `NEATDefaultMutation` still default their `hidden_activations` kwarg to just {sigmoid, tanh, relu}, so CPPN activations require an opt-in. Not yet included: softsign, elu, swish, cos (less standard for NEAT but used in some architectures).
 - **GraphGenome network topology plot recipe**. Would need a layout algorithm (spring / layered / hierarchical) — ideally another weakdep extension against GraphPlot.jl / NetworkLayout.jl rather than rolling our own.
 - **Content-aware cross-worker innovation matching for distributed IslandModel**. Currently disjoint-range; content matching would let NEAT crossover align structurally identical mutations across workers.
 

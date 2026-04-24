@@ -1,24 +1,34 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
-title: "Arborist.jl: Generic Genetic Programming for Julia"
+title: "Arborist.jl"
+type: software
 authors:
   - family-names: McIntyre
     given-names: Alan
     email: alan@codereclaimers.com
+    orcid: "https://orcid.org/0000-0002-8071-4219"
     affiliation: "CodeReclaimers LLC"
-repository-code: "https://github.com/CodeReclaimers/Arborist.jl"
-url: "https://github.com/CodeReclaimers/Arborist.jl"
-license: MIT
-type: software
 version: "0.1.0"
 date-released: "2026-04-23"
+url: "https://github.com/CodeReclaimers/Arborist.jl"
+repository-code: "https://github.com/CodeReclaimers/Arborist.jl"
+# Zenodo DOI will be added here once the post-registration DOI is minted.
+# doi: "10.5281/zenodo.XXXXXXX"
+license: MIT
 keywords:
-  - "genetic programming"
-  - "evolutionary computation"
-  - "neuroevolution"
-  - "NEAT"
-  - "symbolic regression"
-  - "julia"
-  - "machine learning"
-# Zenodo DOI will be added once the post-registration DOI is minted.
-# doi: 10.5281/zenodo.XXXXXXX
+  - genetic-programming
+  - evolutionary-algorithms
+  - neuroevolution
+  - NEAT
+  - symbolic-regression
+  - quality-diversity
+  - Julia
+abstract: >-
+  A generic, extensible genetic programming framework for Julia from
+  the maintainer of neat-python. First-class support for NEAT neural
+  topology evolution, LLM-as-operator (FunSearch / AlphaEvolve
+  pattern), symbolic regression, multi-objective optimization
+  (NSGA-II), quality-diversity search (Novelty Search, MAP-Elites),
+  CMA-ES, and closed-loop control-task benchmarks. Follows the
+  Problem/Algorithm/Solve pattern from the SciML ecosystem via a
+  CommonSolve.jl integration.

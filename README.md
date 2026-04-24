@@ -215,15 +215,17 @@ TreeGenome is backed by [DynamicExpressions.jl](https://github.com/MilesCranmer/
 MIT License. See [LICENSE](LICENSE) for details.
 
 ```bibtex
-@software{arborist_jl,
-  author = {McIntyre, Alan},
-  title  = {Arborist.jl: Generic Genetic Programming for Julia},
-  year   = {2026},
-  url    = {https://github.com/CodeReclaimers/Arborist.jl}
+@software{McIntyre_Arborist_jl,
+  author  = {McIntyre, Alan},
+  title   = {{Arborist.jl}},
+  version = {0.1.0},
+  year    = {2026},
+  url     = {https://github.com/CodeReclaimers/Arborist.jl}
 }
 ```
 
 A machine-readable `CITATION.cff` is also tracked at the repo root
 so GitHub's "Cite this repository" button works directly. Once the
-post-registration Zenodo DOI is minted, both the CFF file and the
-BibTeX block above should be updated to include it.
+post-registration Zenodo DOI is minted, both the CFF file (uncomment
+the `doi:` field) and the BibTeX block above (add a `doi` field)
+should be updated to include it.

@@ -35,6 +35,9 @@ include("genome/evolution.jl")
 # --- Default function set ---
 include("defaults.jl")
 
+# --- Protected arithmetic/unary operators for symbolic regression ---
+include("protected_operators.jl")
+
 # --- AST sanitizer ---
 include("sanitizer.jl")
 
@@ -263,10 +266,19 @@ export
     deserialize,
     default_function_set,
     boolean_function_set,
+    default_protected_function_set,
 
     # Boolean operators (available in evolved code)
     gp_nand,
     gp_nor,
+
+    # Protected arithmetic / unary operators for SR
+    pdiv,
+    plog,
+    psqrt,
+    pexp,
+    pinv,
+    PROTECTED_EPS,
 
     # Initialization strategies
     behavioral_initialize,

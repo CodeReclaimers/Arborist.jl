@@ -141,7 +141,7 @@ src/
     expr_genome.jl         # ExprGenome, GPProblem, serialize/deserialize
     ant_genome.jl          # AntGenome -- side-effectful programs
     graph_genome.jl        # GraphGenome + GraphEvaluator + EpisodicEvaluator (control tasks)
-    linear_genome.jl       # placeholder (empty)
+    adf_genome.jl          # ADFGenome -- main tree + N ADF subroutines via macro expansion (Phase F.7)
   operators/
     mutation.jl            # SubtreeMutation, PointMutation, HoistMutation, ExpansionMutation
     crossover.jl           # SubtreeCrossover
@@ -158,6 +158,7 @@ src/
   migration.jl             # MigrantGenome, to_migrant/from_migrant
   distributed_island.jl    # Distributed.jl island model (sync + async)
   llm_operator.jl          # LLMMutationOperator (uses Downloads.jl stdlib)
+  prompt_context.jl        # MutationContext + AbstractPromptSection -- LLM prompt enrichment
   tree_genome.jl           # TreeGenome, TreeFitnessEvaluator, SymbolicRegressionEvaluator, optimize_constants! (Phase F.3)
   constant_optimization.jl # ConstantOptimization config (Phase F.3)
   nsga2.jl                 # NSGAII, ParsimonyEvaluator, NSGAIIResult, non-dominated sorting
@@ -199,7 +200,7 @@ The env var `GENPROG_RUN_BENCHMARKS` is also accepted for backward compatibility
 
 ## Dependencies
 
-Direct dependencies: DynamicExpressions.jl (TreeGenome), Downloads.jl (LLM HTTP, stdlib), Distributed.jl (island model, stdlib), Random.jl (stdlib), Serialization.jl (checkpointing, stdlib), LinearAlgebra.jl (CMA-ES, stdlib).
+Direct dependencies: CommonSolve.jl (solve verb), DynamicExpressions.jl (TreeGenome), Downloads.jl (LLM HTTP, stdlib), Distributed.jl (island model, stdlib), Random.jl (stdlib), Serialization.jl (checkpointing, stdlib), LinearAlgebra.jl (CMA-ES, stdlib).
 
 Weak dependencies (extensions): RecipesBase.jl (`ext/ArboristRecipesBaseExt.jl` for plotting). Loaded automatically when both Arborist and any RecipesBase consumer (Plots.jl, Makie, etc.) are imported.
 

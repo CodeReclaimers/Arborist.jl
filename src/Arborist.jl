@@ -18,6 +18,7 @@ result    = solve(problem, algorithm; verbose=true)
 module Arborist
 
 using Random
+import CommonSolve: solve
 
 # --- Abstract type hierarchy ---
 include("abstractions.jl")

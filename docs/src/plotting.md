@@ -6,17 +6,30 @@ the main result types. The extension loads automatically when both
 Arborist and any RecipesBase consumer (Plots.jl, Makie, etc.) are
 imported — no explicit opt-in required.
 
-```julia
+```@example plotting-using
 using Plots
 using Arborist
+nothing # hide
 ```
 
 Zero runtime cost when Plots is not loaded.
 
+The plots on this page are rendered at documentation build time, so
+they reflect the actual recipe output for the indicated runs. The
+runs are deliberately small (low pop / few generations) to keep
+build time modest; in practice you would supply full-strength
+settings for the trajectories to be smooth.
+
 ## Fitness trajectory: `plot(::GPResult)`
 
-```julia
-result = solve(problem, algorithm)
+```@example plotting-gp
+using Plots
+using Arborist, DynamicExpressions
+
+evaluator = SymbolicRegressionEvaluator(x -> x^2 + x,
+    domain=(-1f0, 1f0), points=20)
+result = solve(GPProblem(evaluator, TreeGenome{Float32}; seed=42),
+               GeneticProgramming(pop_size=60, generations=80))
 plot(result)
 ```
 
@@ -28,8 +41,15 @@ come from `result.fitness_history` and `result.mean_history`.
 
 For two-objective problems:
 
-```julia
-result = solve(problem, NSGAII(pop_size=200, generations=100))
+```@example plotting-nsga
+using Plots
+using Arborist, DynamicExpressions
+
+inner = SymbolicRegressionEvaluator(x -> x^2 + x,
+    domain=(-2f0, 2f0), points=30)
+evaluator = ParsimonyEvaluator(inner)
+result = solve(GPProblem(evaluator, TreeGenome{Float32}; seed=42),
+               NSGAII(pop_size=120, generations=60))
 plot(result)
 ```
 
@@ -39,8 +59,8 @@ falls back to a parallel-coordinates style view.
 
 ## Hypervolume trajectory: `plothypervolumetrajectory`
 
-```julia
-plothypervolumetrajectory(result)   # result::NSGAIIResult
+```@example plotting-nsga
+plothypervolumetrajectory(result)
 ```
 
 Per-generation hypervolume from `result.hypervolume_history` (2D
@@ -49,9 +69,17 @@ plot is flat).
 
 ## Structured run log: `plot(::RunLog)`
 
-```julia
+```@example plotting-runlog
+using Plots
+using Arborist, DynamicExpressions
+
+evaluator = SymbolicRegressionEvaluator(x -> x^2 + x,
+    domain=(-1f0, 1f0), points=20)
+problem   = GPProblem(evaluator, TreeGenome{Float32}; seed=42)
+algorithm = GeneticProgramming(pop_size=60, generations=80)
+
 log = RunLog()
-solve(problem, algorithm; log=log)
+solve(problem, algorithm; log = log)
 plot(log)
 ```
 
@@ -61,12 +89,39 @@ structure count (a hash-based diversity proxy).
 
 ## MAP-Elites archive: `plot(::MAPElitesResult)` and `plotarchive`
 
-```julia
-result = solve(problem, MAPElites(bins=(10,10), generations=100))
+```@example plotting-mapelites
+using Plots
+using Arborist, DynamicExpressions
+
+ops = OperatorEnum(binary_operators=[+, -, *], unary_operators=[])
+xs = collect(Float32, -1.0:0.1:1.0)
+X = reshape(xs, 1, :)
+y = xs .* xs                                 # target: y = x^2
+
+evaluator = TreeFitnessEvaluator(X, y, ops)
+problem   = GPProblem(evaluator, TreeGenome{Float32}; seed=42)
+
+# Feature grid: (tree size, tree depth)
+fp_fn = g -> (Float64(complexity(g)), Float64(tree_depth(g)))
+algorithm = MAPElites(
+    feature_fn     = fp_fn,
+    feature_bounds = [(1.0, 15.0), (0.0, 6.0)],
+    n_bins         = [5, 4],
+    mutation_ops   = [SubtreeMutation(), PointMutation()],
+    crossover_ops  = [SubtreeCrossover()],
+    generations    = 30,
+    batch_size     = 25,
+    n_init         = 40,
+    crossover_rate = 0.4,
+    parallel       = false,
+)
+result = solve(problem, algorithm)
 
 # Coverage + QD-score history as two subplots:
 plot(result)
+```
 
+```@example plotting-mapelites
 # The final archive state (bin fitness as a heatmap):
 plotarchive(result.archive)
 ```

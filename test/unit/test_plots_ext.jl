@@ -8,8 +8,12 @@ using RecipesBase
     # extension is reachable.
     ext = Base.get_extension(Arborist, :ArboristRecipesBaseExt)
     @test ext !== nothing
-    @test isdefined(ext, :HyperVolumeTrajectory)
+    @test isdefined(ext, :PlotHyperVolumeTrajectory)
     @test isdefined(ext, :PlotArchive)
+    # Forward-declared user-facing functions in Arborist must have methods
+    # registered by the extension after Plots loads.
+    @test !isempty(methods(plothypervolumetrajectory))
+    @test !isempty(methods(plotarchive))
 
     # Verify @recipe registrations exist by checking RecipesBase's recipe table
     # contains our types. RecipesBase doesn't expose a public list directly,

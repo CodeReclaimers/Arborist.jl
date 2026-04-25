@@ -4,34 +4,37 @@
 
 The standard GP algorithm with tournament selection, elitism, and configurable genetic operators.
 
-```julia
+```@example algo-gp
+using Arborist
 algorithm = GeneticProgramming(
-    pop_size = 100,        # population size
-    generations = 200,     # number of generations
-    mutation_rate = 0.3,   # probability of mutation per offspring
-    crossover_rate = 0.3,  # probability of crossover per pair
-    elitism = 2,           # top individuals carried forward
-    tournament_size = 3,   # tournament selection size
-    bloat_penalty = 0.0,   # coefficient on complexity(g)
-    parallel = true,       # threaded evaluation
-    speciation = NoSpeciation(),
-    mutation_ops = [SubtreeMutation(), PointMutation()],
-    crossover_ops = [SubtreeCrossover()],
-    selection = TournamentSelection(3),
+    pop_size       = 100,        # population size
+    generations    = 200,        # number of generations
+    mutation_rate  = 0.3,        # probability of mutation per offspring
+    crossover_rate = 0.3,        # probability of crossover per pair
+    elitism        = 2,          # top individuals carried forward
+    bloat_penalty  = 0.0,        # coefficient on complexity(g)
+    parallel       = true,       # threaded evaluation
+    speciation     = NoSpeciation(),
+    mutation_ops   = [SubtreeMutation(), PointMutation()],
+    crossover_ops  = [SubtreeCrossover()],
+    selection      = TournamentSelection(3),  # tournament size set here
 )
+nothing # hide
 ```
 
 ## IslandModel
 
 Multiple independent populations with periodic ring-topology migration.
 
-```julia
+```@example algo-island
+using Arborist
 algorithm = IslandModel(
     n_islands = 4,
     island_algorithm = GeneticProgramming(pop_size=50, generations=100),
     migration_interval = 10,  # generations between migrations
     migration_size = 2,       # individuals migrated per event
 )
+nothing # hide
 ```
 
 !!! note "Genome support in 0.1.0"
@@ -59,7 +62,7 @@ Multi-objective GP using non-dominated sorting and crowding distance with
 any single-objective `AbstractEvaluator` into the standard
 `(fitness, complexity)` two-objective problem.
 
-```julia
+```@example algo-nsga2
 using Arborist, DynamicExpressions
 
 inner = SymbolicRegressionEvaluator(
@@ -78,6 +81,7 @@ algorithm = NSGAII(
 )
 
 result = solve(GPProblem(evaluator, TreeGenome{Float32}; seed=42), algorithm)
+println("Pareto front size: ", length(result.pareto_front))
 ```
 
 `solve(::GPProblem, ::NSGAII)` returns an `NSGAIIResult` with these fields:
@@ -110,13 +114,15 @@ a `GraphGenome` whose connections you want to tune after a NEAT
 search has discovered the structure. The algorithm itself does not
 mutate topology; pair it with a topology search if both are needed.
 
-```julia
+```@example algo-cmaes
+using Arborist
 algorithm = CMAES(
     generations = 200,
     pop_size    = 0,       # 0 → auto λ = 4 + ⌊3·ln(n)⌋ (Hansen 2016 default)
     sigma0      = 0.5,     # initial step size
     seed_genome = true,    # start the mean from the problem's initial genome
 )
+nothing # hide
 ```
 
 The genome must opt in by implementing `flatten_weights(g) ->
@@ -197,7 +203,8 @@ and use `NSGAII` with both signals.
 that runs a periodic BFGS pass over the numeric constants of the top-K
 genomes:
 
-```julia
+```@example algo-constopt
+using Arborist
 algorithm = GeneticProgramming(
     pop_size = 100,
     generations = 200,
@@ -209,6 +216,7 @@ algorithm = GeneticProgramming(
         fd_step   = 1e-3,  # central finite-difference gradient step
     ),
 )
+nothing # hide
 ```
 
 Currently implemented for `TreeGenome` symbolic regression. The pass
@@ -242,13 +250,18 @@ the run. Pass `hall_of_fame_size = K` to attach a top-K archive of the
 distinct best fitnesses seen across *all* generations, surviving elitism
 loss:
 
-```julia
-result = solve(problem, algorithm; hall_of_fame_size = 20)
+```@example algo-hof
+using Arborist, DynamicExpressions
+evaluator = SymbolicRegressionEvaluator(x -> x^2 + x, domain=(-1f0, 1f0), points=15)
+problem   = GPProblem(evaluator, TreeGenome{Float32}; seed=42)
+algorithm = GeneticProgramming(pop_size=40, generations=20)
 
-result.hall_of_fame   # HallOfFame{G} — best-first, length ≤ 20
-for (i, g) in enumerate(result.hall_of_fame)
-    println("[$i] fitness=", result.hall_of_fame.fitnesses[i],
-            "  genome=", g)
+result = solve(problem, algorithm; hall_of_fame_size = 5)
+
+println("HoF size: ", length(result.hall_of_fame), " / capacity ",
+        result.hall_of_fame.capacity)
+for i in 1:min(3, length(result.hall_of_fame))
+    println("[$i] fitness=", result.hall_of_fame.fitnesses[i])
 end
 ```
 
@@ -289,14 +302,22 @@ check. `IslandModel`, `NSGAII`, `MAPElites`, `AntGenome`, and
 For research-grade reproducibility every single-objective `solve` path
 accepts an optional `RunLog`:
 
-```julia
+```@example algo-runlog
+using Arborist, DynamicExpressions
+evaluator = SymbolicRegressionEvaluator(x -> x^2 + x, domain=(-1f0, 1f0), points=15)
+problem   = GPProblem(evaluator, TreeGenome{Float32}; seed=42)
+algorithm = GeneticProgramming(pop_size=40, generations=10)
+
 log = RunLog()
 result = solve(problem, algorithm; log = log)
 
-# log.entries :: Vector{GenerationLog}
-# Each entry carries best/mean/median/worst fitness, species count and
-# sizes, unique-structure hash diversity, per-operator attempt and
-# success tallies, and wall time for that generation.
+# log.entries :: Vector{GenerationLog} — one entry per generation
+e = entries(log)[end]
+println("generations recorded: ", length(entries(log)))
+println("last gen best/mean/worst: ",
+        round(e.best_fitness; sigdigits=3), " / ",
+        round(e.mean_fitness; sigdigits=3), " / ",
+        round(e.worst_fitness; sigdigits=3))
 ```
 
 The Plots.jl recipe renders three stacked subplots — fitness

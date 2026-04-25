@@ -10,13 +10,15 @@ All individuals belong to a single species. This is the default. Use when fast c
 
 NEAT-style speciation using the genome's `distance()` function. Individuals are assigned to the first species whose representative has `distance(g1, g2) <= threshold`.
 
-```julia
+```@example speciation-threshold
+using Arborist
 speciation = ThresholdSpeciation(
     threshold = 10.0,          # compatibility distance cutoff
     min_species_size = 2,      # minimum size to avoid culling
     stagnation_limit = 15,     # generations without improvement before culling
     sharing_formula = :log2,   # fitness sharing strength
 )
+nothing # hide
 ```
 
 Best suited for NEAT-style topology evolution (GraphGenome) where structural innovation needs protection. For ExprGenome, syntactic distances tend to be large even for small changes, which can create too many species.
@@ -25,15 +27,23 @@ Best suited for NEAT-style topology evolution (GraphGenome) where structural inn
 
 Speciation based on what programs *do*, not how they're structured. Two programs are in the same species if they make similar decisions on a fixed set of probe inputs, regardless of AST structure.
 
-```julia
+```@example speciation-behavioral
+using Arborist
+# Toy fingerprint + distance for illustration. In practice
+# `fingerprint_fn` would call `evaluate_genome(g, probe_evaluator)`
+# or run the genome on a small held-out probe set.
+fingerprint_fn = g -> [Float64(complexity(g)), Float64(tree_depth(g))]
+distance_fn    = (a, b) -> sum(abs.(a .- b))
+
 speciation = BehavioralSpeciation(
-    fingerprint_fn = g -> compute_fingerprint(g, probe),  # genome -> fingerprint
-    distance_fn = hamming_distance,                        # (fp, fp) -> Float64
-    threshold = 0.15,          # behavioral distance cutoff
+    fingerprint_fn = fingerprint_fn,
+    distance_fn    = distance_fn,
+    threshold        = 0.15,   # behavioral distance cutoff
     min_species_size = 2,
     stagnation_limit = 15,
-    sharing_formula = :sqrt,   # fitness sharing strength
+    sharing_formula  = :sqrt,  # fitness sharing strength
 )
+nothing # hide
 ```
 
 The user provides two functions:

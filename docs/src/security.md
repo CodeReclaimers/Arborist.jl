@@ -19,10 +19,11 @@ endpoint with ExprGenome or AntGenome.
 `ASTSanitizer` provides defense-in-depth by checking every function call
 in an expression tree against a whitelist of safe operations:
 
-```julia
-san = ASTSanitizer()   # default: math + logic only
-sanitize(san, :(y = sin(x) + 1.0))   # true — safe
-sanitize(san, :(run(`rm -rf /`)))     # false — blocked
+```@example security-sanitize
+using Arborist
+san = ASTSanitizer()                                  # default: math + logic only
+println("safe:    ", sanitize(san, :(y = sin(x) + 1.0)))  # true
+println("blocked: ", sanitize(san, :(run(`rm -rf /`))))   # false
 ```
 
 **What the sanitizer protects against:**

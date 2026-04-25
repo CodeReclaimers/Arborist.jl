@@ -34,14 +34,15 @@ The Koza symbolic regression suite is a canonical example of the first.
 DynamicExpressions.jl is a hard dependency of Arborist, so no extension dance
 is needed — just `using` both packages:
 
-```julia
+```@example treegenome-using
 using Arborist
 using DynamicExpressions
+nothing # hide
 ```
 
 ## Quick-Start Example
 
-```julia
+```@example treegenome-quick
 using Arborist, DynamicExpressions
 
 # Define operators
@@ -62,12 +63,12 @@ problem = GPProblem(evaluator, TreeGenome{Float32}; seed=42)
 # Run GP
 algorithm = GeneticProgramming(
     pop_size = 100,
-    generations = 200,
+    generations = 100,
     mutation_rate = 0.4,
     crossover_rate = 0.2,
 )
 
-result = solve(problem, algorithm; verbose=true)
+result = solve(problem, algorithm)
 println("Best fitness: ", result.best_fitness)
 println("Best tree: ", serialize(result.best_genome))
 ```
@@ -96,21 +97,25 @@ global state is mutated.
 `erc_uniform(lo, hi)` is the canonical helper, returning a sampler that draws
 uniformly from `[lo, hi]` (Koza-style ERCs):
 
-```julia
+```@example treegenome-erc
+using Arborist
 algorithm = GeneticProgramming(
     pop_size       = 100,
     generations    = 200,
     constant_sampler = erc_uniform(-5.0f0, 5.0f0),
 )
+nothing # hide
 ```
 
 For other distributions, write a closure directly:
 
-```julia
+```@example treegenome-erc-loguniform
+using Arborist
 # Log-uniform over [0.1, 10.0] for problems where constants span orders of magnitude
 algorithm = GeneticProgramming(;
     constant_sampler = rng -> Float32(exp(log(0.1) + log(100.0) * rand(rng))),
 )
+nothing # hide
 ```
 
 `constant_sampler === nothing` (default) preserves the historical

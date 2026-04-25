@@ -91,11 +91,24 @@ renders left-to-right with distinct node shapes by role
 (input / output / bias / hidden) and edges labeled by connection
 weight, with disabled connections drawn dashed:
 
-```julia
-open("genome.dot", "w") do io
-    print(io, to_dot(genome))
+```@example genome-todot
+using Arborist, DynamicExpressions
+# Run a tiny SR problem so we have a real TreeGenome to render.
+evaluator = SymbolicRegressionEvaluator(x -> x^2 + x,
+    domain=(-1f0, 1f0), points=10)
+result = solve(GPProblem(evaluator, TreeGenome{Float32}; seed=1),
+               GeneticProgramming(pop_size=20, generations=10))
+genome = result.best_genome
+
+mktempdir() do dir
+    path = joinpath(dir, "genome.dot")
+    open(path, "w") do io
+        print(io, to_dot(genome))
+    end
+    println("Wrote ", filesize(path), "-byte DOT document.")
 end
-run(`dot -Tsvg genome.dot -o genome.svg`)
+# In production:
+#   run(`dot -Tsvg genome.dot -o genome.svg`)
 ```
 
 The `dot` binary itself is *not* a runtime dependency of Arborist —

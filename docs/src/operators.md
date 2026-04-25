@@ -53,13 +53,15 @@ full set — they default `hidden_activations` to `[:sigmoid, :tanh,
 :relu]`. To enable the CPPN activations during structural search,
 construct the operator explicitly:
 
-```julia
+```@example operators-cppn
+using Arborist
 mutation_ops = AbstractMutationOperator[
     NEATDefaultMutation(;
         hidden_activations = [:sigmoid, :tanh, :gauss, :sin, :abs],
     ),
 ]
 crossover_ops = AbstractCrossoverOperator[NEATCrossover()]
+nothing # hide
 ```
 
 `neat_defaults()` itself takes no arguments and returns the standard
@@ -90,9 +92,11 @@ Every mutation operator on tree-shaped genomes (`SubtreeMutation`,
 `SubtreeCrossover` operator accept optional `max_depth` and `max_size`
 keyword arguments:
 
-```julia
+```@example operators-caps
+using Arborist
 SubtreeMutation(; max_depth=8, max_size=64)
 SubtreeCrossover(; max_depth=12)
+nothing # hide
 ```
 
 When set, the operator measures the resulting child's depth via
@@ -110,7 +114,8 @@ directly to inspect a genome's structure.
 
 ### Example: mixing mutation operators
 
-```julia
+```@example operators-mix
+using Arborist
 algorithm = GeneticProgramming(
     pop_size      = 100,
     generations   = 200,
@@ -121,6 +126,7 @@ algorithm = GeneticProgramming(
         HoistMutation(),         # adds bloat-reduction pressure
     ],
 )
+nothing # hide
 ```
 
 ## Crossover Operators
@@ -161,12 +167,14 @@ algorithm = GeneticProgramming(
 
 ### Example: epsilon-lexicase selection
 
-```julia
+```@example operators-lexicase
+using Arborist
 algorithm = GeneticProgramming(
     pop_size    = 200,
     generations = 100,
     selection   = EpsilonLexicaseSelection(),
 )
+nothing # hide
 ```
 
 The solve loop detects `needs_cases(selection)` and materializes the

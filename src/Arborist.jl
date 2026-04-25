@@ -121,6 +121,17 @@ include("dot_export.jl")
 # --- Cross-cutting utilities (train/test split, summary stats, multi-seed) ---
 include("utilities.jl")
 
+# --- Forward declarations for plot helpers defined in
+#     ext/ArboristRecipesBaseExt.jl. Declaring stubs here lets the extension
+#     add methods to the same function objects, so user code that does
+#     `using Arborist, Plots; plothypervolumetrajectory(result)` finds the
+#     names in the Arborist namespace rather than the (private) extension
+#     module.
+function plothypervolumetrajectory end
+function plothypervolumetrajectory! end
+function plotarchive end
+function plotarchive! end
+
 # --- Canonical benchmark problem generators (Arborist.Benchmarks submodule) ---
 include("benchmarks/Benchmarks.jl")
 
@@ -309,6 +320,12 @@ export
     train_test_split,
     summarize,
     run_multi_seed,
+
+    # Plot helpers (methods added by ext/ArboristRecipesBaseExt.jl when Plots is loaded)
+    plothypervolumetrajectory,
+    plothypervolumetrajectory!,
+    plotarchive,
+    plotarchive!,
 
     # Initialization strategies
     behavioral_initialize,

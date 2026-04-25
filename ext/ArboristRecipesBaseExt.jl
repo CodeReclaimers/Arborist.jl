@@ -10,6 +10,8 @@ module ArboristRecipesBaseExt
 using RecipesBase
 using Arborist: GPResult, NSGAIIResult, RunLog, MAPElitesResult,
                 MAPElitesArchive, GenerationLog, entries, coverage, qd_score
+import Arborist: plothypervolumetrajectory, plothypervolumetrajectory!,
+                 plotarchive, plotarchive!
 
 # ---------------------------------------------------------------------------
 # Single-objective fitness trajectory.
@@ -45,8 +47,9 @@ end
 # ---------------------------------------------------------------------------
 
 @recipe function f(r::NSGAIIResult)
-    front_idx = findall(==(1), r.ranks)
-    front_fits = r.fitnesses[front_idx]
+    front_fits = r.pareto_fitnesses
+    isempty(front_fits) && error(
+        "NSGAIIResult has empty pareto_fitnesses; nothing to plot.")
     n_obj = length(first(front_fits))
 
     if n_obj == 2
@@ -74,7 +77,7 @@ end
     else
         error("NSGAIIResult plotting only supports 2 or 3 objectives directly. " *
               "For higher dimensions, use parallel-coordinates manually with " *
-              "`r.fitnesses[r.ranks .== 1]`.")
+              "`r.pareto_fitnesses`.")
     end
 end
 
@@ -84,13 +87,21 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    plot_hypervolume(r::NSGAIIResult; kwargs...)
+    plothypervolumetrajectory(r::NSGAIIResult; kwargs...)
 
-Plot the hypervolume trajectory across generations. Pass through to
-RecipesBase via a thin recipe; activates only when RecipesBase is loaded.
+Plot the hypervolume trajectory across generations. Activates only when
+RecipesBase is loaded; the function itself is forward-declared in
+`Arborist` so user code that does `using Arborist, Plots` resolves the
+name in the `Arborist` namespace.
 """
-@userplot HyperVolumeTrajectory
-@recipe function f(h::HyperVolumeTrajectory)
+mutable struct PlotHyperVolumeTrajectory
+    args::Tuple
+end
+plothypervolumetrajectory(args...; kw...) =
+    RecipesBase.plot(PlotHyperVolumeTrajectory(args); kw...)
+plothypervolumetrajectory!(args...; kw...) =
+    RecipesBase.plot!(PlotHyperVolumeTrajectory(args); kw...)
+@recipe function f(h::PlotHyperVolumeTrajectory)
     r = h.args[1]::NSGAIIResult
     title  --> "NSGA-II hypervolume convergence"
     xlabel --> "Generation"
@@ -168,12 +179,18 @@ end
 end
 
 """
-    plot_archive(archive::MAPElitesArchive; kwargs...)
+    plotarchive(archive::MAPElitesArchive; kwargs...)
 
 Plot a 2D MAP-Elites archive as a heatmap of best-cell fitness. For 1D
 archives, plots a bar chart. Higher-dimensional archives raise.
+Activates only when RecipesBase is loaded; the function itself is
+forward-declared in `Arborist`.
 """
-@userplot PlotArchive
+mutable struct PlotArchive
+    args::Tuple
+end
+plotarchive(args...; kw...) = RecipesBase.plot(PlotArchive(args); kw...)
+plotarchive!(args...; kw...) = RecipesBase.plot!(PlotArchive(args); kw...)
 @recipe function f(p::PlotArchive)
     archive = p.args[1]::MAPElitesArchive
     n_dims = archive.n_dims

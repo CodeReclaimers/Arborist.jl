@@ -271,6 +271,43 @@ through F.8). All are folded into this single 0.1.0 entry below.
   walker instead of string-based substitution. Prefix-notation and
   unary-op round-trips now succeed.
 
+#### Visualization, inspection, and bloat control
+- **Graphviz DOT export.** `to_dot(g)` and `to_dot(io, g)` produce a
+  self-contained DOT document for every genome type — `TreeGenome`,
+  `ExprGenome`, `ADFGenome`, `AntGenome`, and `GraphGenome`. The `dot`
+  binary is *not* a runtime dependency; `to_dot` only emits the source
+  document. Tree-shaped genomes render as a top-down DAG; `GraphGenome`
+  renders left-to-right with role-distinguished node shapes and
+  weight-labeled edges (disabled connections drawn dashed).
+- **`Base.show` methods** for `GPResult`, `NSGAIIResult`,
+  `MAPElitesResult`, `RunLog`, `Checkpoint`, `HallOfFame`, and every
+  concrete genome — so the REPL no longer dumps internal field structure
+  for the most common return types.
+- **`tree_depth(g) -> Int`** generic exported alongside `complexity(g)`.
+  Implemented for `TreeGenome`, `ExprGenome`, `AntGenome`, and
+  `ADFGenome`; reports the longest root-to-leaf path.
+- **Per-operator `max_depth` / `max_size` caps.** `SubtreeMutation`,
+  `PointMutation`, `HoistMutation`, `ExpansionMutation`, and
+  `SubtreeCrossover` now accept `max_depth` and `max_size` keyword
+  arguments. When set, the operator returns the parent unchanged
+  rather than producing an offspring that exceeds the caps. Both
+  default to `nothing` (no cap). These supersede the dead struct-level
+  `GeneticProgramming.max_depth` field that was removed during cleanup
+  (see *Removed* below) — the new caps are per-operator, so different
+  operators in the same `mutation_ops` vector can carry different
+  limits.
+- **`default_protected_function_set()`** plus the corresponding Koza
+  protected primitives `pdiv`, `plog`, `psqrt`, `pexp`, `pinv` (and the
+  shared `PROTECTED_EPS` constant). The set is the standard SR
+  starting point and is what the Phase E benchmarks (Nguyen, Keijzer)
+  evolve against.
+- **Extended `ACTIVATION_FNS`** with the canonical CPPN / HyperNEAT
+  activation set — `gauss`, `sin`, `abs`, `step` — joining the existing
+  `sigmoid`, `tanh`, `relu`, `identity`. `AddNodeMutation` /
+  `NEATDefaultMutation` still default `hidden_activations` to
+  `{sigmoid, tanh, relu}`, so the new activations are opt-in via the
+  keyword argument.
+
 ### Changed
 - **`TreeGenome` is now part of the core module** rather than a package
   extension. DynamicExpressions.jl is a hard dep of Arborist; users no
@@ -334,9 +371,10 @@ through F.8). All are folded into this single 0.1.0 entry below.
   `GraphEvaluator` (which requires `Matrix{Float64}`) and was missing
   `reset_innovation_counter!()`.
 - **Original README LLM example**: used `TreeGenome{Float32}` with
-  `LLMMutationOperator`, but the operator only dispatches on
-  `ExprGenome`. Anyone copy-pasting the example would have hit a
-  `MethodError`.
+  `LLMMutationOperator`, but the operator did not (and still does
+  not) dispatch on `TreeGenome`. Anyone copy-pasting the example
+  would have hit a `MethodError`. The corrected example uses
+  `ExprGenome`.
 - **LLM operator JSON extraction**: `\uXXXX` unicode escapes in the
   response text are now decoded correctly before being handed to the
   deserializer.
@@ -358,6 +396,10 @@ through F.8). All are folded into this single 0.1.0 entry below.
 
 ### Removed
 - Dead `max_depth` field from `GeneticProgramming` (was never read).
+  The replacement is per-operator `max_depth` / `max_size` keyword
+  arguments on `SubtreeMutation`, `PointMutation`, `HoistMutation`,
+  `ExpansionMutation`, and `SubtreeCrossover` (see
+  *Visualization, inspection, and bloat control* above).
 - Adversarial-loop scratch artifacts (after all 8 findings were
   addressed and committed).
 - **Legacy imperative API:** `Individual`, `Population`,

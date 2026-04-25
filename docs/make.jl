@@ -1,5 +1,16 @@
 using Documenter, Arborist
 
+# Sync the top-level CHANGELOG.md into docs/src/changelog.md before each build
+# so the rendered documentation site carries the same content as the GitHub
+# changelog. The `docs/src/changelog.md` file itself is intentionally a
+# generated artifact.
+let src = joinpath(@__DIR__, "..", "CHANGELOG.md"),
+    dst = joinpath(@__DIR__, "src", "changelog.md")
+    if isfile(src)
+        cp(src, dst; force=true)
+    end
+end
+
 makedocs(
     sitename = "Arborist.jl",
     authors  = "CodeReclaimers LLC",

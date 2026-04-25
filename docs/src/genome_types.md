@@ -34,10 +34,11 @@ is a `Vector{Expr}` of typed assignment statements, compiled via
 `@eval` into callable functions. Supports loops, conditionals, and
 mutable state. Use this for general program synthesis.
 
-The `LLMMutationOperator` currently dispatches on `ExprGenome` only —
+The `LLMMutationOperator` dispatches on `ExprGenome` and `GraphGenome`;
 see the [LLM-Enhanced GP tutorial](tutorials/llm_binpacking.md) and
 [`examples/bin_packing.jl`](https://github.com/CodeReclaimers/Arborist.jl/blob/master/examples/bin_packing.jl)
-for a worked heuristic-discovery example.
+for a worked `ExprGenome` heuristic-discovery example, and the
+[LLM Operator page](llm_operator.md) for the `GraphGenome` path.
 
 ## AntGenome
 
@@ -72,6 +73,35 @@ binary primitives. Useful when the target has reusable structure —
 the evolved program size can stay small even as the expressive
 complexity grows. ADF-from-ADF calls are disallowed to prevent
 infinite expansion.
+
+## Inspecting Genome Structure
+
+Every genome supports `complexity(g)` (total node count) for bloat
+tracking. Tree-shaped genomes (`TreeGenome`, `ExprGenome`, `AntGenome`,
+`ADFGenome`) additionally implement `tree_depth(g)` — the longest
+root-to-leaf path. Both are exported and used by mutation / crossover
+operators that enforce `max_depth` / `max_size` caps; see
+[Operators](operators.md#per-operator-depth-and-size-caps).
+
+For visualization, `to_dot(g)` produces a Graphviz DOT document for
+every concrete genome — `TreeGenome`, `ExprGenome`, `ADFGenome`,
+`AntGenome`, and `GraphGenome`. Tree-shaped genomes render as a
+top-down DAG of operator / constant / variable nodes; `GraphGenome`
+renders left-to-right with distinct node shapes by role
+(input / output / bias / hidden) and edges labeled by connection
+weight, with disabled connections drawn dashed:
+
+```julia
+open("genome.dot", "w") do io
+    print(io, to_dot(genome))
+end
+run(`dot -Tsvg genome.dot -o genome.svg`)
+```
+
+The `dot` binary itself is *not* a runtime dependency of Arborist —
+`to_dot` produces the source document only and the user invokes
+Graphviz separately. The two-argument form `to_dot(io, g)` streams
+directly to an `IO` target.
 
 ## Known Limitations
 

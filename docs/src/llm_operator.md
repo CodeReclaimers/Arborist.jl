@@ -58,7 +58,23 @@ evolutionary loop samples from them uniformly.
 
 `LLMMutationOperator` is exported directly from `Arborist`. It uses
 `Downloads.jl` (a Julia stdlib) for HTTP, so no extra HTTP package is required.
-The operator currently dispatches on `ExprGenome` only.
+
+The operator dispatches on both `ExprGenome` and `GraphGenome`. The
+`ExprGenome` path serializes a Julia source string, prompts the LLM for a
+modified variant, and parses the response with
+`deserialize(ExprGenome, response, state)`. The `GraphGenome` path
+serializes the node-and-connection text format and parses the response
+with `deserialize(GraphGenome, response, n_inputs, n_outputs;
+reassign_innovations=true)` so LLM-generated innovation IDs never
+collide with the parent pool's innovation history (content-aware
+alignment across LLM-evolved genomes is a later phase).
+
+When the operator is paired with `GraphGenome`, override `fallback_op`
+with a NEAT-compatible operator — typically `NEATDefaultMutation()`. The
+default `fallback_op = SubtreeMutation()` only dispatches on `ExprGenome`
+and will itself raise `MethodError` on a fallback path. `TreeGenome`,
+`AntGenome`, and `ADFGenome` are not yet supported by
+`LLMMutationOperator`.
 
 ### With Anthropic API
 

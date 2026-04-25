@@ -57,18 +57,24 @@ picks are separate draws.
 
 ## Genome support
 
-`LLMMutationOperator` currently dispatches on **`ExprGenome`** only.
-It serializes the AST to Julia source, prompts the LLM for a
-semantically meaningful variation, and re-parses the response with
-type-checking. See
+`LLMMutationOperator` dispatches on `ExprGenome` and `GraphGenome`. The
+`ExprGenome` path serializes the AST to Julia source, prompts the LLM
+for a semantically meaningful variation, and re-parses the response
+with type-checking. See
 [`examples/bin_packing.jl`](https://github.com/CodeReclaimers/Arborist.jl/blob/master/examples/bin_packing.jl)
 for a full end-to-end bin-packing run that exercises this path with a
 custom function set and evaluator.
 
-`TreeGenome`, `GraphGenome` (via F.2), and `AntGenome` paths are
-either implemented (Graph via `mutate(::LLMMutationOperator,
-::GraphGenome, rng)` in Phase F.2) or planned; see the Deferred
-Research Roadmap in `CLAUDE.md` for current status.
+The `GraphGenome` path serializes the node-and-connection text format
+and parses the response with `deserialize(GraphGenome, ...;
+reassign_innovations=true)` so LLM-generated innovation IDs cannot
+collide with the parent pool's innovation history. When pairing
+`LLMMutationOperator` with `GraphGenome`, override `fallback_op` with
+a NEAT-compatible operator (typically `NEATDefaultMutation()`) — the
+default `SubtreeMutation()` fallback dispatches on `ExprGenome` only.
+
+`TreeGenome`, `AntGenome`, and `ADFGenome` paths are not yet wired;
+see the Deferred Research Roadmap in `CLAUDE.md` for current status.
 
 ## Prompt enrichment (optional)
 

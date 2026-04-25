@@ -92,9 +92,13 @@ end
 ### LLM-Enhanced GP
 
 `LLMMutationOperator` plugs into the regular `mutation_ops` vector as a peer of
-`SubtreeMutation`/`PointMutation`. It currently dispatches on `ExprGenome` only
-(serialize → prompt → deserialize → type-check, with silent fallback to a
-classical operator on any failure):
+`SubtreeMutation`/`PointMutation`. It dispatches on `ExprGenome` and
+`GraphGenome` (serialize → prompt → deserialize → type-check or
+innovation-renumber, with silent fallback to a classical operator on any
+failure). When pairing the operator with `GraphGenome`, override
+`fallback_op` with a NEAT-compatible operator such as
+`NEATDefaultMutation()`, since the default `SubtreeMutation()` fallback only
+dispatches on `ExprGenome`:
 
 ```julia
 using Arborist

@@ -3,7 +3,7 @@
 All notable changes to Arborist.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.1.0] — 2026-04-23
+## [0.1.0] — 2026-04-24
 
 Initial public release. The scope expanded between the original
 pre-registration readiness cut (2026-04-06) and the final registration
@@ -116,6 +116,12 @@ through F.8). All are folded into this single 0.1.0 entry below.
 - `SubtreeMutation`, `PointMutation`, `HoistMutation`, `ExpansionMutation`
 - `SubtreeCrossover`
 - `TournamentSelection`
+- `FitnessProportionateSelection` — classical roulette-wheel selection
+  adapted to the lower-is-better convention (weight `1 / (ε + f_i − f_min)`)
+- `RankSelection(; selection_pressure=1.5)` — linear-ranking selection
+  with `selection_pressure ∈ [1.0, 2.0]`
+- `TruncationSelection(; ratio=0.5)` — keep the top `ratio` fraction by
+  fitness, then sample uniformly
 
 #### Tooling
 - Tiered test execution (`ARBORIST_RUN_BENCHMARKS=true` /
@@ -270,6 +276,50 @@ through F.8). All are folded into this single 0.1.0 entry below.
 - **`serialize` / `deserialize` round-trip** fixed via a `Meta.parse`
   walker instead of string-based substitution. Prefix-notation and
   unary-op round-trips now succeed.
+
+#### Run-management additions
+- **All-time-best Hall of Fame.** New `HallOfFame{G}` archive type,
+  opt-in via `solve(...; hall_of_fame_size=K)`. Returns a top-K
+  best-first archive of distinct fitnesses observed across all
+  generations (de-duplicated within `1e-12` to avoid storing
+  structurally equivalent solutions). The archive survives elitism
+  loss and is exposed as `result.hall_of_fame`. `K=0` (default)
+  disables the archive and leaves `result.hall_of_fame === nothing`;
+  the older 8-arg `GPResult` constructor is preserved for backward
+  compatibility.
+- **Warm-starting `solve` from a seed pool.** New `initial_population`
+  kwarg on the single-objective `GeneticProgramming` and on the
+  sequential `IslandModel` solve paths. Element type and length must
+  match `algorithm.pop_size` (or `n_islands * pop_size` for
+  `IslandModel`). Mutually exclusive with `resume_from`.
+- **Ephemeral Random Constants (Koza-style).** `GeneticProgramming` now
+  carries an optional `constant_sampler::Union{Function, Nothing}` field
+  threaded into `TreeGenome` random-tree creation and point-mutation
+  leaf creation via task-local storage. `erc_uniform(lo, hi)` is the
+  canonical helper, returning a `(rng) -> T` callable that samples
+  uniformly. Legacy default (`T(randn(rng))`) is preserved when the
+  field is `nothing`.
+
+#### Run utilities
+- **`Arborist.Benchmarks` submodule.** Canonical GP and neuroevolution
+  benchmark problems as reusable data generators consumed by user
+  code: symbolic regression (`nguyen(n)`, `keijzer(variant)`,
+  `koza(name)`, `pagie()`), classification (`iris()`,
+  `two_spirals()`), Boolean (`multiplexer(address_bits)`,
+  `parity(n_bits)`), control (`cartpole()`, `mountain_car()`,
+  `acrobot()`, `double_pole(; markovian)`), sequence/memory
+  (`sequence_memory(length)`, `sequence_recall(; delay)`), and
+  classic neuroevolution (`xor_env()`). Each generator returns a
+  `NamedTuple` carrying dataset (or environment callables), shape
+  metadata, target descriptions, and sensible success thresholds —
+  decoupled from evaluator choice.
+- **Cross-cutting helpers.** `train_test_split(X, y; test_size, rng,
+  stratify)` for deterministic train/test partition with optional
+  class-stratified sampling; `summarize(xs)` returning
+  `(; mean, std, median, min, max, q25, q75, n)` (non-finite entries
+  excluded so a single `Inf` does not poison the report); and
+  `run_multi_seed(f, seeds; parallel=false)` for multi-seed runs
+  with optional `Threads.@threads` parallelism.
 
 #### Visualization, inspection, and bloat control
 - **Graphviz DOT export.** `to_dot(g)` and `to_dot(io, g)` produce a

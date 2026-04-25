@@ -54,16 +54,18 @@ The counter is reset at the start of each `solve()` call via
 `reset_innovation_counter!()`. With `parallel=false` and a fixed seed,
 GraphGenome runs are reproducible.
 
-!!! warning "GraphGenome + distributed islands"
-    The innovation counter is process-local. Under `IslandModel` with
-    `distributed=true`, each worker process maintains its own counter
-    and assigns overlapping innovation numbers to structurally distinct
-    genes. NEAT crossover relies on innovation numbers being globally
-    unique, so migrating genomes between workers will silently corrupt
-    network topologies. Do not use `GraphGenome` with the distributed
-    island backends in 0.1.0. (`IslandModel` itself is currently
-    `ExprGenome`-only, so this only becomes relevant once `GraphGenome`
-    support is added to `IslandModel`.)
+!!! note "GraphGenome + distributed islands"
+    The innovation counter is process-local, so each worker would
+    otherwise assign overlapping innovation numbers to structurally
+    distinct genes. `IslandModel(distributed=true)` works around this
+    by assigning each worker a disjoint innovation-ID range via
+    `init_innovation_range!((island_id - 1) * INNOVATION_STRIDE)` at
+    init time, so cross-process IDs cannot collide. The trade-off:
+    structurally identical mutations on different workers receive
+    different IDs and are treated as disjoint by NEAT crossover rather
+    than aligned. Per-generation cross-worker innovation dedup is not
+    implemented; in practice this is a soft cost on diversity, not a
+    correctness bug.
 
 ## Starting Julia with Multiple Threads
 

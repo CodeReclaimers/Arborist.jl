@@ -1,5 +1,9 @@
 """
-    solve(problem::GPProblem{G,E}, algorithm::GeneticProgramming; verbose=false, callback=nothing, log=nothing) -> GPResult{G}
+    solve(problem::GPProblem{G,E}, algorithm::GeneticProgramming;
+          verbose=false, callback=nothing, log=nothing,
+          checkpoint_every=0, checkpoint_path=nothing,
+          resume_from=nothing, allow_signature_mismatch=false,
+          initial_population=nothing, hall_of_fame_size=0) -> GPResult{G}
 
 Run a genetic programming evolution using the specified problem and algorithm configuration.
 Returns a `GPResult` containing the best genome, fitness history, and run metadata.
@@ -14,6 +18,29 @@ Returns a `GPResult` containing the best genome, fitness history, and run metada
 - `log::Union{Nothing, RunLog}=nothing`: optional structured per-generation log.
   When provided, `record!` is called once per generation with aggregate fitness,
   speciation snapshot, structural diversity, and wall-time.
+- `checkpoint_every::Int=0`: write a checkpoint every N generations. `0` disables
+  checkpointing. When `> 0`, `checkpoint_path` must also be set. Supported on
+  `ExprGenome` and `TreeGenome` only.
+- `checkpoint_path::Union{Nothing, AbstractString}=nothing`: file path the
+  periodic checkpoints (and the final-generation checkpoint) are written to via
+  `save_checkpoint`. Writes are atomic (write-tmp + rename).
+- `resume_from::Union{Nothing, AbstractString}=nothing`: path to a checkpoint
+  produced by a prior `solve`. Loads the population, generation counter, RNG
+  state, fitness history, and all-time best from the checkpoint and continues
+  from there. Mutually exclusive with `initial_population`.
+- `allow_signature_mismatch::Bool=false`: by default, `resume_from` rejects a
+  checkpoint whose `_algorithm_signature` does not match the current
+  `algorithm`. Pass `true` to override intentionally (e.g., changing
+  hyperparameters mid-run).
+- `initial_population::Union{Nothing, Vector{<:AbstractGenome}}=nothing`: warm-
+  start the GA from a user-provided seed pool. Length must equal
+  `algorithm.pop_size` and element type must match `G`. Mutually exclusive with
+  `resume_from`.
+- `hall_of_fame_size::Int=0`: when `> 0`, attach a `HallOfFame{G}` archive of
+  this capacity to the result. The archive tracks the top-K distinct fitnesses
+  observed across all generations (best-first), surviving elitism loss. The
+  archive is exposed as `result.hall_of_fame`. `0` (default) disables the
+  archive and leaves `result.hall_of_fame === nothing`.
 """
 function solve(problem::GPProblem{G,E},
                algorithm::GeneticProgramming;

@@ -36,15 +36,19 @@ algorithm = IslandModel(
 
 !!! note "Genome support in 0.1.0"
     `IslandModel` (sequential, synchronous distributed, and asynchronous
-    distributed) dispatches on `ExprGenome` and `TreeGenome`. For
-    `TreeGenome`, the evaluator must be a `TreeFitnessEvaluator`;
-    migration transports `Node{T}` directly across workers so the op
-    indices remain valid against every island's shared `OperatorEnum`.
-    `AntGenome` and `GraphGenome` must use the single-population
-    `GeneticProgramming` solver for now — the former is blocked by a
-    thread-unsafe simulator, the latter by the process-local NEAT
-    innovation counter. Extending `IslandModel` to those genome types
-    is planned for a future release.
+    distributed) dispatches on `ExprGenome`, `TreeGenome`, and
+    `GraphGenome`. For `TreeGenome`, the evaluator must be a
+    `TreeFitnessEvaluator`; migration transports `Node{T}` directly
+    across workers so the op indices remain valid against every island's
+    shared `OperatorEnum`. For `GraphGenome` under `distributed=true`,
+    each worker is assigned a disjoint innovation-ID range via
+    `init_innovation_range!((island_id - 1) * INNOVATION_STRIDE)` so
+    cross-process IDs cannot collide; the trade-off is that
+    structurally identical mutations on different workers receive
+    different IDs and are treated as disjoint by NEAT crossover.
+    `AntGenome` must use the single-population `GeneticProgramming`
+    solver — the simulator is not thread-safe and has no
+    `_initialize_population` method on the `IslandModel` path.
 
 ## NSGAII
 
@@ -211,6 +215,49 @@ Currently implemented for `TreeGenome` symbolic regression. The pass
 is rollback-guarded: a refined genome's fitness can only improve. To
 optimize a single genome's constants by hand, call
 `optimize_constants!(g, evaluator; kwargs...)`.
+
+## Warm-starting from a seed population
+
+`solve(::GPProblem, ::GeneticProgramming)` accepts an `initial_population`
+keyword carrying a user-provided seed pool. The solve loop replaces the
+random initial population with these genomes — useful for resuming from a
+hand-curated set, transferring solutions between problem variants, or
+seeding a refinement run from a previous best:
+
+```julia
+seed_pool = [g1, g2, g3, ...]   # length must equal algorithm.pop_size
+@assert length(seed_pool) == algorithm.pop_size
+
+result = solve(problem, algorithm; initial_population = seed_pool)
+```
+
+Element type must match the problem's genome type and length must equal
+`algorithm.pop_size`. `initial_population` is mutually exclusive with
+`resume_from` — use one or the other.
+
+## All-time-best Hall of Fame
+
+By default `GPResult` reports only the single best genome at the end of
+the run. Pass `hall_of_fame_size = K` to attach a top-K archive of the
+distinct best fitnesses seen across *all* generations, surviving elitism
+loss:
+
+```julia
+result = solve(problem, algorithm; hall_of_fame_size = 20)
+
+result.hall_of_fame   # HallOfFame{G} — best-first, length ≤ 20
+for (i, g) in enumerate(result.hall_of_fame)
+    println("[$i] fitness=", result.hall_of_fame.fitnesses[i],
+            "  genome=", g)
+end
+```
+
+The archive de-duplicates by fitness within `1e-12` (cheap structural
+proxy — two genomes with identical fitness are treated as the same
+solution). `hall_of_fame_size = 0` (default) disables the archive and
+leaves `result.hall_of_fame === nothing`. The archive composes with
+`resume_from`: a fresh archive is allocated on resume, since the
+checkpoint format does not yet persist the archive.
 
 ## Checkpoint and resume
 

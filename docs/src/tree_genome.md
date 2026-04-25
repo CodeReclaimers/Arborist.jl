@@ -84,6 +84,39 @@ These are invoked automatically when using `SubtreeMutation()` or `PointMutation
 in the algorithm's `mutation_ops` — the dispatch routes to the TreeGenome
 implementation.
 
+## Ephemeral Random Constants
+
+Both random tree creation and point-mutation leaf creation sample numeric
+literals via an *ephemeral random constant* (ERC) sampler. The default is
+`T(randn(rng))` — standard normal, scaled by `T`. To override, pass a
+`(rng) -> T` callable as `GeneticProgramming(; constant_sampler=...)`. The
+sampler is threaded into TreeGenome creation via task-local storage, so no
+global state is mutated.
+
+`erc_uniform(lo, hi)` is the canonical helper, returning a sampler that draws
+uniformly from `[lo, hi]` (Koza-style ERCs):
+
+```julia
+algorithm = GeneticProgramming(
+    pop_size       = 100,
+    generations    = 200,
+    constant_sampler = erc_uniform(-5.0f0, 5.0f0),
+)
+```
+
+For other distributions, write a closure directly:
+
+```julia
+# Log-uniform over [0.1, 10.0] for problems where constants span orders of magnitude
+algorithm = GeneticProgramming(;
+    constant_sampler = rng -> Float32(exp(log(0.1) + log(100.0) * rand(rng))),
+)
+```
+
+`constant_sampler === nothing` (default) preserves the historical
+`T(randn(rng))` behavior; the field is ignored by genome types other than
+`TreeGenome`.
+
 ## Known Limitations
 
 - **Distance metric**: TreeGenome's `distance` function uses absolute node count

@@ -14,6 +14,33 @@ import Arborist: plothypervolumetrajectory, plothypervolumetrajectory!,
                  plotarchive, plotarchive!
 
 # ---------------------------------------------------------------------------
+# Helper: cap a vector of values at `median + k * MAD`, replacing values
+# above the cap with NaN (so Plots draws a gap rather than a spike).
+#
+# Float32 protected arithmetic in TreeGenome / ExprGenome can produce very
+# large but finite mean values when a single pathological tree dominates
+# the population's average. Linear y-axis scaling on those points hides
+# every other generation's data. Clipping at median + k·MAD is the same
+# robust-statistics approach epsilon-lexicase uses for its per-case
+# tolerance band, and surfaces the typical trajectory without losing the
+# information that "an outlier occurred at generation N" — the gap is
+# visible in the plot.
+# ---------------------------------------------------------------------------
+function _clip_outliers(xs::AbstractVector{<:Real}; k::Real=10.0)
+    finite = [Float64(v) for v in xs if isfinite(v)]
+    n = length(finite)
+    n < 4 && return [isfinite(v) ? Float64(v) : NaN for v in xs]
+    sorted_vals = sort(finite)
+    med = sorted_vals[div(n + 1, 2)]
+    mad = let abs_devs = sort([abs(v - med) for v in finite])
+        abs_devs[div(n + 1, 2)]
+    end
+    # Floor cap so flat data (mad ≈ 0) doesn't get clipped to median.
+    cap = max(med + k * mad, 2.0 * abs(med) + 1e-12)
+    return [(isfinite(v) && v <= cap) ? Float64(v) : NaN for v in xs]
+end
+
+# ---------------------------------------------------------------------------
 # Single-objective fitness trajectory.
 # ---------------------------------------------------------------------------
 
@@ -33,12 +60,10 @@ import Arborist: plothypervolumetrajectory, plothypervolumetrajectory!,
     end
 
     @series begin
-        label --> "mean (finite)"
+        label --> "mean (clipped)"
         linestyle --> :dash
         seriescolor --> :gray
-        # Mask infs for plotting.
-        ys = [isfinite(v) ? v : NaN for v in r.mean_history]
-        xs, ys
+        xs, _clip_outliers(r.mean_history)
     end
 end
 
@@ -105,9 +130,16 @@ plothypervolumetrajectory!(args...; kw...) =
     r = h.args[1]::NSGAIIResult
     title  --> "NSGA-II hypervolume convergence"
     xlabel --> "Generation"
-    ylabel --> "Hypervolume"
+    ylabel --> "Hypervolume (log scale)"
     legend --> false
-    1:length(r.hypervolume_history), r.hypervolume_history
+    # The hypervolume can span several orders of magnitude (the reference
+    # point shrinks rapidly as the population improves), so a log scale
+    # is the natural default. Override with `yscale=:identity` to see
+    # the linear view. Replace any nonpositive HV with NaN so log10
+    # never gets a zero / negative input.
+    yscale --> :log10
+    ys = [v > 0 ? Float64(v) : NaN for v in r.hypervolume_history]
+    1:length(ys), ys
 end
 
 # ---------------------------------------------------------------------------
@@ -131,15 +163,19 @@ end
     end
     @series begin
         subplot := 1
-        label --> "mean"
+        label --> "mean (clipped)"
         linestyle --> :dash
-        xs, [e.mean_fitness for e in es]
+        # Same outlier-clipping as the GPResult fitness recipe — Float32
+        # protected arithmetic can produce extreme single-generation means.
+        xs, _clip_outliers([e.mean_fitness for e in es])
     end
     @series begin
         subplot := 2
         ylabel := "Species"
         label --> "n_species"
-        seriestype --> :sticks
+        # Step plot reads better than `:sticks` over many generations and
+        # is informative even when speciation is disabled (a flat line at 1).
+        seriestype --> :steppost
         xs, [e.n_species for e in es]
     end
     @series begin

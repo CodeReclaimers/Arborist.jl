@@ -34,8 +34,12 @@ plot(result)
 ```
 
 Draws a two-line chart: the best fitness per generation (bottom
-envelope) and the mean fitness per generation (upper line). Both
-come from `result.fitness_history` and `result.mean_history`.
+envelope) and the population-mean fitness per generation (upper line).
+The mean is clipped at `median + 10·MAD` so a rare
+pathological-genome generation (Float32 protected arithmetic can
+produce very large but finite means) does not dominate the y-axis;
+clipped points appear as a gap rather than a spike. Both series come
+from `result.fitness_history` and `result.mean_history`.
 
 ## Pareto front: `plot(::NSGAIIResult)`
 
@@ -65,7 +69,10 @@ plothypervolumetrajectory(result)
 
 Per-generation hypervolume from `result.hypervolume_history` (2D
 objective problems only; 3+ objective problems record 0.0 and the
-plot is flat).
+plot is flat). The y-axis defaults to log scale because the
+hypervolume can span several orders of magnitude as the reference
+point shrinks during the early generations; pass `yscale=:identity`
+to see the linear view.
 
 ## Structured run log: `plot(::RunLog)`
 
@@ -76,16 +83,23 @@ using Arborist, DynamicExpressions
 evaluator = SymbolicRegressionEvaluator(x -> x^2 + x,
     domain=(-1f0, 1f0), points=20)
 problem   = GPProblem(evaluator, TreeGenome{Float32}; seed=42)
-algorithm = GeneticProgramming(pop_size=60, generations=80)
+algorithm = GeneticProgramming(
+    pop_size    = 60,
+    generations = 80,
+    speciation  = ThresholdSpeciation(threshold=2.0),
+)
 
 log = RunLog()
 solve(problem, algorithm; log = log)
 plot(log)
 ```
 
-Renders three subplots: fitness trajectory (best / mean / worst),
-species count and maximum species size over time, and unique
-structure count (a hash-based diversity proxy).
+Renders three subplots: fitness trajectory (best / mean — the recipe
+clips mean values above `median + 10·MAD` so a single pathological
+genome's huge fitness does not dominate the y-axis), species count
+over time, and unique structure count (a hash-based diversity proxy).
+With `NoSpeciation` (the default), the species panel is a flat line
+at 1.
 
 ## MAP-Elites archive: `plot(::MAPElitesResult)` and `plotarchive`
 

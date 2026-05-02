@@ -1,9 +1,11 @@
 # Arborist benchstone manifest.
 #
-# Companion to /home/alan/benchstone (the benchmark harness).
-# Registered projects are invoked via the `invocation` template; each
-# [[benchmarks]] entry declares a single entry point implemented in
-# bench/benchmarks.jl. See bench/README.md for the contract summary.
+# Companion to the benchstone benchmark harness:
+# https://pypi.org/project/benchstone/ (source:
+# https://github.com/CodeReclaimers/benchstone). Registered projects
+# are invoked via the `invocation` template; each [[benchmarks]] entry
+# declares a single entry point implemented in bench/benchmarks.jl.
+# See bench/README.md for the contract summary.
 
 [project]
 name = "Arborist"

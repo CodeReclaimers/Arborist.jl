@@ -211,12 +211,10 @@ The release-readiness plan at
 pre-registration cleanup items. Items deferred during execution are tracked
 here so they are not lost between sessions.
 
-- **Item 2d — bench/ directory cleanup (deferred 2026-04-23).** The
-  `bench/` directory is an integration layer for a personal benchstone
-  harness (`/home/alan/benchstone`); its `README.md` and `manifest.toml`
-  reference that path. Owner decision: leave as-is for now because
-  benchstone itself may be publicly released in time for Arborist's
-  formal publication. Revisit: if benchstone is not published by the
-  time the Arborist Registrator PR is opened, either sanitize the
-  `/home/alan/` paths out of `bench/` or remove the directory from the
-  public repo.
+- **Item 2d — bench/ directory cleanup (resolved 2026-05-02).** The
+  `bench/` directory is an integration layer for the benchstone benchmark
+  harness. benchstone was published to PyPI on 2026-05-02
+  (https://pypi.org/project/benchstone/, source at
+  https://github.com/CodeReclaimers/benchstone), so the Arborist `bench/`
+  README and manifest were sanitized to reference the public PyPI/GitHub
+  URLs instead of the local development path. No outstanding work.

@@ -48,6 +48,11 @@ println("Best expression: ", serialize(result.best_genome))
 
 ### Neural Topology Evolution (XOR with NEAT)
 
+`GraphGenome` requires NEAT-compatible mutation and crossover operators —
+the default `SubtreeMutation`/`PointMutation`/`SubtreeCrossover` operators
+only dispatch on `ExprGenome` and are rejected for `GraphGenome` problems
+by `_validate_ops`. Use `neat_defaults()` to get the canonical pair:
+
 ```julia
 using Arborist
 reset_innovation_counter!()
@@ -56,12 +61,16 @@ X = Float64[0 0 1 1; 0 1 0 1]
 y = Float64[0 1 1 0]
 evaluator = GraphEvaluator(X, reshape(y, 1, 4))
 
+ops = neat_defaults()
+
 result = solve(
     GPProblem(evaluator, GraphGenome; seed=42),
     GeneticProgramming(
         pop_size=150, generations=150,
         mutation_rate=0.5, crossover_rate=0.3,
-        speciation=ThresholdSpeciation(threshold=3.0)
+        mutation_ops  = ops.mutation_ops,
+        crossover_ops = ops.crossover_ops,
+        speciation    = ThresholdSpeciation(threshold=3.0),
     )
 )
 println("Best fitness: ", result.best_fitness)

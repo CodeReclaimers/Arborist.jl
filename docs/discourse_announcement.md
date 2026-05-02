@@ -11,31 +11,34 @@ The Julia ecosystem has lacked a general-purpose GP framework since Wallace.jl d
 **Symbolic regression in two lines:**
 ```julia
 using Arborist, DynamicExpressions
-const DynExt = Base.get_extension(Arborist, :DynExprExt)
 
-evaluator = DynExt.SymbolicRegressionEvaluator(
+evaluator = SymbolicRegressionEvaluator(
     x -> x^4 + x^3 + x^2 + x, domain=(-1f0, 1f0), points=20
 )
 result = solve(
-    GPProblem(evaluator, DynExt.TreeGenome{Float32}; seed=42),
+    GPProblem(evaluator, TreeGenome{Float32}; seed=42),
     GeneticProgramming(pop_size=100, generations=200)
 )
 ```
 
-**Four genome types** cover different problem classes:
+**Five genome types** cover different problem classes:
 - `TreeGenome` — DynamicExpressions.jl-backed, 8x faster, for symbolic regression
 - `ExprGenome` — Julia AST compilation via @eval, for general program synthesis
 - `GraphGenome` — NEAT-style neural topology with structural mutation
 - `AntGenome` — side-effectful agent control programs
+- `ADFGenome` — Koza-style Automatically Defined Functions on top of TreeGenome
 
 **NEAT-style neural topology evolution:**
 ```julia
 using Arborist
 reset_innovation_counter!()
 X = Float64[0 0 1 1; 0 1 0 1]; y = Float64[0 1 1 0]
+ops = neat_defaults()
 result = solve(
     GPProblem(GraphEvaluator(X, reshape(y,1,4)), GraphGenome; seed=42),
     GeneticProgramming(pop_size=150, generations=150,
+                       mutation_ops=ops.mutation_ops,
+                       crossover_ops=ops.crossover_ops,
                        speciation=ThresholdSpeciation(threshold=3.0))
 )
 ```
@@ -44,13 +47,22 @@ result = solve(
 
 ## Benchmarks
 
-| Problem | Genome | Generations | Pop Size | Convergence |
-|---|---|---|---|---|
-| Koza-1 (x⁴+x³+x²+x) | TreeGenome | 300 | 100 | 5/5 seeds |
-| Koza-2 (x⁵−2x³+x) | TreeGenome | 300 | 100 | 5/5 seeds |
-| Koza-3 (x⁶−2x⁴+x²) | TreeGenome | 300 | 100 | 5/5 seeds |
-| XOR (NEAT) | GraphGenome | 150 | 150 | 4/5 seeds |
-| Max Ones | ExprGenome | 100 | 100 | 5/5 seeds |
+A representative slice of the benchmark suite (`ARBORIST_RUN_BENCHMARKS=true`,
+~27 min wall time). Each gate is verified across 5 independent seeds.
+
+| Problem | Genome | Gate | Passing |
+|---|---|---|---|
+| Koza-1 / Koza-2 / Koza-3 | TreeGenome | fitness < 0.1 | 3/5 each |
+| Nguyen-1..6, -8..10 | TreeGenome | fitness < 0.01 | 3/5 |
+| XOR | GraphGenome (NEAT) | fitness < 0.01 | 4/5 |
+| UCI Iris (one-vs-rest) | TreeGenome | test acc ≥ 90% | 4/5 |
+| Cart-pole | GraphGenome (NEAT) | ≥ 195 steps mean | 4/5 |
+| Two-spirals (NSGA-II) | GraphGenome | best-front error < 1.0; HV > 0 | — |
+
+See the [README](https://github.com/CodeReclaimers/Arborist.jl#benchmarks)
+for the full set covering 25+ problems across symbolic regression, Boolean
+synthesis, classification, control tasks, modularity, time series, and
+multi-objective formulations.
 
 ## Related packages
 

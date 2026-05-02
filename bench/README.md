@@ -1,8 +1,10 @@
 # Arborist bench/ — benchstone integration
 
 This directory is Arborist's customer-side implementation of the benchstone
-benchmark harness contract. The harness itself lives at `/home/alan/benchstone`;
-this directory only holds Arborist-side plumbing.
+benchmark harness contract. The harness ships separately on PyPI as
+[`benchstone`](https://pypi.org/project/benchstone/)
+([source](https://github.com/CodeReclaimers/benchstone)); this directory only
+holds Arborist-side plumbing.
 
 ## Contract summary
 
@@ -16,8 +18,8 @@ The harness writes an `InvocationConfig` JSON to a temp path, passes it as
 `--config=<path>`, and expects the entry point to write a `ProjectResult` JSON
 to `--output=<path>`. Stderr is captured as log; stdout is progress-only.
 
-See `/home/alan/benchstone/benchstone/protocol.py` for the authoritative
-`InvocationConfig` and `ProjectResult` schemas.
+See the [benchstone repository](https://github.com/CodeReclaimers/benchstone)
+for the authoritative `InvocationConfig` and `ProjectResult` schemas.
 
 ## Benchmarks
 
@@ -68,16 +70,24 @@ Flagged here so it is not forgotten.
 
 ## Running locally
 
+Install the harness from PyPI (Python 3.11+):
+
+```bash
+pip install benchstone
+```
+
+Then, from inside a clone of Arborist.jl:
+
 ```bash
 # One-off register + exercise run
-/home/alan/benchstone/.venv/bin/bench register /home/alan/GenProg.jl
-/home/alan/benchstone/.venv/bin/bench run Arborist koza_regression_mean_fitness --seed-set baseline --foreground
+bench register .
+bench run Arborist koza_regression_mean_fitness --seed-set baseline --foreground
 
 # 90-minute baseline
-/home/alan/benchstone/.venv/bin/bench baseline establish Arborist nsga2_binpack_mean_fitness --notes "initial baseline on <sha>"
+bench baseline establish Arborist nsga2_binpack_mean_fitness --notes "initial baseline on <sha>"
 
 # Evaluate current working tree against baseline
-/home/alan/benchstone/.venv/bin/bench evaluate Arborist nsga2_binpack_mean_fitness
+bench evaluate Arborist nsga2_binpack_mean_fitness
 ```
 
 `bench status` lists any detached jobs. `--allow-dirty` is refused by default

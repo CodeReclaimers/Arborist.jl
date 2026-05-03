@@ -9,7 +9,7 @@ authors:
     orcid: "https://orcid.org/0000-0002-8071-4219"
     affiliation: "CodeReclaimers LLC"
 version: "0.1.0"
-date-released: "2026-04-23"
+date-released: "2026-05-03"
 url: "https://github.com/CodeReclaimers/Arborist.jl"
 repository-code: "https://github.com/CodeReclaimers/Arborist.jl"
 # Zenodo DOI will be added here once the post-registration DOI is minted.

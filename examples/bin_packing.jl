@@ -73,12 +73,12 @@ end
 # Primitives callable from @eval'd evolved programs
 # =============================================================================
 
-"""Number of currently open bins."""
+"""Number of currently open containers."""
 function bp_n_containers()::Int32
     return _get_bp_state().n_bins
 end
 
-"""Remaining capacity of bin i (1-indexed, clamped to valid range).
+"""Remaining capacity of container i (1-indexed, clamped to valid range).
 Returns 0.0f0 for invalid or out-of-range indices."""
 function bp_container_remaining(i::Int32)::Float32
     s = _get_bp_state()
@@ -94,13 +94,13 @@ function bp_item_size()::Float32
     return _get_bp_state().current_item
 end
 
-"""Bin capacity (always 1.0f0)."""
+"""Container capacity (always 1.0f0)."""
 function bp_capacity()::Float32
     return _get_bp_state().capacity
 end
 
-"""Place current item in bin i. Returns true if successful.
-If i > n_bins, opens new bins up to i. Returns false if item doesn't fit."""
+"""Place current item in container i. Returns true if successful.
+If i > n_containers, opens new containers up to i. Returns false if item doesn't fit."""
 function bp_place_in_container(i::Int32)::Bool
     s = _get_bp_state()
     s.place_calls += 1

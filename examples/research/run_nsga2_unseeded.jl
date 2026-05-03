@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# NSGA-II bin packing with auxiliary trace objectives + qwen3-coder.
+# NSGA-II bin packing with qwen3-coder.
 #
 # Two objectives: [primary_fitness, failed_placements]. The 2026-04-14
 # ablation study found that a third success_rate objective is redundant

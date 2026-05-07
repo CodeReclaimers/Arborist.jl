@@ -1166,6 +1166,9 @@ function solve(problem::GPProblem{GraphGenome, E},
     species_state = _init_species_state(algorithm.speciation)
     fitness_history = Float64[]
     mean_history = Float64[]
+    init_best = argmin(fitnesses)
+    best_genome_all_time = deepcopy(genomes[init_best])
+    best_fitness_all_time = fitnesses[init_best]
     t0 = time()
 
     for gen in 1:algorithm.generations
@@ -1216,6 +1219,12 @@ function solve(problem::GPProblem{GraphGenome, E},
             next_genomes[i].fitness = next_fitnesses[i]  # NEAT crossover uses cached fitness
         end
 
+        cur_best = argmin(next_fitnesses)
+        if next_fitnesses[cur_best] < best_fitness_all_time
+            best_fitness_all_time = next_fitnesses[cur_best]
+            best_genome_all_time = deepcopy(next_genomes[cur_best])
+        end
+
         genomes = next_genomes
         fitnesses = next_fitnesses
     end
@@ -1225,10 +1234,12 @@ function solve(problem::GPProblem{GraphGenome, E},
     fitnesses = fitnesses[order]
 
     return GPResult{GraphGenome}(
-        genomes[1], fitnesses[1], genomes,
+        best_fitness_all_time < fitnesses[1] ? best_genome_all_time : genomes[1],
+        min(best_fitness_all_time, fitnesses[1]),
+        genomes,
         fitness_history, mean_history,
         algorithm.generations, time() - t0,
-        fitnesses[1] < algorithm.convergence_threshold
+        min(best_fitness_all_time, fitnesses[1]) < algorithm.convergence_threshold
     )
 end
 

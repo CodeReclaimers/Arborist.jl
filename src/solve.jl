@@ -457,10 +457,16 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
     # accumulating on top of the prior run's wall time.
     t0 = time() - start_wall
 
-    # Track the all-time best — resume hands this in; fresh runs take it from
-    # the first sorted population.
-    best_genome_all_time  = initial_best === nothing ? genomes[1] : initial_best[1]
-    best_fitness_all_time = initial_best === nothing ? Inf         : initial_best[2]
+    # Track the all-time best. Fresh runs seed this from the already-evaluated
+    # initial population so an excellent parent is not forgotten if later
+    # generations regress.
+    if initial_best === nothing
+        init_best = argmin(fitnesses)
+        best_genome_all_time = deepcopy(genomes[init_best])
+        best_fitness_all_time = fitnesses[init_best]
+    else
+        best_genome_all_time, best_fitness_all_time = initial_best
+    end
 
     for gen in start_gen:algorithm.generations
         # Sort by fitness ascending (best first).

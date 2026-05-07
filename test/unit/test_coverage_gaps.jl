@@ -1,4 +1,11 @@
 # Tests for previously untested functionality identified by coverage audit.
+using Test
+using Arborist
+using Random
+
+struct AlwaysBadMutation <: AbstractMutationOperator end
+Arborist.mutate(::AlwaysBadMutation, g::ExprGenome, rng::AbstractRNG) =
+    ExprGenome([:(out = x + 10.0)], g.state)
 
 @testset "Coverage gap tests" begin
 
@@ -68,6 +75,37 @@
         @test all(g -> g isa ExprGenome, callback_genomes)
 
         println("  callback: $(length(callback_log)) calls, final best=$(callback_log[end][2])")
+    end
+
+    @testset "solve() reports best from initial population if later generations regress" begin
+        input_cols = Dict(:x => Float64)
+        output_cols = Dict(:out => Float64)
+        input_rows = [Dict{Symbol,Any}(:x => 1.0), Dict{Symbol,Any}(:x => 2.0)]
+        output_rows = [Dict{Symbol,Any}(:out => 1.0), Dict{Symbol,Any}(:out => 2.0)]
+        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
+                                    time_limit_ns=1_000_000_000)
+        fset = default_function_set()
+        rng = Random.MersenneTwister(12)
+        state = GenState(rng, fset, input_cols, output_cols, 1)
+        initial_population = [
+            ExprGenome([:(out = x)], state),
+            ExprGenome([:(out = x + 5.0)], state),
+        ]
+        problem = GPProblem(fe, ExprGenome; function_set=fset, num_temps=1, seed=12)
+        algorithm = GeneticProgramming(;
+            pop_size=2,
+            generations=1,
+            elitism=0,
+            mutation_rate=1.0,
+            crossover_rate=0.0,
+            mutation_ops=AbstractMutationOperator[AlwaysBadMutation()],
+            parallel=false)
+
+        result = solve(problem, algorithm; initial_population=initial_population)
+
+        @test result.best_fitness == 0.0
+        @test only(result.best_genome.body) == :(out = x)
+        @test minimum(result.fitness_history) == 0.0
     end
 
     # =========================================================================

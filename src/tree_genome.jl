@@ -556,7 +556,9 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
             raw = evaluate(evaluator, genomes[i])
             fitnesses[i] = (bp > 0.0 && isfinite(raw)) ? raw + bp * complexity(genomes[i]) : raw
         end
-        best_genome_all_time = genomes[1]
+        init_best = argmin(fitnesses)
+        best_genome_all_time = deepcopy(genomes[init_best])
+        best_fitness_all_time = fitnesses[init_best]
     end
 
     rng = rng_local
@@ -1127,4 +1129,3 @@ Example output: +(*(x1, x1), *(3.0, x1))
 
 Respond with only the prefix expression and nothing else.
 """
-

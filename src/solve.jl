@@ -79,7 +79,7 @@ function solve(problem::GPProblem{G,E},
                 "current algorithm 0x$(string(expected_sig, base=16)). " *
                 "Pass `allow_signature_mismatch=true` to override intentionally."))
         end
-        hof_resume = hall_of_fame_size > 0 ? HallOfFame{G}(hall_of_fame_size) : nothing
+        hof_resume = _hall_of_fame_for_resume(ckpt, G, hall_of_fame_size)
         return _run_evolution!(ckpt, problem, algorithm;
                                verbose=verbose, callback=callback, log=log,
                                checkpoint_every=checkpoint_every,
@@ -127,6 +127,34 @@ function _validate_initial_population(pop::AbstractVector,
             "expected $G to match the problem's genome type."))
     end
     return nothing
+end
+
+function _seed_hall_of_fame!(hof::HallOfFame{G},
+                             genomes::AbstractVector{G},
+                             fitnesses::AbstractVector{Float64}) where {G}
+    for i in eachindex(genomes, fitnesses)
+        push!(hof, genomes[i], fitnesses[i])
+    end
+    return hof
+end
+
+function _hall_of_fame_for_resume(ckpt::Checkpoint{G},
+                                  ::Type{G},
+                                  capacity::Int) where {G}
+    capacity > 0 || return nothing
+    hof = HallOfFame{G}(capacity)
+
+    if ckpt.hall_of_fame isa HallOfFame
+        old_hof = ckpt.hall_of_fame
+        for i in eachindex(old_hof.genomes, old_hof.fitnesses)
+            old_hof.genomes[i] isa G || continue
+            push!(hof, old_hof.genomes[i], old_hof.fitnesses[i])
+        end
+    end
+
+    _seed_hall_of_fame!(hof, ckpt.population, ckpt.fitnesses)
+    push!(hof, ckpt.best_genome, ckpt.best_fitness)
+    return hof
 end
 
 """
@@ -272,7 +300,8 @@ end
 
 """
     _save_ckpt(genomes, fitnesses, rng, best_genome, best_fitness,
-               fitness_history, mean_history, wall_time, gen, algorithm, path)
+               fitness_history, mean_history, wall_time, gen, algorithm, path;
+               hall_of_fame=nothing)
 
 Build a `Checkpoint` from the current evolution state and atomically persist
 it to `path`. Invoked from `_run_evolution!` at `checkpoint_every` boundaries.
@@ -283,7 +312,8 @@ function _save_ckpt(genomes::Vector{G}, fitnesses::Vector{Float64},
                     mean_history::Vector{Float64},
                     wall_time::Float64, gen::Int,
                     algorithm::GeneticProgramming,
-                    path::AbstractString) where {G}
+                    path::AbstractString;
+                    hall_of_fame::Union{Nothing, HallOfFame{G}} = nothing) where {G}
     sig = _algorithm_signature(algorithm)
     ckpt = Checkpoint{G}(
         CHECKPOINT_FORMAT_VERSION,
@@ -299,6 +329,7 @@ function _save_ckpt(genomes::Vector{G}, fitnesses::Vector{Float64},
         copy(mean_history),
         wall_time,
         sig,
+        hall_of_fame === nothing ? nothing : deepcopy(hall_of_fame),
     )
     save_checkpoint(ckpt, path)
     return nothing
@@ -468,6 +499,7 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
         init_best = argmin(fitnesses)
         best_genome_all_time = deepcopy(genomes[init_best])
         best_fitness_all_time = fitnesses[init_best]
+        hall_of_fame !== nothing && _seed_hall_of_fame!(hall_of_fame, genomes, fitnesses)
     else
         best_genome_all_time, best_fitness_all_time = initial_best
     end
@@ -571,7 +603,8 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
            gen % checkpoint_every == 0
             _save_ckpt(genomes, fitnesses, rng, best_genome_all_time,
                        best_fitness_all_time, fitness_history, mean_history,
-                       time() - t0, gen, algorithm, checkpoint_path)
+                       time() - t0, gen, algorithm, checkpoint_path;
+                       hall_of_fame=hall_of_fame)
         end
     end
 

@@ -101,6 +101,54 @@ using DynamicExpressions
         @test hof.fitnesses[1] <= result.best_fitness + 1e-9
     end
 
+    @testset "solve seeds hall_of_fame from initial population" begin
+        nguyen1 = Arborist.Benchmarks.nguyen(1)
+        ops_spec = Arborist.Benchmarks.canonical_sr_operators(Float32)
+        ops = OperatorEnum(binary_operators=ops_spec.binary,
+                           unary_operators=ops_spec.unary)
+        ev = TreeFitnessEvaluator(nguyen1.X, nguyen1.y, ops)
+        problem = GPProblem(ev, TreeGenome{Float32}; seed=7)
+
+        result = solve(problem, GeneticProgramming(;
+            pop_size=12, generations=0, parallel=false);
+            hall_of_fame_size=5)
+
+        @test result.hall_of_fame !== nothing
+        @test 1 <= length(result.hall_of_fame) <= 5
+        @test result.hall_of_fame.fitnesses[1] ≈ result.best_fitness
+    end
+
+    @testset "checkpoint resume restores hall_of_fame archive" begin
+        nguyen1 = Arborist.Benchmarks.nguyen(1)
+        ops_spec = Arborist.Benchmarks.canonical_sr_operators(Float32)
+        ops = OperatorEnum(binary_operators=ops_spec.binary,
+                           unary_operators=ops_spec.unary)
+        ev = TreeFitnessEvaluator(nguyen1.X, nguyen1.y, ops)
+        alg = GeneticProgramming(; pop_size=16, generations=3, parallel=false)
+        ckpt_path = tempname() * ".ckpt"
+
+        problem1 = GPProblem(ev, TreeGenome{Float32}; seed=11)
+        solve(problem1, alg;
+              checkpoint_every=1,
+              checkpoint_path=ckpt_path,
+              hall_of_fame_size=6)
+
+        ckpt = load_checkpoint(ckpt_path)
+        @test ckpt.hall_of_fame isa HallOfFame
+        @test 1 <= length(ckpt.hall_of_fame) <= 6
+
+        problem2 = GPProblem(ev, TreeGenome{Float32}; seed=11)
+        resumed = solve(problem2, alg;
+                        resume_from=ckpt_path,
+                        hall_of_fame_size=6)
+
+        @test resumed.hall_of_fame !== nothing
+        @test 1 <= length(resumed.hall_of_fame) <= 6
+        @test resumed.hall_of_fame.fitnesses == ckpt.hall_of_fame.fitnesses
+
+        rm(ckpt_path; force=true)
+    end
+
     @testset "end-to-end: solve with ExprGenome populates hall_of_fame" begin
         fs = default_function_set()
         inputs  = Dict(:x => Float64)

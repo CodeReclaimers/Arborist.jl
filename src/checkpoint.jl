@@ -12,7 +12,7 @@
 
 import Serialization
 
-const CHECKPOINT_FORMAT_VERSION = 1
+const CHECKPOINT_FORMAT_VERSION = 2
 
 """
     Checkpoint{G}
@@ -47,6 +47,8 @@ when implementing a custom solve loop.
 - `algorithm_signature::UInt64`: hash of the algorithm config (see
   `_algorithm_signature`) — checked on resume so the user can't hot-swap
   hyperparameters silently.
+- `hall_of_fame::Any`: optional `HallOfFame{G}` archive at checkpoint time,
+  or `nothing` when disabled.
 """
 struct Checkpoint{G}
     format_version::Int
@@ -62,6 +64,26 @@ struct Checkpoint{G}
     mean_history::Vector{Float64}
     wall_time::Float64
     algorithm_signature::UInt64
+    hall_of_fame::Any
+end
+
+function Checkpoint{G}(format_version::Int,
+                       arborist_version::VersionNumber,
+                       julia_version::VersionNumber,
+                       generation::Int,
+                       population::Vector{G},
+                       fitnesses::Vector{Float64},
+                       rng_state,
+                       best_genome::G,
+                       best_fitness::Float64,
+                       fitness_history::Vector{Float64},
+                       mean_history::Vector{Float64},
+                       wall_time::Float64,
+                       algorithm_signature::UInt64) where {G}
+    return Checkpoint{G}(format_version, arborist_version, julia_version,
+                         generation, population, fitnesses, rng_state,
+                         best_genome, best_fitness, fitness_history,
+                         mean_history, wall_time, algorithm_signature, nothing)
 end
 
 # --- Display ---------------------------------------------------------------

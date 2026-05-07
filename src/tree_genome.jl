@@ -517,6 +517,7 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
         ckpt.population isa Vector{TreeGenome{T}} || throw(ArgumentError(
             "checkpoint population type $(eltype(ckpt.population)) does not match " *
             "current genome type TreeGenome{$T}"))
+        hof = _hall_of_fame_for_resume(ckpt, TreeGenome{T}, hall_of_fame_size)
         expected_sig = _algorithm_signature(algorithm)
         if ckpt.algorithm_signature != expected_sig && !allow_signature_mismatch
             throw(ArgumentError(
@@ -559,6 +560,7 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
         init_best = argmin(fitnesses)
         best_genome_all_time = deepcopy(genomes[init_best])
         best_fitness_all_time = fitnesses[init_best]
+        hof !== nothing && _seed_hall_of_fame!(hof, genomes, fitnesses)
     end
 
     rng = rng_local
@@ -660,7 +662,8 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
            gen % checkpoint_every == 0
             _save_ckpt(genomes, fitnesses, rng, best_genome_all_time,
                        best_fitness_all_time, fitness_history, mean_history,
-                       time() - t0, gen, algorithm, checkpoint_path)
+                       time() - t0, gen, algorithm, checkpoint_path;
+                       hall_of_fame=hof)
         end
     end
 

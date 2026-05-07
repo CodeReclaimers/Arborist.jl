@@ -38,6 +38,7 @@ using DynamicExpressions
         @test ckpt2.best_fitness == 0.05
         @test ckpt2.wall_time == 12.5
         @test ckpt2.algorithm_signature == UInt64(0xdeadbeef)
+        @test ckpt2.hall_of_fame === nothing
 
         rm(tmp; force=true)
     end

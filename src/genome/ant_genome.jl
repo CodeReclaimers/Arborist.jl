@@ -420,6 +420,9 @@ function solve(problem::GPProblem{AntGenome, E},
     species_state = _init_species_state(algorithm.speciation)
     fitness_history = Float64[]
     mean_history = Float64[]
+    init_best = argmin(fitnesses)
+    best_genome_all_time = deepcopy(genomes[init_best])
+    best_fitness_all_time = fitnesses[init_best]
     t0 = time()
 
     for gen in 1:algorithm.generations
@@ -464,6 +467,12 @@ function solve(problem::GPProblem{AntGenome, E},
             next_fitnesses[i] = evaluate_genome(next_genomes[i], evaluator)
         end
 
+        cur_best = argmin(next_fitnesses)
+        if next_fitnesses[cur_best] < best_fitness_all_time
+            best_fitness_all_time = next_fitnesses[cur_best]
+            best_genome_all_time = deepcopy(next_genomes[cur_best])
+        end
+
         genomes = next_genomes
         fitnesses = next_fitnesses
     end
@@ -472,10 +481,14 @@ function solve(problem::GPProblem{AntGenome, E},
     genomes = genomes[order]
     fitnesses = fitnesses[order]
 
+    final_best_genome = best_fitness_all_time < fitnesses[1] ?
+        best_genome_all_time : genomes[1]
+    final_best_fitness = min(best_fitness_all_time, fitnesses[1])
+
     return GPResult{AntGenome}(
-        genomes[1], fitnesses[1], genomes,
+        final_best_genome, final_best_fitness, genomes,
         fitness_history, mean_history,
         algorithm.generations, time() - t0,
-        fitnesses[1] < algorithm.convergence_threshold
+        _converged(final_best_fitness, algorithm.convergence_threshold)
     )
 end

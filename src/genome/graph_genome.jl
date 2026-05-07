@@ -1242,7 +1242,8 @@ function solve(problem::GPProblem{GraphGenome, E},
         genomes,
         fitness_history, mean_history,
         algorithm.generations, time() - t0,
-        min(best_fitness_all_time, fitnesses[1]) < algorithm.convergence_threshold
+        _converged(min(best_fitness_all_time, fitnesses[1]),
+                   algorithm.convergence_threshold)
     )
 end
 

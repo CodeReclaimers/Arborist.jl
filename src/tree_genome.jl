@@ -681,7 +681,7 @@ function solve(problem::GPProblem{TreeGenome{T}, E},
         final_best_genome, final_best_fitness, genomes,
         fitness_history, mean_history,
         algorithm.generations, wall_time,
-        final_best_fitness < algorithm.convergence_threshold,
+        _converged(final_best_fitness, algorithm.convergence_threshold),
         hof,
     )
 end

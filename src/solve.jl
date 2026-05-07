@@ -628,7 +628,7 @@ function _run_evolution!(pop::Tuple{Vector{G}, GenState},
         mean_history,
         algorithm.generations,
         wall_time,
-        final_best_fitness < algorithm.convergence_threshold,
+        _converged(final_best_fitness, algorithm.convergence_threshold),
         hall_of_fame
     )
 end
@@ -1044,7 +1044,7 @@ function solve(problem::GPProblem{G,E},
         mean_history,
         alg.generations,
         wall_time,
-        global_best_fitness < alg.convergence_threshold
+        _converged(global_best_fitness, alg.convergence_threshold)
     )
 end
 

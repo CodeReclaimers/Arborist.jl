@@ -156,19 +156,37 @@ function _algorithm_signature(alg::GeneticProgramming)
               alg.parallel,
               length(alg.mutation_ops),
               length(alg.crossover_ops),
-              typeof(alg.selection),
-              typeof(alg.speciation),
+              _signature_component(alg.selection),
+              _signature_component(alg.speciation),
               alg.convergence_threshold,
+              _signature_component(alg.constant_optimization),
               # Presence (not identity) of the ERC sampler: closures hash by
               # identity, so two equivalent user-rebuilt samplers would
               # spuriously differ; resuming with ERC on/off stays detectable.
               alg.constant_sampler === nothing))
     # Include operator-type identities so adding/removing an operator changes the signature.
     for op in alg.mutation_ops
-        h = hash(typeof(op), h)
+        h = hash(_signature_component(op), h)
     end
     for op in alg.crossover_ops
-        h = hash(typeof(op), h)
+        h = hash(_signature_component(op), h)
     end
     return h
+end
+
+_signature_component(::Nothing) = nothing
+_signature_component(x::Union{Bool, Integer, AbstractFloat, Symbol, String}) = x
+_signature_component(x::Function) = typeof(x)
+_signature_component(x::Type) = x
+_signature_component(x::Tuple) = map(_signature_component, x)
+_signature_component(x::AbstractVector) =
+    (typeof(x), map(_signature_component, Tuple(x)))
+
+function _signature_component(x)
+    T = typeof(x)
+    isstructtype(T) || return T
+    fields = map(fieldnames(T)) do name
+        _signature_component(getfield(x, name))
+    end
+    return (T, fields)
 end

@@ -218,6 +218,11 @@ features at or above `high` clamp to bin `n_bins[d]`.
 """
 function _cell_index(features, bounds, n_bins)
     n = length(features)
+    if n != length(bounds) || n != length(n_bins)
+        throw(ArgumentError(
+            "feature vector length ($n) must match feature_bounds " *
+            "($(length(bounds))) and n_bins ($(length(n_bins)))"))
+    end
     idx = Vector{Int}(undef, n)
     @inbounds for d in 1:n
         lo, hi = bounds[d]

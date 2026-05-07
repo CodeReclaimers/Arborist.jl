@@ -1,3 +1,7 @@
+struct AlwaysTurnLeftAntMutation <: AbstractMutationOperator end
+Arborist.mutate(::AlwaysTurnLeftAntMutation, g::AntGenome, rng::AbstractRNG) =
+    AntGenome(:(gp_ant_left(true)), g.primitives, g.conditions, g.max_depth)
+
 @testset "AntGenome" begin
     @testset "initialization" begin
         rng = Random.MersenneTwister(42)
@@ -71,5 +75,21 @@
         @test result isa GPResult{AntGenome}
         @test result.best_fitness >= 0.0
         @test length(result.fitness_history) == 3
+    end
+
+    @testset "solve reports all-time best if final generation regresses" begin
+        evaluator = AntEvaluator([(1, 2)], 10)
+        problem = GPProblem(evaluator, AntGenome; seed=1)
+        algorithm = GeneticProgramming(
+            pop_size=20, generations=1,
+            elitism=0,
+            mutation_rate=1.0, crossover_rate=0.0,
+            parallel=false,
+            mutation_ops=AbstractMutationOperator[AlwaysTurnLeftAntMutation()]
+        )
+
+        result = solve(problem, algorithm; verbose=false)
+        @test result.fitness_history == [0.0]
+        @test result.best_fitness == 0.0
     end
 end

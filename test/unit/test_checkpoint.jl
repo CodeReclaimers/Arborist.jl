@@ -117,6 +117,26 @@ using DynamicExpressions
 
         rm(ckpt_path; force=true)
     end
+
+    @testset "resume rejects selection parameter mismatch" begin
+        ops = OperatorEnum(binary_operators=[+, -, *], unary_operators=[])
+        X = reshape(collect(Float32, 0.0:0.1:1.0), 1, :)
+        y = X[1, :] .* X[1, :]
+        evaluator = TreeFitnessEvaluator(X, y, ops)
+
+        problem = GPProblem(evaluator, TreeGenome{Float32}; seed=100)
+        alg1 = GeneticProgramming(pop_size=12, generations=3, parallel=false,
+                                   selection=TournamentSelection(2))
+        ckpt_path = tempname() * ".ckpt"
+        solve(problem, alg1; checkpoint_every=1, checkpoint_path=ckpt_path)
+
+        alg2 = GeneticProgramming(pop_size=12, generations=3, parallel=false,
+                                   selection=TournamentSelection(5))
+        problem2 = GPProblem(evaluator, TreeGenome{Float32}; seed=100)
+        @test_throws ArgumentError solve(problem2, alg2; resume_from=ckpt_path)
+
+        rm(ckpt_path; force=true)
+    end
 end
 
 @testset "Operator success tracking in RunLog" begin

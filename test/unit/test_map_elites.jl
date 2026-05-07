@@ -44,6 +44,13 @@ using DynamicExpressions
         @test Arborist._cell_index((5.0, 0.0), bounds, n_bins)[1] == 3
     end
 
+    @testset "_cell_index rejects feature dimension mismatch" begin
+        bounds = [(0.0, 1.0), (0.0, 1.0)]
+        n_bins = [2, 2]
+        @test_throws ArgumentError Arborist._cell_index((0.5,), bounds, n_bins)
+        @test_throws ArgumentError Arborist._cell_index((0.5, 0.5, 0.5), bounds, n_bins)
+    end
+
     @testset "coverage and qd_score" begin
         archive = MAPElitesArchive{Int}([3, 3])
         @test coverage(archive) == 0.0

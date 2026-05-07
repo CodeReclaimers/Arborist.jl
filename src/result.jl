@@ -44,6 +44,9 @@ function GPResult{G}(best_genome::G, best_fitness::Float64,
                        generations_run, wall_time, converged, nothing)
 end
 
+_converged(best_fitness::Real, threshold::Real) =
+    isfinite(threshold) && best_fitness < threshold
+
 # --- Display ---------------------------------------------------------------
 
 function Base.show(io::IO, r::GPResult{G}) where G

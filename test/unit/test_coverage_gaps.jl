@@ -185,6 +185,22 @@ Arborist.mutate(::AlwaysBadMutation, g::ExprGenome, rng::AbstractRNG) =
         println("  convergence (impossible threshold): converged=$(result_hard.converged), best=$(result_hard.best_fitness)")
     end
 
+    @testset "default convergence_threshold does not mark finite runs converged" begin
+        input_cols = Dict(:x => Float64)
+        output_cols = Dict(:out => Float64)
+        input_rows = [Dict{Symbol,Any}(:x => 1.0)]
+        output_rows = [Dict{Symbol,Any}(:out => 1.0)]
+        fe = TableFitnessEvaluator(input_cols, output_cols, input_rows, output_rows;
+                                    time_limit_ns=1_000_000_000)
+        problem = GPProblem(fe, ExprGenome; function_set=default_function_set(),
+                            num_temps=1, seed=1)
+        alg = GeneticProgramming(pop_size=4, generations=1, parallel=false)
+        result = solve(problem, alg)
+
+        @test isfinite(result.best_fitness)
+        @test result.converged == false
+    end
+
     # =========================================================================
     # Boolean function set and boolean operators
     # =========================================================================

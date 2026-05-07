@@ -3,7 +3,18 @@
 All notable changes to Arborist.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [0.1.1] — 2026-05-07
+
+### Security
+
+- **`ASTSanitizer` whitelist bypass via indirect calls.** Strengthen the
+  sanitizer to require that the callable in any `:call` expression is a
+  plain `Symbol` present in `allowed_calls`. Previously, indirect calls
+  built from arrays, tuples, or refs (e.g. `[open][1]()`,
+  `(run,)[1]()`) could route around the whitelist and reach unsafe
+  functions through `@eval`. The fix only affects the `ExprGenome`
+  `@eval` path with sanitization enabled; `TreeGenome` and `GraphGenome`
+  do not use `@eval` and were not affected.
 
 ### Fixed
 

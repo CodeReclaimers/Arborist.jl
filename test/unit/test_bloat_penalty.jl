@@ -1,3 +1,7 @@
+using Test
+using Arborist
+using Random
+
 @testset "Bloat penalty" begin
     @testset "bloat_penalty=0.0 preserves existing behavior" begin
         input_cols = Dict(:x => Float32)
@@ -69,5 +73,27 @@
 
         @test raw == 0.0  # y = x is perfect for y = x
         @test penalized ≈ 0.0 + 0.1 * complexity(g)
+    end
+
+    @testset "GraphGenome solve applies bloat_penalty" begin
+        input_data = Float64[0 1 0 1; 0 0 1 1]
+        output_data = reshape(Float64[0, 1, 1, 0], 1, :)
+        evaluator = GraphEvaluator(input_data, output_data)
+        problem = GPProblem(evaluator, GraphGenome; seed=7)
+        ops = neat_defaults()
+        alg = GeneticProgramming(;
+            pop_size=6,
+            generations=0,
+            bloat_penalty=0.25,
+            mutation_ops=ops.mutation_ops,
+            crossover_ops=ops.crossover_ops,
+            parallel=false)
+
+        result = solve(problem, alg)
+        raw = evaluate_genome(result.best_genome, evaluator)
+
+        @test isfinite(raw)
+        @test result.best_fitness ≈ raw + 0.25 * complexity(result.best_genome)
+        @test result.best_genome.fitness ≈ result.best_fitness
     end
 end

@@ -1153,13 +1153,14 @@ function solve(problem::GPProblem{GraphGenome, E},
     n_in = length(input_signature(evaluator))
     n_out = length(output_signature(evaluator))
     pop_size = algorithm.pop_size
+    bp = algorithm.bloat_penalty
 
     # Initialize population
     genomes = [initialize(GraphGenome, n_in, n_out, rng) for _ in 1:pop_size]
     fitnesses = fill(Inf, pop_size)
 
     for i in 1:pop_size
-        fitnesses[i] = evaluate_genome(genomes[i], evaluator)
+        fitnesses[i] = _evaluate_with_penalty(genomes[i], evaluator, bp)
         genomes[i].fitness = fitnesses[i]
     end
 
@@ -1215,7 +1216,7 @@ function solve(problem::GPProblem{GraphGenome, E},
                                  case_fitnesses=case_fitnesses)
 
         for i in (algorithm.elitism + 1):pop_size
-            next_fitnesses[i] = evaluate_genome(next_genomes[i], evaluator)
+            next_fitnesses[i] = _evaluate_with_penalty(next_genomes[i], evaluator, bp)
             next_genomes[i].fitness = next_fitnesses[i]  # NEAT crossover uses cached fitness
         end
 

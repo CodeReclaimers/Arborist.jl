@@ -87,12 +87,10 @@ function sanitize(san::ASTSanitizer, expr::Expr)::Bool
 
     if expr.head == :call
         fn = expr.args[1]
-        # Reject qualified calls (e.g., Base.run, Sys.exit)
-        if fn isa Expr && fn.head == :.
-            return false
-        end
-        # Check against whitelist
-        if fn isa Symbol && fn ∉ san.allowed_calls
+        # The callable must be a plain Symbol in the whitelist.
+        # This prevents bypassing the whitelist via tuples (e.g., `(run,)[1]()`),
+        # arrays (e.g., `[run][1]()`), or type parameters.
+        if !(fn isa Symbol && fn ∈ san.allowed_calls)
             return false
         end
     end

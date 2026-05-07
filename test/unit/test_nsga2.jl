@@ -24,6 +24,11 @@ using DynamicExpressions: OperatorEnum, Node
         @test_throws ArgumentError NSGAII(pop_size=2)
         # rates must sum to <= 1.0
         @test_throws ArgumentError NSGAII(mutation_rate=0.6, crossover_rate=0.6)
+        @test_throws ArgumentError NSGAII(generations=-1)
+        @test_throws ArgumentError NSGAII(mutation_rate=-0.1)
+        @test_throws ArgumentError NSGAII(crossover_rate=-0.1)
+        @test_throws ArgumentError NSGAII(mutation_rate=NaN)
+        @test_throws ArgumentError NSGAII(crossover_rate=NaN)
     end
 
     # =========================================================================

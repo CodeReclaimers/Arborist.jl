@@ -117,6 +117,13 @@ function NSGAII(;
     mutation_ops::Vector{<:AbstractMutationOperator} = AbstractMutationOperator[SubtreeMutation(), PointMutation()],
     crossover_ops::Vector{<:AbstractCrossoverOperator} = AbstractCrossoverOperator[SubtreeCrossover()]
 )
+    generations >= 0 || throw(ArgumentError("generations must be >= 0, got $generations"))
+    isfinite(mutation_rate) || throw(ArgumentError("mutation_rate must be finite, got $mutation_rate"))
+    isfinite(crossover_rate) || throw(ArgumentError("crossover_rate must be finite, got $crossover_rate"))
+    0.0 <= mutation_rate <= 1.0 || throw(ArgumentError(
+        "mutation_rate must be in [0, 1], got $mutation_rate"))
+    0.0 <= crossover_rate <= 1.0 || throw(ArgumentError(
+        "crossover_rate must be in [0, 1], got $crossover_rate"))
     if crossover_rate + mutation_rate > 1.0
         throw(ArgumentError(
             "crossover_rate ($crossover_rate) + mutation_rate ($mutation_rate) = " *
@@ -633,7 +640,9 @@ function solve(problem::GPProblem{G, E},
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
-    _validate_ops(algorithm.mutation_ops, algorithm.crossover_ops, G)
+    _validate_ops(algorithm.mutation_ops, algorithm.crossover_ops, G;
+                  mutation_rate=algorithm.mutation_rate,
+                  crossover_rate=algorithm.crossover_rate)
 
     # GraphGenome uses a process-global innovation counter that tracks structural
     # mutation IDs. Reset it at the top of each solve so successive runs in the

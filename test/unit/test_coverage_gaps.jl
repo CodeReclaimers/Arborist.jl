@@ -17,6 +17,10 @@ Arborist.mutate(::AlwaysBadMutation, g::ExprGenome, rng::AbstractRNG) =
         @test_throws ArgumentError GeneticProgramming(crossover_rate=0.8, mutation_rate=0.5)
         @test_throws ArgumentError GeneticProgramming(crossover_rate=0.6, mutation_rate=0.6)
         @test_throws ArgumentError GeneticProgramming(crossover_rate=1.0, mutation_rate=0.01)
+        @test_throws ArgumentError GeneticProgramming(crossover_rate=-0.1)
+        @test_throws ArgumentError GeneticProgramming(mutation_rate=-0.1)
+        @test_throws ArgumentError GeneticProgramming(crossover_rate=NaN)
+        @test_throws ArgumentError GeneticProgramming(mutation_rate=NaN)
         # Boundary: exactly 1.0 is allowed (no reproduction, but valid)
         alg = GeneticProgramming(crossover_rate=0.7, mutation_rate=0.3)
         @test alg.crossover_rate == 0.7
@@ -26,6 +30,44 @@ Arborist.mutate(::AlwaysBadMutation, g::ExprGenome, rng::AbstractRNG) =
         @test alg2.crossover_rate + alg2.mutation_rate <= 1.0
         println("  Operator rate validation: invalid rates rejected, valid rates accepted")
         flush(stdout)
+    end
+
+    @testset "GeneticProgramming validates public scalar config" begin
+        @test_throws ArgumentError GeneticProgramming(pop_size=0)
+        @test_throws ArgumentError GeneticProgramming(pop_size=-1)
+        @test_throws ArgumentError GeneticProgramming(generations=-1)
+        @test_throws ArgumentError GeneticProgramming(elitism=-1)
+        @test_throws ArgumentError GeneticProgramming(pop_size=4, elitism=5)
+        @test_throws ArgumentError GeneticProgramming(bloat_penalty=-0.1)
+        @test_throws ArgumentError IslandModel(n_islands=0)
+        @test_throws ArgumentError IslandModel(migration_interval=0)
+        @test_throws ArgumentError IslandModel(migration_size=-1)
+
+        alg = GeneticProgramming(;
+            pop_size=4,
+            elitism=4,
+            generations=0,
+            mutation_rate=1.0,
+            crossover_rate=0.0,
+            crossover_ops=AbstractCrossoverOperator[])
+        @test alg.generations == 0
+        @test isempty(alg.crossover_ops)
+    end
+
+    @testset "_validate_ops respects zero operator rates" begin
+        muts = AbstractMutationOperator[WeightPerturbMutation()]
+        xos = AbstractCrossoverOperator[NEATCrossover()]
+
+        @test Arborist._validate_ops(muts, AbstractCrossoverOperator[], GraphGenome;
+                                     mutation_rate=1.0, crossover_rate=0.0) === nothing
+        @test Arborist._validate_ops(AbstractMutationOperator[], xos, GraphGenome;
+                                     mutation_rate=0.0, crossover_rate=1.0) === nothing
+        @test_throws ArgumentError Arborist._validate_ops(
+            muts, AbstractCrossoverOperator[], GraphGenome;
+            mutation_rate=1.0, crossover_rate=0.1)
+        @test_throws ArgumentError Arborist._validate_ops(
+            AbstractMutationOperator[], xos, GraphGenome;
+            mutation_rate=0.1, crossover_rate=1.0)
     end
 
     # (The legacy evolve! rate-validation testset was removed in 0.1.0

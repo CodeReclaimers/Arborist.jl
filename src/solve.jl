@@ -178,9 +178,13 @@ problem — without this check the failure would surface as a cryptic
 """
 function _validate_ops(mutation_ops::Vector{AbstractMutationOperator},
                        crossover_ops::Vector{AbstractCrossoverOperator},
-                       ::Type{G}) where {G}
-    have_mut = any(op -> hasmethod(mutate, Tuple{typeof(op), G, AbstractRNG}), mutation_ops)
-    have_xo  = any(op -> hasmethod(crossover, Tuple{typeof(op), G, G, AbstractRNG}), crossover_ops)
+                       ::Type{G};
+                       mutation_rate::Float64 = 1.0,
+                       crossover_rate::Float64 = 1.0) where {G}
+    have_mut = mutation_rate == 0.0 ||
+        any(op -> hasmethod(mutate, Tuple{typeof(op), G, AbstractRNG}), mutation_ops)
+    have_xo = crossover_rate == 0.0 ||
+        any(op -> hasmethod(crossover, Tuple{typeof(op), G, G, AbstractRNG}), crossover_ops)
 
     hint = if G === GraphGenome
         "Use `neat_defaults()` to get (mutation_ops, crossover_ops) for GraphGenome: " *
@@ -836,7 +840,9 @@ function solve(problem::GPProblem{G,E},
           Random.MersenneTwister(problem.seed)
 
     alg = algorithm.island_algorithm
-    _validate_ops(alg.mutation_ops, alg.crossover_ops, G)
+    _validate_ops(alg.mutation_ops, alg.crossover_ops, G;
+                  mutation_rate=alg.mutation_rate,
+                  crossover_rate=alg.crossover_rate)
 
     # GraphGenome maintains a process-global innovation counter that all
     # islands share in sequential mode. Reset it once before island setup so

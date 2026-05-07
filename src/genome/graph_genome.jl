@@ -1146,7 +1146,9 @@ function solve(problem::GPProblem{GraphGenome, E},
     rng = problem.seed === nothing ? Random.default_rng() :
           Random.MersenneTwister(problem.seed)
 
-    _validate_ops(algorithm.mutation_ops, algorithm.crossover_ops, GraphGenome)
+    _validate_ops(algorithm.mutation_ops, algorithm.crossover_ops, GraphGenome;
+                  mutation_rate=algorithm.mutation_rate,
+                  crossover_rate=algorithm.crossover_rate)
     reset_innovation_counter!()
 
     evaluator = problem.evaluator

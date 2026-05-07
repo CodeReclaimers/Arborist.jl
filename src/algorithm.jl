@@ -57,6 +57,19 @@ function GeneticProgramming(;
     constant_optimization::Union{Nothing, ConstantOptimization} = nothing,
     constant_sampler::Union{Function, Nothing} = nothing,
 )
+    pop_size > 0 || throw(ArgumentError("pop_size must be > 0, got $pop_size"))
+    generations >= 0 || throw(ArgumentError("generations must be >= 0, got $generations"))
+    elitism >= 0 || throw(ArgumentError("elitism must be >= 0, got $elitism"))
+    elitism <= pop_size || throw(ArgumentError(
+        "elitism ($elitism) must be <= pop_size ($pop_size)"))
+    isfinite(mutation_rate) || throw(ArgumentError("mutation_rate must be finite, got $mutation_rate"))
+    isfinite(crossover_rate) || throw(ArgumentError("crossover_rate must be finite, got $crossover_rate"))
+    0.0 <= mutation_rate <= 1.0 || throw(ArgumentError(
+        "mutation_rate must be in [0, 1], got $mutation_rate"))
+    0.0 <= crossover_rate <= 1.0 || throw(ArgumentError(
+        "crossover_rate must be in [0, 1], got $crossover_rate"))
+    bloat_penalty >= 0.0 || throw(ArgumentError(
+        "bloat_penalty must be >= 0, got $bloat_penalty"))
     if crossover_rate + mutation_rate > 1.0
         throw(ArgumentError(
             "crossover_rate ($crossover_rate) + mutation_rate ($mutation_rate) = " *
@@ -119,6 +132,11 @@ function IslandModel(;
     distributed::Bool = false,
     async::Bool = false
 )
+    n_islands > 0 || throw(ArgumentError("n_islands must be > 0, got $n_islands"))
+    migration_interval > 0 || throw(ArgumentError(
+        "migration_interval must be > 0, got $migration_interval"))
+    migration_size >= 0 || throw(ArgumentError(
+        "migration_size must be >= 0, got $migration_size"))
     if async && !distributed
         throw(ArgumentError("async=true requires distributed=true"))
     end

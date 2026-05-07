@@ -130,7 +130,7 @@ function solve(problem::GPProblem{G,E}, alg::CMAES;
     # Use a throwaway GP config to reach _initialize_population; we just
     # want one genome to provide the topology.
     init_gp = GeneticProgramming(
-        pop_size=1, generations=1, parallel=false,
+        pop_size=1, generations=1, elitism=0, parallel=false,
         mutation_ops=AbstractMutationOperator[],
         crossover_ops=AbstractCrossoverOperator[],
         selection=TournamentSelection(1),

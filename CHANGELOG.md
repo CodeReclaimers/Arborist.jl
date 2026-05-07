@@ -3,6 +3,21 @@
 All notable changes to Arborist.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Track the true all-time best genome from the evaluated initial population
+  across `ExprGenome`, `TreeGenome`, and `GraphGenome` solve paths, including
+  runs where later generations regress or `elitism=0`.
+- Apply `bloat_penalty` consistently in `GraphGenome` solves.
+- Validate public evolutionary algorithm configuration earlier, including
+  population size, generations, rates, elitism, bloat penalty, island counts,
+  and migration settings; operator compatibility checks now respect zero
+  mutation or crossover rates.
+- Seed `HallOfFame` archives from the initial population and preserve them
+  through checkpoint/resume.
+
 ## [0.1.0] — 2026-04-24
 
 Initial public release. The scope expanded between the original

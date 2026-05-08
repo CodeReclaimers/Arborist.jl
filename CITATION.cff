@@ -8,12 +8,11 @@ authors:
     email: alan@codereclaimers.com
     orcid: "https://orcid.org/0000-0002-8071-4219"
     affiliation: "CodeReclaimers LLC"
-version: "0.1.1"
-date-released: "2026-05-07"
+version: "0.1.2"
+date-released: "2026-05-08"
 url: "https://github.com/CodeReclaimers/Arborist.jl"
 repository-code: "https://github.com/CodeReclaimers/Arborist.jl"
-# Zenodo DOI will be added here once the post-registration DOI is minted.
-# doi: "10.5281/zenodo.XXXXXXX"
+doi: "10.5281/zenodo.20076827"
 license: MIT
 keywords:
   - genetic-programming

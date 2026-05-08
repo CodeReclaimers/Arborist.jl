@@ -6,6 +6,7 @@
   <a href="https://codereclaimers.github.io/Arborist.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg" alt="Documentation"></a>
   <a href="https://julialang.org"><img src="https://img.shields.io/badge/Julia-1.10+-blue.svg" alt="Julia"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://doi.org/10.5281/zenodo.20076827"><img src="https://zenodo.org/badge/1189015297.svg" alt="DOI"></a>
 </p>
 
 Arborist.jl is a generic, extensible genetic programming framework for
@@ -231,14 +232,12 @@ MIT License. See [LICENSE](LICENSE) for details.
 @software{McIntyre_Arborist_jl,
   author  = {McIntyre, Alan},
   title   = {{Arborist.jl}},
-  version = {0.1.0},
+  version = {0.1.2},
   year    = {2026},
-  url     = {https://github.com/CodeReclaimers/Arborist.jl}
+  url     = {https://github.com/CodeReclaimers/Arborist.jl},
+  doi     = {10.5281/zenodo.20076827}
 }
 ```
 
-A machine-readable `CITATION.cff` is also tracked at the repo root
-so GitHub's "Cite this repository" button works directly. Once the
-post-registration Zenodo DOI is minted, both the CFF file (uncomment
-the `doi:` field) and the BibTeX block above (add a `doi` field)
-should be updated to include it.
+A machine-readable `CITATION.cff` is also tracked at the repo root so
+GitHub's "Cite this repository" button works directly.

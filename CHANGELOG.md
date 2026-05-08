@@ -3,6 +3,13 @@
 All notable changes to Arborist.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.1.2] — 2026-05-08
+
+### Documentation
+
+- Add Zenodo DOI (10.5281/zenodo.20076827) to `CITATION.cff`, the
+  README bibtex block, and a Zenodo badge in the README header.
+
 ## [0.1.1] — 2026-05-07
 
 ### Security

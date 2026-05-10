@@ -10,11 +10,6 @@ Genome representation based on Julia `Expr` trees. Wraps the existing
 
 # Known limitations
 
-- **`serialize` / `deserialize` round-trip is ~80% reliable.**
-  `repr()`-style `Float32(literal)` forms produced by the Julia
-  printer fail type-checking on round-trip. The LLM operator falls
-  back silently to a classical operator, but checkpoint/resume or
-  cross-process migration can lose a fraction of individuals.
 - **`@eval` grows Julia's method table monotonically** across
   generations. Long runs (thousands of generations × hundreds of
   individuals) accumulate tens of thousands of methods, slowing
@@ -178,6 +173,33 @@ function Base.show(io::IO, ::MIME"text/plain", g::ExprGenome)
     end
 end
 
+# Recursively rewrite `Expr(:call, :Float32, literal)` nodes into their
+# evaluated Float32 value so that `repr` prints the parser-friendly `1.5f0`
+# form instead of `Float32(1.5)`. Calls with non-literal arguments (e.g.
+# `Float32(x)`) are real conversions and are left untouched.
+_collapse_float32_literals(x) = x
+function _collapse_float32_literals(e::Expr)
+    if e.head === :call && length(e.args) == 2 &&
+       e.args[1] === :Float32 && e.args[2] isa Number
+        return Float32(e.args[2])
+    end
+    return Expr(e.head, Any[_collapse_float32_literals(a) for a in e.args]...)
+end
+
+"""
+    _expr_to_string(e) -> String
+
+Convert an `Expr` (or atom) to a Julia source string. Embedded
+`Float32(literal)` call nodes are folded to their evaluated Float32
+value so that `repr` emits the `f0` literal form (e.g. `1.5f0`)
+that round-trips through `Meta.parse` and the deserializer's
+type-check, rather than the constructor-call form `Float32(1.5)`
+that fails type-check.
+"""
+function _expr_to_string(e)::String
+    return repr(_collapse_float32_literals(e))
+end
+
 """
     serialize(g::ExprGenome) -> String
 
@@ -188,7 +210,7 @@ on its own line using Julia's standard pretty-printer.
 function serialize(g::ExprGenome)::String
     io = IOBuffer()
     for (i, stmt) in enumerate(g.body)
-        print(io, repr(stmt))
+        print(io, _expr_to_string(stmt))
         i < length(g.body) && print(io, "\n")
     end
     return String(take!(io))

@@ -1142,14 +1142,20 @@ function solve(problem::GPProblem{GraphGenome, E},
                algorithm::GeneticProgramming;
                verbose::Bool = false,
                callback = nothing,
-               log::Union{Nothing, RunLog} = nothing) where {E<:AbstractEvaluator}
-    rng = problem.seed === nothing ? Random.default_rng() :
-          Random.MersenneTwister(problem.seed)
+               log::Union{Nothing, RunLog} = nothing,
+               checkpoint_every::Int = 0,
+               checkpoint_path::Union{Nothing, AbstractString} = nothing,
+               resume_from::Union{Nothing, AbstractString} = nothing,
+               allow_signature_mismatch::Bool = false,
+               ) where {E<:AbstractEvaluator}
+    checkpoint_every >= 0 || throw(ArgumentError("checkpoint_every must be >= 0"))
+    if checkpoint_every > 0 && checkpoint_path === nothing
+        throw(ArgumentError("checkpoint_every > 0 requires a checkpoint_path"))
+    end
 
     _validate_ops(algorithm.mutation_ops, algorithm.crossover_ops, GraphGenome;
                   mutation_rate=algorithm.mutation_rate,
                   crossover_rate=algorithm.crossover_rate)
-    reset_innovation_counter!()
 
     evaluator = problem.evaluator
     n_in = length(input_signature(evaluator))
@@ -1157,24 +1163,67 @@ function solve(problem::GPProblem{GraphGenome, E},
     pop_size = algorithm.pop_size
     bp = algorithm.bloat_penalty
 
-    # Initialize population
-    genomes = [initialize(GraphGenome, n_in, n_out, rng) for _ in 1:pop_size]
-    fitnesses = fill(Inf, pop_size)
+    # Resume vs fresh.
+    if resume_from !== nothing
+        ckpt = load_checkpoint(resume_from)
+        ckpt isa Checkpoint{GraphGenome} || throw(ArgumentError(
+            "checkpoint at $resume_from is not a Checkpoint{GraphGenome} " *
+            "(got $(typeof(ckpt)))"))
+        expected_sig = _algorithm_signature(algorithm)
+        if ckpt.algorithm_signature != expected_sig && !allow_signature_mismatch
+            throw(ArgumentError(
+                "algorithm signature mismatch on resume. " *
+                "Checkpoint signature 0x$(string(ckpt.algorithm_signature, base=16)), " *
+                "current algorithm 0x$(string(expected_sig, base=16)). " *
+                "Pass `allow_signature_mismatch=true` to override intentionally."))
+        end
+        rng = deepcopy(ckpt.rng_state)
+        genomes = deepcopy(ckpt.population)
+        fitnesses = copy(ckpt.fitnesses)
+        start_gen = ckpt.generation + 1
+        start_wall = ckpt.wall_time
+        fitness_history = copy(ckpt.fitness_history)
+        mean_history = copy(ckpt.mean_history)
+        best_genome_all_time = deepcopy(ckpt.best_genome)
+        best_fitness_all_time = ckpt.best_fitness
 
-    for i in 1:pop_size
-        fitnesses[i] = _evaluate_with_penalty(genomes[i], evaluator, bp)
-        genomes[i].fitness = fitnesses[i]
+        # Restore the global innovation counter from the live population so
+        # future structural mutations get IDs strictly greater than any
+        # currently-allocated innovation.
+        max_inn = 0
+        for g in genomes
+            for c in values(g.connections)
+                if c.innovation > max_inn
+                    max_inn = c.innovation
+                end
+            end
+        end
+        init_innovation_range!(max_inn)
+    else
+        rng = problem.seed === nothing ? Random.default_rng() :
+              Random.MersenneTwister(problem.seed)
+        reset_innovation_counter!()
+
+        # Initialize population
+        genomes = [initialize(GraphGenome, n_in, n_out, rng) for _ in 1:pop_size]
+        fitnesses = fill(Inf, pop_size)
+        for i in 1:pop_size
+            fitnesses[i] = _evaluate_with_penalty(genomes[i], evaluator, bp)
+            genomes[i].fitness = fitnesses[i]
+        end
+        start_gen = 1
+        start_wall = 0.0
+        fitness_history = Float64[]
+        mean_history = Float64[]
+        init_best = argmin(fitnesses)
+        best_genome_all_time = deepcopy(genomes[init_best])
+        best_fitness_all_time = fitnesses[init_best]
     end
 
     species_state = _init_species_state(algorithm.speciation)
-    fitness_history = Float64[]
-    mean_history = Float64[]
-    init_best = argmin(fitnesses)
-    best_genome_all_time = deepcopy(genomes[init_best])
-    best_fitness_all_time = fitnesses[init_best]
-    t0 = time()
+    t0 = time() - start_wall
 
-    for gen in 1:algorithm.generations
+    for gen in start_gen:algorithm.generations
         order = sortperm(fitnesses)
         genomes = genomes[order]
         fitnesses = fitnesses[order]
@@ -1230,6 +1279,13 @@ function solve(problem::GPProblem{GraphGenome, E},
 
         genomes = next_genomes
         fitnesses = next_fitnesses
+
+        if checkpoint_every > 0 && checkpoint_path !== nothing &&
+           gen % checkpoint_every == 0
+            _save_ckpt(genomes, fitnesses, rng, best_genome_all_time,
+                       best_fitness_all_time, fitness_history, mean_history,
+                       time() - t0, gen, algorithm, checkpoint_path)
+        end
     end
 
     order = sortperm(fitnesses)

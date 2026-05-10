@@ -173,6 +173,7 @@ export
 
     # Checkpointing
     Checkpoint,
+    NSGAIICheckpoint,
     save_checkpoint,
     load_checkpoint,
 

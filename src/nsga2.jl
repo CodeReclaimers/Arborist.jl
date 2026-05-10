@@ -673,6 +673,59 @@ function _nsga2_select_survivors(genomes::Vector{G},
 end
 
 # =============================================================================
+# Checkpointing helpers
+# =============================================================================
+
+# Stable signature for an NSGAII config so resume can detect mismatched
+# hyperparameters. Mirrors `_algorithm_signature(::GeneticProgramming)`.
+function _algorithm_signature(alg::NSGAII)
+    h = hash((alg.pop_size, alg.generations,
+              alg.mutation_rate, alg.crossover_rate,
+              alg.parallel,
+              length(alg.mutation_ops),
+              length(alg.crossover_ops)))
+    for op in alg.mutation_ops
+        h = hash(_signature_component(op), h)
+    end
+    for op in alg.crossover_ops
+        h = hash(_signature_component(op), h)
+    end
+    return h
+end
+
+"""
+    _save_nsga2_ckpt(genomes, fitnesses, rng, hypervolume_history,
+                     wall_time, gen, algorithm, path)
+
+Build an `NSGAIICheckpoint` from the current evolution state and atomically
+persist it to `path`. Invoked from the NSGA-II solve loop at
+`checkpoint_every` boundaries.
+"""
+function _save_nsga2_ckpt(genomes::Vector{G},
+                          fitnesses::Vector{Vector{Float64}},
+                          rng::AbstractRNG,
+                          hypervolume_history::Vector{Float64},
+                          wall_time::Float64, gen::Int,
+                          algorithm::NSGAII,
+                          path::AbstractString) where {G}
+    sig = _algorithm_signature(algorithm)
+    ckpt = NSGAIICheckpoint{G}(
+        NSGAII_CHECKPOINT_FORMAT_VERSION,
+        _arborist_version(),
+        VERSION,
+        gen,
+        deepcopy(genomes),
+        [copy(f) for f in fitnesses],
+        copy(rng),
+        copy(hypervolume_history),
+        wall_time,
+        sig,
+    )
+    save_checkpoint(ckpt, path)
+    return nothing
+end
+
+# =============================================================================
 # Solve method
 # =============================================================================
 
@@ -695,42 +748,91 @@ function solve(problem::GPProblem{G, E},
                verbose::Bool = false,
                callback = nothing,
                log::Union{Nothing, RunLog} = nothing,
-               initial_population::Union{Nothing, Vector{<:AbstractGenome}} = nothing
+               initial_population::Union{Nothing, Vector{<:AbstractGenome}} = nothing,
+               checkpoint_every::Int = 0,
+               checkpoint_path::Union{Nothing, AbstractString} = nothing,
+               resume_from::Union{Nothing, AbstractString} = nothing,
+               allow_signature_mismatch::Bool = false,
                ) where {G, E<:AbstractMultiObjectiveEvaluator}
-    rng = problem.seed === nothing ? Random.default_rng() :
-          Random.MersenneTwister(problem.seed)
+    checkpoint_every >= 0 || throw(ArgumentError("checkpoint_every must be >= 0"))
+    if checkpoint_every > 0 && checkpoint_path === nothing
+        throw(ArgumentError("checkpoint_every > 0 requires a checkpoint_path"))
+    end
+    if resume_from !== nothing && initial_population !== nothing
+        throw(ArgumentError(
+            "solve: pass either `resume_from` or `initial_population`, not both"))
+    end
 
     _validate_ops(algorithm.mutation_ops, algorithm.crossover_ops, G;
                   mutation_rate=algorithm.mutation_rate,
                   crossover_rate=algorithm.crossover_rate)
 
-    # GraphGenome uses a process-global innovation counter that tracks structural
-    # mutation IDs. Reset it at the top of each solve so successive runs in the
-    # same process start from 1 (same semantics as the single-objective path).
-    if G === GraphGenome
-        reset_innovation_counter!()
-    end
-
     evaluator = problem.evaluator
     pop_size = algorithm.pop_size
     n_objectives = length(objective_names(evaluator))
 
-    # Initialize population (warm-start or fresh).
-    genomes = if initial_population === nothing
-        _nsga2_init_population(problem, algorithm, rng)
+    if resume_from !== nothing
+        ckpt = load_checkpoint(resume_from)
+        ckpt isa NSGAIICheckpoint{G} || throw(ArgumentError(
+            "checkpoint at $resume_from is not an NSGAIICheckpoint{$G} " *
+            "(got $(typeof(ckpt)))"))
+        expected_sig = _algorithm_signature(algorithm)
+        if ckpt.algorithm_signature != expected_sig && !allow_signature_mismatch
+            throw(ArgumentError(
+                "algorithm signature mismatch on resume. " *
+                "Checkpoint signature 0x$(string(ckpt.algorithm_signature, base=16)), " *
+                "current algorithm 0x$(string(expected_sig, base=16)). " *
+                "Pass `allow_signature_mismatch=true` to override intentionally."))
+        end
+        rng = deepcopy(ckpt.rng_state)
+        genomes = deepcopy(ckpt.population)
+        fitnesses = [copy(f) for f in ckpt.fitnesses]
+        hypervolume_history = copy(ckpt.hypervolume_history)
+        start_gen = ckpt.generation + 1
+        start_wall = ckpt.wall_time
+
+        if G === GraphGenome
+            max_inn = 0
+            for g in genomes
+                for c in values(g.connections)
+                    if c.innovation > max_inn
+                        max_inn = c.innovation
+                    end
+                end
+            end
+            init_innovation_range!(max_inn)
+        end
     else
-        _validate_initial_population(initial_population, pop_size, G)
-        Vector{G}(deepcopy.(initial_population))
+        rng = problem.seed === nothing ? Random.default_rng() :
+              Random.MersenneTwister(problem.seed)
+
+        # GraphGenome uses a process-global innovation counter that tracks
+        # structural mutation IDs. Reset at the top of fresh solves so
+        # successive runs in the same process start from 1.
+        if G === GraphGenome
+            reset_innovation_counter!()
+        end
+
+        # Initialize population (warm-start or fresh).
+        genomes = if initial_population === nothing
+            _nsga2_init_population(problem, algorithm, rng)
+        else
+            _validate_initial_population(initial_population, pop_size, G)
+            Vector{G}(deepcopy.(initial_population))
+        end
+
+        # Evaluate initial population.
+        fitnesses = [fill(Inf, n_objectives) for _ in 1:pop_size]
+        _parallel_evaluate_multi!(fitnesses, genomes, evaluator, 1:pop_size, algorithm.parallel)
+
+        hypervolume_history = Float64[]
+        start_gen = 1
+        start_wall = 0.0
     end
 
-    # Evaluate initial population.
-    fitnesses = [fill(Inf, n_objectives) for _ in 1:pop_size]
-    _parallel_evaluate_multi!(fitnesses, genomes, evaluator, 1:pop_size, algorithm.parallel)
+    t0 = time() - start_wall
 
-    hypervolume_history = Float64[]
-    t0 = time()
-
-    for gen in 1:algorithm.generations
+    for gen in start_gen:algorithm.generations
         # Compute ranks and crowding for parent selection.
         ranks = _nondominated_sort(fitnesses)
         crowding = zeros(Float64, pop_size)
@@ -790,6 +892,12 @@ function solve(problem::GPProblem{G, E},
         # Select N survivors via non-dominated sorting + crowding.
         genomes, fitnesses, _, _ = _nsga2_select_survivors(
             combined_genomes, combined_fitnesses, pop_size)
+
+        if checkpoint_every > 0 && checkpoint_path !== nothing &&
+           gen % checkpoint_every == 0
+            _save_nsga2_ckpt(genomes, fitnesses, rng, hypervolume_history,
+                             time() - t0, gen, algorithm, checkpoint_path)
+        end
     end
 
     wall_time = time() - t0

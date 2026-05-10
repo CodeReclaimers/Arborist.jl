@@ -293,6 +293,77 @@ using DynamicExpressions: OperatorEnum, Node
     end
 
     # =========================================================================
+    # RunLog wired with NSGA-II hypervolume + front-size metrics
+    # =========================================================================
+
+    @testset "NSGA-II RunLog metrics" begin
+        ops = OperatorEnum(; binary_operators=[+, -, *, /], unary_operators=[abs])
+        xs = Float32.(range(-1, 1, length=20))
+        X = reshape(xs, 1, :)
+        y = xs .^ 2 .+ xs
+
+        evaluator = ParsimonyEvaluator(TreeFitnessEvaluator(X, y, ops))
+        problem = GPProblem(evaluator, TreeGenome{Float32}; seed=42)
+        algorithm = NSGAII(pop_size=20, generations=8,
+                           mutation_rate=0.4, crossover_rate=0.3,
+                           parallel=false)
+
+        log = RunLog()
+        result = solve(problem, algorithm; verbose=false, log=log)
+
+        # One entry per generation.
+        @test length(log) == algorithm.generations
+
+        # Hypervolume populated and consistent with NSGAIIResult.
+        for (i, entry) in enumerate(log)
+            @test !isnan(entry.hypervolume)
+            @test entry.hypervolume == result.hypervolume_history[i]
+        end
+
+        # Front sizes are non-empty and sum to the population size.
+        for entry in log
+            @test !isempty(entry.front_sizes)
+            @test sum(entry.front_sizes) == algorithm.pop_size
+            @test all(s -> s > 0, entry.front_sizes)
+        end
+
+        # Final-generation hypervolume should be > 0 for this 2-objective
+        # parsimony problem (regression: pre-fix this stayed at 0.0 for
+        # ≥3 objectives; the assertion guards the populated path generally).
+        @test log[end].hypervolume > 0.0
+
+        # Show methods surface the new fields.
+        io = IOBuffer()
+        show(io, MIME("text/plain"), log[end])
+        s = String(take!(io))
+        @test occursin("hypervolume:", s)
+        @test occursin("Pareto fronts:", s)
+
+        println("  NSGA-II RunLog: gens=$(length(log)), final hv=$(round(log[end].hypervolume, digits=4)), final fronts=$(log[end].front_sizes)")
+    end
+
+    # =========================================================================
+    # Backwards-compat: GenerationLog 11-arg constructor still works
+    # =========================================================================
+
+    @testset "GenerationLog backward-compat constructor" begin
+        # 11-arg positional call (pre-NSGA-II-metrics signature).
+        g = Arborist.GenerationLog(0, 0.5, 0.8, 0.7, 1.2, 3, [5, 3, 2],
+                                    Dict(:m => 8), Dict(:m => 10), 4, 0.5)
+        @test isnan(g.hypervolume)
+        @test isempty(g.front_sizes)
+
+        # Single-objective record! call leaves the new fields at their
+        # sentinels (NaN / Int[]).
+        log = RunLog()
+        # Use a minimal stand-in for genomes (only counted via objectid).
+        Arborist.record!(log, 1, [0.5, 0.7], [Ref(1), Ref(2)], 0.1)
+        @test length(log) == 1
+        @test isnan(log[1].hypervolume)
+        @test isempty(log[1].front_sizes)
+    end
+
+    # =========================================================================
     # Solve with ExprGenome
     # =========================================================================
 

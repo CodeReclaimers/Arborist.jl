@@ -367,6 +367,21 @@ function _hypervolume_2d(front_fitnesses::Vector{Vector{Float64}},
 end
 
 """
+    _front_sizes_from_ranks(ranks::Vector{Int}, max_rank::Int) -> Vector{Int}
+
+Given per-individual Pareto-rank assignments and the population's maximum
+rank, return the size of each front in rank order (front 1 first). The
+returned vector sums to `length(ranks)`.
+"""
+function _front_sizes_from_ranks(ranks::Vector{Int}, max_rank::Int)
+    sizes = zeros(Int, max_rank)
+    for r in ranks
+        sizes[r] += 1
+    end
+    return sizes
+end
+
+"""
     _hypervolume_nd(front_fitnesses::Vector{Vector{Float64}}, ref_point::Vector{Float64}) -> Float64
 
 General N-D hypervolume indicator (minimization) via Hypervolume-by-Slicing-
@@ -744,11 +759,13 @@ function solve(problem::GPProblem{G, E},
         end
 
         if log !== nothing
-            # Scalar summary = best first-objective fitness; matches the plan's
-            # agreement that richer NSGA-II metrics (per-front hypervolume,
-            # crowding) are a future phase.
+            # Scalar summary = best first-objective fitness; multi-objective
+            # detail is carried in the NSGAIISnapshot fields below.
             scalar_fits = Float64[f[1] for f in fitnesses]
-            record!(log, gen, scalar_fits, genomes, time() - t0)
+            front_sizes = _front_sizes_from_ranks(ranks, max_rank)
+            nsga2_snap = NSGAIISnapshot(hv, front_sizes)
+            record!(log, gen, scalar_fits, genomes, time() - t0;
+                    nsga2=nsga2_snap)
         end
 
         # Update LLM operator contexts — use first objective as scalar fitness proxy.

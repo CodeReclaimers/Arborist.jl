@@ -37,6 +37,12 @@ are left as empty containers by F.0.
   by `serialize`-hash. Coarse genotypic diversity proxy.
 - `wall_time::Float64`: cumulative wall-clock seconds elapsed since
   `t0` (run start).
+- `hypervolume::Float64`: NSGA-II first-front hypervolume. `NaN` for
+  single-objective runs and any caller that does not pass an
+  `NSGAIISnapshot` to `record!`.
+- `front_sizes::Vector{Int}`: NSGA-II per-rank Pareto-front sizes,
+  ordered by rank (front 1 first). Empty for single-objective runs and
+  any caller that does not pass an `NSGAIISnapshot` to `record!`.
 """
 mutable struct GenerationLog
     generation::Int
@@ -50,7 +56,25 @@ mutable struct GenerationLog
     operator_attempted::Dict{Symbol,Int}
     unique_structures::Int
     wall_time::Float64
+    hypervolume::Float64
+    front_sizes::Vector{Int}
 end
+
+# Backward-compatible constructor: callers pre-dating the NSGA-II metric
+# fields supply 11 positional arguments and get NaN / Int[] defaults.
+GenerationLog(generation::Integer, best_fitness::Real,
+              mean_fitness::Real, median_fitness::Real, worst_fitness::Real,
+              n_species::Integer, species_sizes::Vector{Int},
+              operator_success::Dict{Symbol,Int},
+              operator_attempted::Dict{Symbol,Int},
+              unique_structures::Integer, wall_time::Real) =
+    GenerationLog(Int(generation), Float64(best_fitness),
+                  Float64(mean_fitness), Float64(median_fitness),
+                  Float64(worst_fitness),
+                  Int(n_species), species_sizes,
+                  operator_success, operator_attempted,
+                  Int(unique_structures), Float64(wall_time),
+                  NaN, Int[])
 
 """
     RunLog
@@ -105,6 +129,17 @@ function Base.show(io::IO, ::MIME"text/plain", g::GenerationLog)
         println(io, "  species:          (speciation disabled)")
     end
     println(io, "  unique structures: ", g.unique_structures)
+    if !isnan(g.hypervolume) || !isempty(g.front_sizes)
+        if !isnan(g.hypervolume)
+            println(io, "  hypervolume:      ", _fmt_fitness(g.hypervolume))
+        end
+        if !isempty(g.front_sizes)
+            shown = g.front_sizes[1:min(8, end)]
+            more = length(g.front_sizes) > length(shown) ? ", ..." : ""
+            println(io, "  Pareto fronts:    ", length(g.front_sizes),
+                        " (sizes: ", join(shown, ", "), more, ")")
+        end
+    end
     if !isempty(g.operator_attempted)
         ops = sort!(collect(keys(g.operator_attempted)))
         parts = String[]
@@ -147,6 +182,13 @@ function Base.show(io::IO, ::MIME"text/plain", log::RunLog)
                 ", median=", _fmt_fitness(last.median_fitness))
     println(io, "  final species:    ", last.n_species)
     println(io, "  final structures: ", last.unique_structures)
+    if !isnan(last.hypervolume)
+        println(io, "  final hypervolume: ", _fmt_fitness(last.hypervolume))
+    end
+    if !isempty(last.front_sizes)
+        println(io, "  final Pareto fronts: ", length(last.front_sizes),
+                    " (front 1 size = ", last.front_sizes[1], ")")
+    end
     if !isempty(op_try)
         ops = sort!(collect(keys(op_try)))
         parts = String[]
@@ -177,13 +219,34 @@ end
 
 SpeciationSnapshot() = SpeciationSnapshot(0, Int[])
 
+"""
+    NSGAIISnapshot
+
+Mutable carrier for NSGA-II per-generation metrics that are not derivable
+from a scalar fitness vector. Constructed by the NSGA-II solve loop and
+passed to `record!` via the `nsga2=` kwarg; ignored by single-objective
+callers. Not part of the public API.
+
+# Fields
+- `hypervolume::Float64`: hypervolume of the first Pareto front against a
+  per-generation reference point (worst finite values × `ref_margin`).
+- `front_sizes::Vector{Int}`: member counts per Pareto front, ordered by
+  rank (front 1 first). Sums to the population size.
+"""
+mutable struct NSGAIISnapshot
+    hypervolume::Float64
+    front_sizes::Vector{Int}
+end
+
+NSGAIISnapshot() = NSGAIISnapshot(NaN, Int[])
+
 # ---------------------------------------------------------------------------
 # record! — append one entry to a RunLog.
 # ---------------------------------------------------------------------------
 
 """
     record!(log::RunLog, gen, fitnesses, genomes, wall_time;
-            snapshot=nothing)
+            snapshot=nothing, nsga2=nothing)
 
 Append one `GenerationLog` to `log` with aggregate fitness statistics,
 optional speciation snapshot, structural diversity, and wall-clock time.
@@ -197,11 +260,16 @@ optional speciation snapshot, structural diversity, and wall-clock time.
   `n_species` / `sizes` fields are copied into the entry. If `nothing`,
   the entry records `n_species=1` and `species_sizes=[length(genomes)]`
   (the NoSpeciation case).
+- `nsga2::Union{Nothing, NSGAIISnapshot}`: if provided, its
+  `hypervolume` and `front_sizes` are copied into the entry. If
+  `nothing`, the entry leaves `hypervolume=NaN` and `front_sizes=Int[]`,
+  signalling that the metrics do not apply to this run.
 """
 function record!(log::RunLog, gen::Integer,
                  fitnesses::AbstractVector, genomes::AbstractVector,
                  wall_time::Real;
-                 snapshot::Union{Nothing, SpeciationSnapshot} = nothing)
+                 snapshot::Union{Nothing, SpeciationSnapshot} = nothing,
+                 nsga2::Union{Nothing, NSGAIISnapshot} = nothing)
     finite = Float64[f for f in fitnesses if isfinite(f)]
     if isempty(finite)
         best = Inf
@@ -221,6 +289,12 @@ function record!(log::RunLog, gen::Integer,
         (snapshot.n_species, copy(snapshot.sizes))
     end
 
+    hv, front_sizes = if nsga2 === nothing
+        (NaN, Int[])
+    else
+        (nsga2.hypervolume, copy(nsga2.front_sizes))
+    end
+
     unique_n = _count_unique_structures(genomes)
 
     push!(log.entries, GenerationLog(
@@ -228,6 +302,7 @@ function record!(log::RunLog, gen::Integer,
         n_species, sizes,
         Dict{Symbol,Int}(), Dict{Symbol,Int}(),
         unique_n, Float64(wall_time),
+        hv, front_sizes,
     ))
     return log
 end

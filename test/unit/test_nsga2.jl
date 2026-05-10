@@ -158,6 +158,62 @@ using DynamicExpressions: OperatorEnum, Node
     end
 
     # =========================================================================
+    # Hypervolume N-D (HSO recursion, Phase F follow-up)
+    # =========================================================================
+
+    @testset "Hypervolume N-D" begin
+        # 1-D closed form: ref - min.
+        hv1 = Arborist._hypervolume_nd([[0.25], [0.75]], [1.0])
+        @test hv1 ≈ 0.75
+        println("  Hypervolume 1-D: min(0.25,0.75) vs ref 1.0 -> $hv1")
+
+        # 3-D unit cube from origin: ref (1,1,1) -> volume 1.
+        hv3_unit = Arborist._hypervolume_nd([[0.0, 0.0, 0.0]], [1.0, 1.0, 1.0])
+        @test hv3_unit ≈ 1.0
+
+        # 4-D unit hypercube from origin: ref (1,1,1,1) -> volume 1.
+        hv4_unit = Arborist._hypervolume_nd([[0.0, 0.0, 0.0, 0.0]],
+                                             [1.0, 1.0, 1.0, 1.0])
+        @test hv4_unit ≈ 1.0
+
+        # 3-D dominated point contributes nothing (origin already covers
+        # everything inside ref (1,1,1)).
+        hv3_dom = Arborist._hypervolume_nd([[0.0, 0.0, 0.0], [0.5, 0.5, 0.5]],
+                                            [1.0, 1.0, 1.0])
+        @test hv3_dom ≈ 1.0
+
+        # 3-D hand-computed front against ref (3.3, 4.4, 5.5):
+        #   slab z in [2,3): HV_2d([(3,1)], (3.3,4.4)) = 0.3*3.4 = 1.02
+        #   slab z in [3,5): HV_2d([(3,1),(2,2)], (3.3,4.4)) = 3.42
+        #   slab z in [5,5.5]: HV_2d(all three, (3.3,4.4))   = 3.82
+        # total = 1*1.02 + 2*3.42 + 0.5*3.82 = 9.77
+        hv3_hand = Arborist._hypervolume_nd([[1.0, 4.0, 5.0],
+                                              [2.0, 2.0, 3.0],
+                                              [3.0, 1.0, 2.0]],
+                                             [3.3, 4.4, 5.5])
+        @test hv3_hand ≈ 9.77 atol=1e-9
+        println("  Hypervolume 3-D: hand-computed slab sum -> $hv3_hand")
+
+        # Empty front and points beyond reference both produce zero.
+        @test Arborist._hypervolume_nd(Vector{Float64}[], [1.0, 1.0, 1.0]) == 0.0
+        @test Arborist._hypervolume_nd([[2.0, 2.0, 2.0]], [1.0, 1.0, 1.0]) == 0.0
+
+        # Regression: _compute_hypervolume must be non-zero for a non-degenerate
+        # 3-objective front. Prior to the HSO fix it always returned 0.0 for
+        # n_objectives != 2.
+        fits3 = [[1.0, 4.0, 5.0], [2.0, 2.0, 3.0], [3.0, 1.0, 2.0]]
+        ranks3 = [1, 1, 1]
+        hv3_dispatch = Arborist._compute_hypervolume(fits3, ranks3)
+        @test hv3_dispatch > 0.0
+        println("  _compute_hypervolume 3-objective dispatch -> $hv3_dispatch")
+
+        # 4-objective dispatch sanity.
+        fits4 = [[1.0, 4.0, 5.0, 2.0], [2.0, 2.0, 3.0, 1.0]]
+        ranks4 = [1, 1]
+        @test Arborist._compute_hypervolume(fits4, ranks4) > 0.0
+    end
+
+    # =========================================================================
     # ParsimonyEvaluator
     # =========================================================================
 

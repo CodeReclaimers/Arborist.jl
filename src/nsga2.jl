@@ -367,19 +367,57 @@ function _hypervolume_2d(front_fitnesses::Vector{Vector{Float64}},
 end
 
 """
+    _hypervolume_nd(front_fitnesses::Vector{Vector{Float64}}, ref_point::Vector{Float64}) -> Float64
+
+General N-D hypervolume indicator (minimization) via Hypervolume-by-Slicing-
+Objectives (Zitzler 2001). Recurses on the last objective and bottoms out at
+`_hypervolume_2d` for `d == 2` and a closed-form length for `d == 1`. Points
+exceeding the reference point in any objective are excluded.
+"""
+function _hypervolume_nd(front_fitnesses::Vector{Vector{Float64}},
+                          ref_point::Vector{Float64})
+    d = length(ref_point)
+    valid = [f for f in front_fitnesses
+             if all(f[m] <= ref_point[m] for m in 1:d)]
+    isempty(valid) && return 0.0
+
+    if d == 1
+        return ref_point[1] - minimum(f[1] for f in valid)
+    elseif d == 2
+        return _hypervolume_2d(valid, ref_point)
+    end
+
+    # Slice along the last objective: sort ascending, then for each "slab"
+    # the active set in d-1 dims is the prefix of points with smaller last-dim
+    # value (those still contribute at this height under minimization).
+    sort!(valid; by = f -> f[d])
+    sub_ref = ref_point[1:d-1]
+    n = length(valid)
+    hv = 0.0
+    for i in 1:n
+        z_lo = valid[i][d]
+        z_hi = i < n ? valid[i+1][d] : ref_point[d]
+        height = z_hi - z_lo
+        if height > 0.0
+            active = [valid[j][1:d-1] for j in 1:i]
+            hv += height * _hypervolume_nd(active, sub_ref)
+        end
+    end
+    return hv
+end
+
+"""
     _compute_hypervolume(fitnesses, ranks, ref_margin=1.1) -> Float64
 
 Compute hypervolume of the first Pareto front. Reference point is derived
 from the worst objective values across the entire population, scaled by
-`ref_margin`. Currently supports 2 objectives.
+`ref_margin`. Dispatches by objective count: closed-form for 1-D, the O(n log n)
+sweep for 2-D, and HSO recursion (`_hypervolume_nd`) for 3-D and beyond.
 """
 function _compute_hypervolume(fitnesses::Vector{Vector{Float64}},
                                ranks::Vector{Int};
                                ref_margin::Float64 = 1.1)
     n_objectives = length(fitnesses[1])
-    if n_objectives != 2
-        return 0.0  # only 2D hypervolume implemented
-    end
 
     # Compute reference point from worst finite values.
     ref_point = fill(-Inf, n_objectives)
@@ -403,7 +441,14 @@ function _compute_hypervolume(fitnesses::Vector{Vector{Float64}},
     # Filter out individuals with any Inf objective.
     front1 = [f for f in front1 if all(isfinite, f)]
 
-    return _hypervolume_2d(front1, ref_point)
+    if n_objectives == 1
+        isempty(front1) && return 0.0
+        return ref_point[1] - minimum(f[1] for f in front1)
+    elseif n_objectives == 2
+        return _hypervolume_2d(front1, ref_point)
+    else
+        return _hypervolume_nd(front1, ref_point)
+    end
 end
 
 # =============================================================================

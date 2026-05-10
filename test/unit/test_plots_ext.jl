@@ -40,4 +40,28 @@ using RecipesBase
     for (needle, ok) in found
         @test ok || @info "no apply_recipe method found for $needle"
     end
+
+    # ---- RunLog recipe: NSGA-II metric awareness -------------------------
+    # When the RunLog has no NSGA-II metrics populated the recipe should
+    # request the default 3-panel layout; when at least one entry has a
+    # non-NaN hypervolume or non-empty front_sizes, it should request 5.
+    plain = RunLog()
+    Arborist.record!(plain, 1, [0.5, 0.7], [Ref(1), Ref(2)], 0.1)
+    rich = RunLog()
+    Arborist.record!(rich, 1, [0.5, 0.7], [Ref(1), Ref(2)], 0.1;
+                     nsga2 = Arborist.NSGAIISnapshot(1.234, [10, 5, 3]))
+
+    # `apply_recipe(plotattributes, log)` returns a vector of `RecipeData`;
+    # the layout attribute is inserted into `plotattributes` by the recipe.
+    plain_attrs = Dict{Symbol, Any}()
+    rich_attrs  = Dict{Symbol, Any}()
+    plain_series = RecipesBase.apply_recipe(plain_attrs, plain)
+    rich_series  = RecipesBase.apply_recipe(rich_attrs,  rich)
+
+    @test plain_attrs[:layout] == (3, 1)
+    @test rich_attrs[:layout]  == (5, 1)
+    # 3-panel layout produces 4 series (best + mean on subplot 1, then
+    # species, then unique). 5-panel layout adds 2 (hypervolume + front1).
+    @test length(plain_series) == 4
+    @test length(rich_series)  == 6
 end

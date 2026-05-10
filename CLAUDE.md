@@ -102,7 +102,6 @@ Surveyed gaps that Phase F did not implement, either because of scope caps per p
 - **First-class test-problem generators** (`Benchmarks.nguyen(n)`, `Benchmarks.cartpole()`, etc). Each benchmark hand-rolls its data inline; a generator module would let users run the same problems outside `test/`.
 - **Hall-of-Fame / all-time archive beyond per-run best**. F.5 tracks a single all-time best; an archive of the top-K across all generations would support richer analysis.
 - **Per-island checkpointing for IslandModel**. F.5 ships global-best checkpoint only.
-- **RunLog richer NSGA-II support** (hypervolume trajectory, per-front sizes). F.0 wired the kwarg but only populates first-objective scalar.
 - **Per-species size dynamics plot recipe**. RunLog already records `species_sizes` per generation; stacked-area recipe is a natural follow-on to F.6.
 - **`plot_operator_success(log)`**. F.5 populates operator dicts; a dedicated recipe would make per-operator hit rates visually scannable.
 

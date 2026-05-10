@@ -147,12 +147,20 @@ end
 # ---------------------------------------------------------------------------
 
 @recipe function f(log::RunLog)
+    es = entries(log)
+    # Detect whether NSGA-II metrics were populated for any generation.
+    # Mirrors the show-method gating: NaN hypervolume + empty front_sizes
+    # mean "not applicable", so the default 3-panel layout is used; when
+    # an NSGA-II solve attached this RunLog the layout grows to 5 panels.
+    has_nsga2 = !isempty(es) && (any(e -> !isnan(e.hypervolume), es) ||
+                                  any(e -> !isempty(e.front_sizes), es))
+    n_panels = has_nsga2 ? 5 : 3
+
     title  --> "RunLog summary"
     xlabel --> "Generation"
     legend --> :topright
-    layout --> (3, 1)
+    layout --> (n_panels, 1)
 
-    es = entries(log)
     xs = [e.generation for e in es]
 
     @series begin
@@ -183,6 +191,33 @@ end
         ylabel := "Unique structures"
         label --> "unique"
         xs, [e.unique_structures for e in es]
+    end
+
+    if has_nsga2
+        # Hypervolume panel: log scale by default since HV typically spans
+        # several orders of magnitude as the front improves. Non-positive
+        # / NaN values become gaps so log10 never sees a bad input.
+        @series begin
+            subplot := 4
+            ylabel := "Hypervolume"
+            label --> "hypervolume"
+            linewidth --> 2
+            yscale --> :log10
+            hv_raw = [e.hypervolume for e in es]
+            xs, [(isfinite(v) && v > 0) ? Float64(v) : NaN for v in hv_raw]
+        end
+        # Pareto-front-1 size panel: most actionable single number from
+        # `front_sizes`. A stacked-area view of all fronts would be richer
+        # but is a separate recipe; this recipe targets a quick-look
+        # trajectory view.
+        @series begin
+            subplot := 5
+            ylabel := "Front 1 size"
+            label --> "front1"
+            linewidth --> 2
+            xs, [isempty(e.front_sizes) ? NaN : Float64(e.front_sizes[1])
+                 for e in es]
+        end
     end
 end
 

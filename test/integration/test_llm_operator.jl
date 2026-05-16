@@ -39,6 +39,33 @@ include(joinpath(@__DIR__, "..", "mocks", "mock_http.jl"))
         flush(stdout)
     end
 
+    @testset "JSON unescape walker preserves NUL-byte sentinel sequences" begin
+        # The previous unescape implementation used "\x00BACKSLASH\x00" as a
+        # round-trip placeholder while decoding \\. If a captured JSON string
+        # ever contained that exact byte sequence (highly unlikely in source
+        # code but possible in arbitrary LLM output), the placeholder would
+        # be mangled on the way out. The single-pass walker has no such
+        # placeholder, so the sequence round-trips byte-for-byte.
+        sentinel = "\x00BACKSLASH\x00"
+        @test Arborist._json_unescape(sentinel) == sentinel
+        # Same sentinel embedded next to a real escape; only the \n should decode.
+        @test Arborist._json_unescape("\x00BACKSLASH\x00\\n") == "\x00BACKSLASH\x00\n"
+        # Sentinel surviving \\ decoding (which used to overwrite it).
+        @test Arborist._json_unescape("\\\\$sentinel") == "\\$sentinel"
+    end
+
+    @testset "JSON unescape walker handles malformed escapes gracefully" begin
+        # Trailing lone backslash — emit literally rather than dropping or crashing.
+        @test Arborist._json_unescape("abc\\") == "abc\\"
+        # Unknown escape — pass through unchanged.
+        @test Arborist._json_unescape("a\\zb") == "a\\zb"
+        # Malformed \u (fewer than 4 hex digits) — pass through unchanged.
+        @test Arborist._json_unescape("a\\u12") == "a\\u12"
+        @test Arborist._json_unescape("a\\uZZZZ") == "a\\uZZZZ"
+        # Well-formed unicode still decodes.
+        @test Arborist._json_unescape("a\\u003cb") == "a<b"
+    end
+
 
     # Helper: create a simple test problem and genome.
     function make_llm_test_setup()

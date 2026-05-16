@@ -182,38 +182,46 @@ function _initialize_population(problem::GPProblem{ExprGenome, E},
     return (genomes, state)
 end
 
-# Fallback for genome types that do not yet support IslandModel.
-# TreeGenome has its own method defined in tree_genome.jl.
+# Fallback for genome types that do not provide their own _initialize_population.
+# ExprGenome's method is defined just above; TreeGenome / AntGenome / GraphGenome
+# each define their own in tree_genome.jl / ant_genome.jl / graph_genome.jl.
 function _initialize_population(problem::GPProblem{G,E},
                                  algorithm::GeneticProgramming,
                                  rng::AbstractRNG) where {G,E}
-    error("_initialize_population does not support $(G). " *
-          "IslandModel currently supports ExprGenome and TreeGenome; " *
-          "other genome types (AntGenome, GraphGenome) require a " *
-          "specialized solve method.")
+    hint = if G === ADFGenome
+        "ADFGenome currently has mutation, crossover, and an evaluate_adf(g, X, y) " *
+        "helper but no solve-loop integration. Wiring _initialize_population and an " *
+        "evaluate_genome(::ADFGenome, ::AbstractEvaluator) dispatch is tracked under " *
+        "\"Deferred Research Roadmap > ADF extensions\" in CLAUDE.md."
+    else
+        "Define `_initialize_population(::GPProblem{$G, E}, ::GeneticProgramming, " *
+        "::AbstractRNG)` for this genome type. The built-in supported genomes are " *
+        "ExprGenome, TreeGenome, AntGenome, and GraphGenome."
+    end
+    error("_initialize_population is not defined for genome type $G. $hint")
 end
 
 """
     _validate_ops(mutation_ops, crossover_ops, ::Type{G})
 
-Verify that at least one operator in each vector has a `mutate` / `crossover`
-method dispatched on genome type `G`. Throws `ArgumentError` with a pointer
-at the right default operators if no compatible operator is present. This
-catches the common case where a user constructs `GeneticProgramming` or
-`NSGAII` with the default ExprGenome operators and hands it a GraphGenome
-problem — without this check the failure would surface as a cryptic
-`MethodError` deep inside the breed loop.
+Verify that **every** operator in each vector has a `mutate` / `crossover`
+method dispatched on genome type `G`. Throws `ArgumentError` listing the
+offending operator types if any do not dispatch.
+
+The breed loop in `_breed_next_generation!` samples uniformly from the
+operator lists via `rand(rng, alg.crossover_ops)` / `rand(rng,
+alg.mutation_ops)`, so a single non-dispatching operator in the list is
+enough to crash a long run with a `MethodError` mid-evolution. The
+common trigger is constructing `GeneticProgramming` or `NSGAII` with the
+default ExprGenome operators and handing it a `GraphGenome` problem;
+this check turns that into a fast configuration-time failure with a
+pointer at the right default operators.
 """
 function _validate_ops(mutation_ops::Vector{AbstractMutationOperator},
                        crossover_ops::Vector{AbstractCrossoverOperator},
                        ::Type{G};
                        mutation_rate::Float64 = 1.0,
                        crossover_rate::Float64 = 1.0) where {G}
-    have_mut = mutation_rate == 0.0 ||
-        any(op -> hasmethod(mutate, Tuple{typeof(op), G, AbstractRNG}), mutation_ops)
-    have_xo = crossover_rate == 0.0 ||
-        any(op -> hasmethod(crossover, Tuple{typeof(op), G, G, AbstractRNG}), crossover_ops)
-
     hint = if G === GraphGenome
         "Use `neat_defaults()` to get (mutation_ops, crossover_ops) for GraphGenome: " *
         "`ops = neat_defaults(); GeneticProgramming(; mutation_ops=ops.mutation_ops, " *
@@ -222,15 +230,37 @@ function _validate_ops(mutation_ops::Vector{AbstractMutationOperator},
         "Pass operators that dispatch on $G."
     end
 
-    if !have_mut
-        throw(ArgumentError(
-            "No mutation operator in `mutation_ops` dispatches on $G. " *
-            "Got types: $([typeof(op) for op in mutation_ops]). $hint"))
+    if mutation_rate > 0.0
+        if isempty(mutation_ops)
+            throw(ArgumentError(
+                "`mutation_ops` is empty but `mutation_rate=$(mutation_rate) > 0`; " *
+                "the breed loop would crash on `rand(rng, [])`. $hint"))
+        end
+        bad_mut = [typeof(op) for op in mutation_ops
+                   if !hasmethod(mutate, Tuple{typeof(op), G, AbstractRNG})]
+        if !isempty(bad_mut)
+            throw(ArgumentError(
+                "Some mutation operators in `mutation_ops` do not dispatch on $G: " *
+                "$(bad_mut). Every operator in the list must have a `mutate` method " *
+                "for $G because the breed loop samples operators uniformly at " *
+                "random. $hint"))
+        end
     end
-    if !have_xo
-        throw(ArgumentError(
-            "No crossover operator in `crossover_ops` dispatches on $G. " *
-            "Got types: $([typeof(op) for op in crossover_ops]). $hint"))
+    if crossover_rate > 0.0
+        if isempty(crossover_ops)
+            throw(ArgumentError(
+                "`crossover_ops` is empty but `crossover_rate=$(crossover_rate) > 0`; " *
+                "the breed loop would crash on `rand(rng, [])`. $hint"))
+        end
+        bad_xo = [typeof(op) for op in crossover_ops
+                  if !hasmethod(crossover, Tuple{typeof(op), G, G, AbstractRNG})]
+        if !isempty(bad_xo)
+            throw(ArgumentError(
+                "Some crossover operators in `crossover_ops` do not dispatch on $G: " *
+                "$(bad_xo). Every operator in the list must have a `crossover` " *
+                "method for $G because the breed loop samples operators uniformly " *
+                "at random. $hint"))
+        end
     end
     return nothing
 end

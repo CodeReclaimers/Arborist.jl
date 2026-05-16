@@ -32,9 +32,16 @@ function replace_subtree!(tree::Expr, target::Expr, replacement::Expr)
 end
 
 """
-    crossover(s::GenState, parent_a::Expr, parent_b::Expr) -> Tuple{Expr, Expr}
+    crossover(s::GenState, parent_a::Expr, parent_b::Expr,
+              rng::AbstractRNG = s.rng) -> Tuple{Expr, Expr}
 
 Perform subtree crossover between two parent expression trees.
+
+The `rng` argument controls compatible-pair sampling and defaults to
+`s.rng` for backwards compatibility; high-level operator wrappers should
+pass their explicit `rng` so the legacy contract that operators draw
+exclusively from the caller-provided RNG is honored even when `s.rng`
+differs.
 
 Strategy:
 - Flatten both trees with `unravel()`.
@@ -42,7 +49,8 @@ Strategy:
 - Pick a random compatible pair, deepcopy both parents, and swap the subtrees.
 - If no compatible pair exists, return deepcopy of both parents unchanged.
 """
-function crossover(s::GenState, parent_a::Expr, parent_b::Expr)
+function crossover(s::GenState, parent_a::Expr, parent_b::Expr,
+                   rng::AbstractRNG = s.rng)
     nodes_a = unravel(parent_a)
     nodes_b = unravel(parent_b)
 
@@ -79,7 +87,7 @@ function crossover(s::GenState, parent_a::Expr, parent_b::Expr)
         return (deepcopy(parent_a), deepcopy(parent_b))
     end
 
-    (idx_a, idx_b) = rand(s.rng, compatible_pairs)
+    (idx_a, idx_b) = rand(rng, compatible_pairs)
 
     offspring_a = deepcopy(parent_a)
     offspring_b = deepcopy(parent_b)

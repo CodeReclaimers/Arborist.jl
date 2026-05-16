@@ -3,6 +3,110 @@
 All notable changes to Arborist.jl will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Checkpoint/resume for `GraphGenome` single-objective solve and `NSGAII`**
+  (ee13313). The existing `checkpoint_every` / `checkpoint_path` /
+  `resume_from` / `allow_signature_mismatch` kwargs now flow through both
+  paths. Introduces `AbstractCheckpoint` as a parent for the existing
+  `Checkpoint{G}` (layout v2, unchanged) and a new `NSGAIICheckpoint{G}`
+  (layout v1) that carries `Vector{Vector{Float64}}` fitnesses and the
+  hypervolume history. `GraphGenome` resume reconstructs the global
+  innovation counter via
+  `init_innovation_range!(max_innovation_in_population)`, which yields
+  bit-exact resumes (verified by a 20-generation interrupt-resume drift
+  test). `AntGenome` and `IslandModel` checkpointing remain deferred.
+- **`RunLog` NSGA-II metrics** (c01ec25). `GenerationLog` gains
+  `hypervolume::Float64` (NaN sentinel when not applicable) and
+  `front_sizes::Vector{Int}` (empty when not applicable). New
+  `NSGAIISnapshot` carrier mirrors the existing `SpeciationSnapshot`
+  pattern; `record!` gains an optional `nsga2=` kwarg. Single-objective
+  callers and the 11-arg positional `GenerationLog` constructor remain
+  source-compatible via a backward-compat constructor.
+- **`@recipe f(::RunLog)` NSGA-II awareness** (e8b014b). When at least
+  one entry has a non-NaN hypervolume or non-empty `front_sizes`, the
+  layout switches from `(3,1)` to `(5,1)` and adds log-scaled
+  hypervolume + front-1-size panels. Default 3-panel layout is
+  unchanged for plain single-objective `RunLog`s.
+
+### Changed
+
+- **`_validate_ops` now requires every operator in `mutation_ops` /
+  `crossover_ops` to dispatch on the genome type, not just one.** The
+  breed loop samples uniformly from each list, so a single
+  non-dispatching operator would crash mid-run with a `MethodError`. The
+  validation error now names the offending operator types and explains
+  the contract.
+- **`SubtreeCrossover` now honors the `rng` argument**. The high-level
+  `crossover(::SubtreeCrossover, ::ExprGenome, ::ExprGenome, rng)`
+  wrapper previously discarded the `rng` and used `g1.state.rng` via
+  the legacy `crossover(s::GenState, a, b)` method. The legacy method
+  now accepts an explicit `rng::AbstractRNG` (defaulting to `s.rng`
+  for backwards compatibility), and the wrapper threads its `rng`
+  through. In typical use the two RNGs are the same object, but
+  contract-driven code that swaps RNGs now behaves correctly.
+- **LLM operator JSON unescape rewritten as a single-pass character
+  walker** (`_json_unescape`). Replaces the previous five-step
+  `replace(...)` chain that used `\x00BACKSLASH\x00` as a round-trip
+  placeholder to avoid double-decoding `\\`. The new walker handles
+  `\\`, `\"`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`, and `\uXXXX` in one
+  traversal, passes unknown escapes through unchanged, and survives
+  malformed `\u` sequences without crashing. Captured values
+  containing the literal byte sequence `\x00BACKSLASH\x00` (very rare,
+  but possible in arbitrary LLM output) now round-trip exactly.
+- **`_initialize_population` fallback error message** rewritten to drop
+  the misleading "IslandModel only" framing, list the four built-in
+  supported genome types (`ExprGenome`, `TreeGenome`, `AntGenome`,
+  `GraphGenome`), and point `ADFGenome` callers at the deferred
+  roadmap entry. `ADFGenome` solve-loop integration remains deferred —
+  use `evaluate_adf(g, X, y)` directly.
+
+### Fixed
+
+- **CMA-ES `generations_run` after early termination** (14f105e). The
+  generation loop breaks when `best_fitness < convergence_threshold`,
+  but `GPResult` was constructed with the configured `alg.generations`
+  regardless. It now tracks the actual last completed generation. The
+  break condition and the returned `converged` flag both now use the
+  shared `_converged(best, threshold)` helper used elsewhere; this
+  also makes `convergence_threshold = Inf` correctly disable early
+  termination (matching the existing `convergence_threshold = -Inf`
+  default).
+- **`GraphEvaluator` data-shape validation** (14f105e). Constructor
+  now raises `ArgumentError` when `size(input_data, 2) !=
+  size(output_data, 2)`, when either matrix has zero columns, or
+  when either has zero rows. Previously extra target columns were
+  silently dropped, and missing target columns surfaced as `Inf` from
+  a swallowed `BoundsError` deep in the feedforward path.
+- **N-D hypervolume for NSGA-II with three or more objectives**
+  (3c666da). `_compute_hypervolume` was returning `0.0` for any
+  `n_objectives != 2`, so ≥3-objective NSGA-II runs reported a
+  flat-zero hypervolume trajectory. Now dispatches through
+  `_hypervolume_nd` (HSO recursion, Zitzler 2001) for `d ≥ 3`, with
+  the existing `_hypervolume_2d` and a closed-form `d=1` length as
+  base cases. Documentation in `docs/src/algorithms.md` and the
+  `NSGAIIResult` docstring updated to match.
+- **`ExprGenome` `serialize` Float32 literal round-trip** (48e3319).
+  `repr()` emits `Float32` constants in constructor-call form
+  (`Float32(1.5)`) rather than literal form (`1.5f0`); the
+  deserializer's `_is_valid_assignment` rejected RHS `:call` nodes
+  outside the function-set whitelist, so ~20% of LLM-style genomes
+  failed to round-trip and silently fell back to a classical
+  operator. The same mechanism dropped a fraction of individuals
+  during checkpoint/resume and cross-process migration. Fixed via
+  `_collapse_float32_literals` which evaluates constructor-call
+  forms back to literals before validation.
+- **`TreeGenome` docs ("Known Limitations")** corrected (14f105e). The
+  "Deserialize returns nothing" bullet no longer matched the
+  implementation, which accepts both DynamicExpressions infix and
+  prefix s-expression forms and returns `nothing` only on parse
+  failures or unknown operators. The LLM-operator note is now
+  scoped accurately — the prefix-notation system prompt exists but
+  the `mutate(::LLMMutationOperator, ::TreeGenome, rng)` dispatch is
+  not yet wired.
+
 ## [0.1.2] — 2026-05-08
 
 ### Documentation

@@ -27,7 +27,7 @@ function crossover(op::SubtreeCrossover, g1::ExprGenome, g2::ExprGenome, rng::Ab
     block_a = Expr(:block, deepcopy(g1.body)...)
     block_b = Expr(:block, deepcopy(g2.body)...)
 
-    (offspring_a, offspring_b) = crossover(g1.state, block_a, block_b)
+    (offspring_a, offspring_b) = crossover(g1.state, block_a, block_b, rng)
 
     expr_a = offspring_a.head == :block ? collect(offspring_a.args) : [offspring_a]
     expr_b = offspring_b.head == :block ? collect(offspring_b.args) : [offspring_b]

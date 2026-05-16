@@ -527,27 +527,90 @@ function _find_last_json_string(json::String, key::String)
         last_match = m
     end
     last_match === nothing && return nothing
-    raw = last_match.captures[1]
-    # Unescape JSON string escapes. The \\\\ -> \\ replacement MUST come
-    # first to avoid double-unescaping (e.g., "\\\\n" should become "\\n",
-    # not a newline).
-    raw = replace(raw, "\\\\" => "\x00BACKSLASH\x00")  # placeholder to avoid interference
-    raw = replace(raw, "\\n" => "\n")
-    raw = replace(raw, "\\t" => "\t")
-    raw = replace(raw, "\\r" => "\r")
-    raw = replace(raw, "\\b" => "\b")
-    raw = replace(raw, "\\f" => "\f")
-    raw = replace(raw, "\\\"" => "\"")
-    raw = replace(raw, "\\/" => "/")
-    raw = replace(raw, "\x00BACKSLASH\x00" => "\\")
-    # Unescape \uXXXX unicode escapes (RFC 8259 §7). Ollama commonly
-    # emits \u003c (<), \u003e (>), \u0026 (&) for HTML-sensitive chars.
-    # Without this, code containing <= or && is passed to Meta.parse as
-    # literal "\u003c=" which fails to parse, silently gutting while-loop
-    # conditions and boolean operators via partial recovery.
-    raw = replace(raw, r"\\u([0-9a-fA-F]{4})" => function(m)
-        hex = m[3:6]  # skip the \u prefix
-        String([Char(parse(UInt16, hex, base=16))])
-    end)
-    return raw
+    return _json_unescape(last_match.captures[1])
+end
+
+# Single-pass character walker that decodes JSON string escapes per
+# RFC 8259 §7: `\\`, `\"`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`, and
+# `\uXXXX`. Unknown escapes are passed through unchanged (matches the
+# historical replace-loop behavior). Replaces the previous placeholder-
+# based unescape, which inserted `\x00BACKSLASH\x00` to avoid
+# double-decoding `\\` — that placeholder would mangle output if the
+# captured value ever contained the same byte sequence.
+#
+# `\uXXXX` decoding matters because Ollama commonly emits `<` (<),
+# `>` (>), `&` (&) for HTML-sensitive chars; without it,
+# code containing `<=` or `&&` fails `Meta.parse` and silently strips
+# operators via partial recovery.
+function _json_unescape(s::AbstractString)
+    out = IOBuffer()
+    i = firstindex(s)
+    last = lastindex(s)
+    while i <= last
+        c = s[i]
+        if c != '\\'
+            print(out, c)
+            i = nextind(s, i)
+            continue
+        end
+        j = nextind(s, i)
+        if j > last
+            # Trailing lone backslash — emit it literally rather than dropping.
+            print(out, '\\')
+            i = j
+            continue
+        end
+        esc = s[j]
+        if esc == '\\'
+            print(out, '\\')
+        elseif esc == '"'
+            print(out, '"')
+        elseif esc == '/'
+            print(out, '/')
+        elseif esc == 'b'
+            print(out, '\b')
+        elseif esc == 'f'
+            print(out, '\f')
+        elseif esc == 'n'
+            print(out, '\n')
+        elseif esc == 'r'
+            print(out, '\r')
+        elseif esc == 't'
+            print(out, '\t')
+        elseif esc == 'u'
+            # Need four hex digits after \u.
+            k = nextind(s, j)
+            k_end = k
+            hex_chars = Char[]
+            ok = true
+            for _ in 1:4
+                if k_end > last
+                    ok = false
+                    break
+                end
+                ch = s[k_end]
+                if !(('0' <= ch <= '9') || ('a' <= ch <= 'f') || ('A' <= ch <= 'F'))
+                    ok = false
+                    break
+                end
+                push!(hex_chars, ch)
+                k_end = nextind(s, k_end)
+            end
+            if !ok
+                # Malformed \u escape — emit literally rather than crashing.
+                print(out, '\\', esc)
+                i = nextind(s, j)
+                continue
+            end
+            cp = parse(UInt16, String(hex_chars), base=16)
+            print(out, Char(cp))
+            i = k_end
+            continue
+        else
+            # Unknown escape — pass through unchanged.
+            print(out, '\\', esc)
+        end
+        i = nextind(s, j)
+    end
+    return String(take!(out))
 end

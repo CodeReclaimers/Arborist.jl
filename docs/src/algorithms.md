@@ -92,7 +92,10 @@ println("Pareto front size: ", length(result.pareto_front))
 - `population::Vector{G}` and `all_fitnesses::Vector{Vector{Float64}}` — full
   final population and its objective vectors
 - `hypervolume_history::Vector{Float64}` — hypervolume of front 1 per
-  generation (2D only; problems with three or more objectives return 0.0)
+  generation. 1-D returns `ref_point[1] - min(fitnesses[1])`; 2-D uses
+  an O(n log n) sweep; 3+ objectives use HSO (Hypervolume-by-Slicing-
+  Objectives) recursion. The reference point is derived from the
+  current front with a 1.1× margin.
 - `generations_run::Int`, `wall_time::Float64`, `objective_names::Vector{String}`
 
 See [`examples/nsga2_regression.jl`](https://github.com/CodeReclaimers/Arborist.jl/blob/master/examples/nsga2_regression.jl)

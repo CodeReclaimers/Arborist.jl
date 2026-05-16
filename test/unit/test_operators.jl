@@ -53,6 +53,51 @@
         end
     end
 
+    @testset "SubtreeCrossover honors the rng argument" begin
+        # The wrapper previously discarded the passed-in rng and used
+        # g1.state.rng. Use hand-built bodies with all-variable subtrees
+        # (no `Float32(...)` constants — those constructor calls aren't
+        # in the FunctionSet so `get_rvalue_type` returns nothing for
+        # them, leaving zero compatible pairs and a vacuous test).
+        (_, _, s) = make_test_genomes()
+        g1 = ExprGenome(Expr[
+            :(y = x + x),
+            :(y = x - x),
+            :(y = x * x),
+        ], s)
+        g2 = ExprGenome(Expr[
+            :(y = x * x),
+            :(y = x / x),
+            :(y = x + x),
+        ], s)
+        op = SubtreeCrossover()
+
+        # Same seed → identical offspring (deterministic given rng).
+        rng_c = Random.MersenneTwister(42)
+        rng_d = Random.MersenneTwister(42)
+        (c1, c2) = crossover(op, g1, g2, rng_c)
+        (d1, d2) = crossover(op, g1, g2, rng_d)
+        @test c1.body == d1.body
+        @test c2.body == d2.body
+
+        # Different seeds → at least one of N crossover invocations should
+        # produce different offspring, proving the rng controls compatible-
+        # pair sampling. With these bodies an empirical run gives ~43/50
+        # differing iterations, so 50 is well past the noise floor.
+        differed = false
+        rng_a = Random.MersenneTwister(1)
+        rng_b = Random.MersenneTwister(2)
+        for _ in 1:50
+            (a1, a2) = crossover(op, g1, g2, rng_a)
+            (b1, b2) = crossover(op, g1, g2, rng_b)
+            if a1.body != b1.body || a2.body != b2.body
+                differed = true
+                break
+            end
+        end
+        @test differed
+    end
+
     @testset "TournamentSelection" begin
         sel = TournamentSelection(5)
         @test sel.tournament_size == 5

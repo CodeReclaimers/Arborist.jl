@@ -159,6 +159,8 @@ full population, fitness vectors, and convergence history.
 - `population::Vector{G}`: full final population
 - `all_fitnesses::Vector{Vector{Float64}}`: fitness vectors for all individuals
 - `hypervolume_history::Vector{Float64}`: hypervolume of front 1 per generation
+  (1-D: `ref - min(f)`; 2-D: O(n log n) sweep; 3+ -D: HSO recursion via
+  `_hypervolume_nd`)
 - `generations_run::Int`: number of generations completed
 - `wall_time::Float64`: elapsed wall-clock time in seconds
 - `objective_names::Vector{String}`: human-readable names for each objective

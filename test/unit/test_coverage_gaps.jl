@@ -70,6 +70,42 @@ Arborist.mutate(::AlwaysBadMutation, g::ExprGenome, rng::AbstractRNG) =
             mutation_rate=0.1, crossover_rate=1.0)
     end
 
+    @testset "_validate_ops requires every operator to dispatch (not just one)" begin
+        # The breed loop samples operators uniformly via rand(rng, ops), so a
+        # single non-dispatching operator in a mixed list will eventually
+        # crash mid-run with a MethodError. Validation must reject the
+        # mixed list at configuration time.
+        good_mut = AbstractMutationOperator[SubtreeMutation()]                 # dispatches on ExprGenome
+        bad_mut_for_expr = AbstractMutationOperator[WeightPerturbMutation()]   # GraphGenome-only
+        mixed_mut = AbstractMutationOperator[SubtreeMutation(),
+                                              WeightPerturbMutation()]
+
+        good_xo = AbstractCrossoverOperator[SubtreeCrossover()]                # dispatches on ExprGenome
+        bad_xo_for_expr = AbstractCrossoverOperator[NEATCrossover()]           # GraphGenome-only
+        mixed_xo = AbstractCrossoverOperator[SubtreeCrossover(), NEATCrossover()]
+
+        # All-good lists still pass (regression guard).
+        @test Arborist._validate_ops(good_mut, good_xo, ExprGenome) === nothing
+
+        # All-bad lists fail (covered by other tests too — confirm here for parity).
+        @test_throws ArgumentError Arborist._validate_ops(bad_mut_for_expr, good_xo, ExprGenome)
+        @test_throws ArgumentError Arborist._validate_ops(good_mut, bad_xo_for_expr, ExprGenome)
+
+        # The new contract: mixed lists are rejected, and the error names the
+        # offending operator type.
+        err_m = try
+            Arborist._validate_ops(mixed_mut, good_xo, ExprGenome)
+        catch e; e end
+        @test err_m isa ArgumentError
+        @test occursin("WeightPerturbMutation", sprint(showerror, err_m))
+
+        err_x = try
+            Arborist._validate_ops(good_mut, mixed_xo, ExprGenome)
+        catch e; e end
+        @test err_x isa ArgumentError
+        @test occursin("NEATCrossover", sprint(showerror, err_x))
+    end
+
     # (The legacy evolve! rate-validation testset was removed in 0.1.0
     # when the Individual / Population / evolve! API was retired; the
     # equivalent validation now lives entirely inside GeneticProgramming

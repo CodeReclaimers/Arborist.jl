@@ -23,6 +23,33 @@ recoverable from git history — use `git log --all --diff-filter=D
 --name-only` to rediscover paths, then `git show <sha>:<path>` to retrieve
 content.
 
+## Changelog Discipline
+
+`CHANGELOG.md` is the user-facing release notes file (Keep a Changelog
+format). It must stay in lock-step with user-visible code changes:
+
+- **Every commit that ships user-visible behavior change** (fix, feature,
+  performance, breaking, deprecation, public-API doc) **must touch
+  `CHANGELOG.md`** in the same commit. Add the entry under an
+  `## [Unreleased]` section at the top — never edit a tagged release
+  section after the fact.
+- Skip changelog updates only for commits that are *purely* internal:
+  CI tweaks, internal refactors with zero behavior change, fixes to
+  CLAUDE.md or session notes, comment-only edits. When in doubt, add
+  an entry — extra detail is cheaper than drift.
+- Use the standard Keep-a-Changelog buckets: `Added`, `Changed`,
+  `Deprecated`, `Removed`, `Fixed`, `Security`. Mention the relevant
+  commit hash inline when it helps future archaeology.
+- When cutting a release, rename `[Unreleased]` to `[X.Y.Z] — YYYY-MM-DD`
+  and start a fresh `[Unreleased]` block.
+
+Past drift: between `v0.1.2` (2026-05-08) and 2026-05-16 the changelog
+fell behind by seven user-visible commits (3c666da, c01ec25, e8b014b,
+48e3319, ee13313, 14f105e, plus the REVIEW-GEMINI fixes) and was caught
+up in a single sweep. If you notice the gap between `HEAD` and the
+latest tagged release contains commits whose summaries don't appear in
+`CHANGELOG.md`, fix the drift before adding new ones.
+
 ## Project Status
 
 All tests pass. Fast tier: 3864 tests, ~1m44s. Full benchmarks: 4202 tests, ~27m23s. The single "broken" reported in the test summary is `@test_skip "ANTHROPIC_API_KEY not set"` in `test/integration/test_llm_operator.jl` — `@test_skip` is reported in the same column as `@test_broken`.
@@ -84,7 +111,7 @@ Surveyed gaps that Phase F did not implement, either because of scope caps per p
 - **Cartesian GP (CGP) / Linear GP / PushGP**. `LinearGenome` is a stub; each of these representations is a separate major implementation. All three are mainstream GP research branches.
 - **Grammar-based GP / Grammatical Evolution (CFG-GP)**. Yet another mainstream branch. Sits separately from tree- and graph-based genomes.
 - **Strongly Typed GP** beyond what DynamicExpressions offers. For richer type constraints than `T` alone.
-- **ADF extensions**: mixed arity per ADF; nested ADF-from-ADF calls (requires cycle detection); `ADFFitnessEvaluator` that integrates F.7's ADFGenome with the existing `evaluate_genome` dispatch; LLM mutation for ADFGenome.
+- **ADF extensions**: mixed arity per ADF; nested ADF-from-ADF calls (requires cycle detection); `ADFFitnessEvaluator` that integrates F.7's ADFGenome with the existing `evaluate_genome` dispatch (also requires an `_initialize_population(::GPProblem{ADFGenome}, …)` method — until then ADFGenome cannot be passed to `solve` with `GeneticProgramming`, `NSGAII`, or `MAPElites`; users currently call `evaluate_adf(g, X, y)` directly); LLM mutation for ADFGenome; integration tests that exercise the end-to-end `solve(...)` path (current tests cover individual components — init, expand, mutate, crossover, evaluate_adf — but not solve).
 - **Geometric semantic GP operators** (Moraglio-Krawiec-Johnson). Semantic crossover/mutation that combine parents by semantic interpolation rather than syntactic swap.
 - **Automatically Defined Macros / Loops / Iterations** (Koza's ADM/ADL/ADI). F.7 covers ADFs; the others follow similar patterns.
 
@@ -104,6 +131,7 @@ Surveyed gaps that Phase F did not implement, either because of scope caps per p
 - **Per-island checkpointing for IslandModel**. F.5 ships global-best checkpoint only.
 - **Per-species size dynamics plot recipe**. RunLog already records `species_sizes` per generation; stacked-area recipe is a natural follow-on to F.6.
 - **`plot_operator_success(log)`**. F.5 populates operator dicts; a dedicated recipe would make per-operator hit rates visually scannable.
+- **Distributed channel-full stress tests**. `_nonblocking_put!` in `src/distributed_island.jl` drops migration / status payloads when the `RemoteChannel` is at capacity; existing tests in `test/integration/test_distributed_islands.jl` cover the happy path but do not exercise this drop behavior under congestion. A targeted test would harden production reliability.
 
 ### Symbolic regression polish
 - **Ephemeral random constants (Koza)**. Node-creation-time constant sampling. Complements F.3's BFGS refinement.
@@ -184,6 +212,8 @@ ext/
 - **@eval method table growth**: Every ExprGenome evaluation adds a method to Julia's method table. Long runs accumulate thousands of methods. TreeGenome avoids this via DynamicExpressions' compiled evaluation.
 - **AntGenome not thread-safe**: Uses a module-level `Ref` for simulator state. Runtime error if `parallel=true`. Bin packing and sorting examples demonstrate the thread-local state workaround.
 - **Distributed NEAT innovation matching is disjoint-range, not content-aware**: Distributed IslandModel gives each worker a unique innovation ID range (`[0, 10^9)`, `[10^9, 2·10^9)`, …) so IDs don't collide. The cost is that structurally identical mutations on different workers receive different IDs — treated as disjoint (non-matching) by NEAT crossover rather than aligned. Per-generation cross-worker innovation dedup is not implemented.
+- **In-process NEAT structural-innovation alignment is connection-only, not node-aware**: `_mutate_add_node!` assigns new hidden-node IDs as `maximum(keys(g.nodes)) + 1`, so two sibling genomes in the same generation that split the same connection receive different node IDs. NEAT crossover aligns by connection-innovation only; structurally identical "split-this-connection" mutations do not align by node identity. Adding a generation-local mutation cache would close this gap (separate from the cross-worker case above).
+- **ADFGenome cannot be passed directly to `solve(...)`**: F.7 ships `ADFGenome` with mutation, crossover, distance, complexity, serialize, and a `evaluate_adf(g, X, y)` helper, but no `_initialize_population` method and no `evaluate_genome(::ADFGenome, ::AbstractEvaluator)` dispatch. Calling `solve(problem, ::GeneticProgramming)` (or `NSGAII`, `MAPElites`) for an ADFGenome problem hits the fallback error in `src/solve.jl`'s `_initialize_population`. Use `evaluate_adf` directly or write a custom driver until the deferred-roadmap "ADF extensions" entry lands.
 - **EpisodicEvaluator output decoding depends on output-node activation**: The `decode_action` callback receives raw network outputs in the range determined by the output node's activation function (default `:sigmoid` ∈ (0,1)). Threshold-based decoders must account for this — `y > 0` is always true with sigmoid, so thresholds should be at the activation midpoint (0.5 for sigmoid, 0 for tanh/identity). The Phase B control benchmarks all document this in their `_decode` helpers.
 - **EpisodicEvaluator is not parallel-ready for stateful environments**: The declarative API is structurally thread-safe (no shared state across evaluations — all state lives in values passed between the callables). But `GraphGenome`'s solve method does not currently set `parallel=true` with episodic benchmarks; the existing `@threads` evaluate loop is fine for pure function callbacks. A benchmark whose dynamics closure captures mutable state would break under `parallel=true` — the planned `StatefulEpisodicEvaluator` (deferred) will address this when it lands.
 

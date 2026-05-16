@@ -193,6 +193,10 @@ function solve(problem::GPProblem{G,E}, alg::CMAES;
     pop_genomes = Vector{G}(undef, lambda)
     pop_fits = fill(Inf, lambda)
 
+    # Track the last completed generation so that early termination via the
+    # convergence check reports the actual count (not the configured maximum).
+    last_gen = 0
+
     # Helper: write w into a copy of seed_genome and evaluate.
     function _eval_at(w::Vector{Float64})
         g = deepcopy(seed_genome)
@@ -201,6 +205,7 @@ function solve(problem::GPProblem{G,E}, alg::CMAES;
     end
 
     for gen in 1:alg.generations
+        last_gen = gen
         # --- Sample λ candidates from N(mean, sigma^2 * C) ---
         # Eigendecompose C; ensure symmetric (numerical drift safeguard).
         Csym = Symmetric(C)
@@ -301,8 +306,10 @@ function solve(problem::GPProblem{G,E}, alg::CMAES;
 
         mean_x = new_mean
 
-        # Convergence check.
-        if best_f < alg.convergence_threshold
+        # Convergence check. Uses the shared _converged helper so that a
+        # non-finite threshold (default Inf) disables early termination, and
+        # so that the break semantics match the other solve paths.
+        if _converged(best_f, alg.convergence_threshold)
             break
         end
     end
@@ -322,8 +329,8 @@ function solve(problem::GPProblem{G,E}, alg::CMAES;
         final_population,
         fitness_history,
         mean_history,
-        alg.generations,
+        last_gen,
         wall_time,
-        best_f < alg.convergence_threshold,
+        _converged(best_f, alg.convergence_threshold),
     )
 end

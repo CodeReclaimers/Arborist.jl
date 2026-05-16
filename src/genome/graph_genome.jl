@@ -646,6 +646,17 @@ function GraphEvaluator(input_data::Matrix{Float64}, output_data::Matrix{Float64
                         activation_fns::Dict{Symbol, Function}=ACTIVATION_FNS,
                         allow_recurrent::Bool=false,
                         relaxation_passes::Int=1)
+    n_in_rows,  n_in_cols  = size(input_data)
+    n_out_rows, n_out_cols = size(output_data)
+    n_in_rows > 0 || throw(ArgumentError(
+        "input_data must have at least one row (n_inputs); got 0"))
+    n_out_rows > 0 || throw(ArgumentError(
+        "output_data must have at least one row (n_outputs); got 0"))
+    n_in_cols > 0 || throw(ArgumentError(
+        "input_data must have at least one sample (column); got 0"))
+    n_in_cols == n_out_cols || throw(ArgumentError(
+        "input_data and output_data must have the same number of samples " *
+        "(columns); got $n_in_cols vs $n_out_cols"))
     relaxation_passes >= 1 || throw(ArgumentError(
         "relaxation_passes must be >= 1 (got $relaxation_passes)"))
     GraphEvaluator(input_data, output_data, activation_fns,

@@ -109,6 +109,36 @@ Arborist._initialize_population(problem::GPProblem{_RealVecGenome, E},
         flush(stdout)
     end
 
+    @testset "early termination reports actual generation count" begin
+        # convergence_threshold deliberately above the random init fitness so
+        # the first generation triggers the break. generations_run must report
+        # the number actually completed, not alg.generations.
+        n = 3
+        evaluator = _RealFnEvaluator(w -> sum(w .^ 2), n)
+        problem = GPProblem(evaluator, _RealVecGenome; seed=7)
+        alg = CMAES(generations=5, pop_size=8, sigma0=1.0, parallel=false,
+                    seed_genome=false, convergence_threshold=1e9)
+        result = solve(problem, alg)
+        @test length(result.fitness_history) == 1
+        @test result.generations_run == 1
+        @test result.converged == true
+    end
+
+    @testset "infinite convergence_threshold does not falsely report convergence" begin
+        # The shared _converged helper requires a finite threshold; the CMA-ES
+        # solve path should use it (not the inline best_f < threshold check)
+        # so that the default convergence_threshold=Inf reports converged=false.
+        n = 3
+        evaluator = _RealFnEvaluator(w -> sum(w .^ 2), n)
+        problem = GPProblem(evaluator, _RealVecGenome; seed=11)
+        alg = CMAES(generations=4, pop_size=8, sigma0=1.0, parallel=false,
+                    seed_genome=false, convergence_threshold=Inf)
+        result = solve(problem, alg)
+        @test result.generations_run == 4
+        @test length(result.fitness_history) == 4
+        @test result.converged == false
+    end
+
     @testset "GraphGenome end-to-end (XOR with frozen topology)" begin
         # Initialize a 2-input, 1-output XOR network (just inputs+output, no
         # hidden nodes — known not to solve XOR optimally, but we just verify

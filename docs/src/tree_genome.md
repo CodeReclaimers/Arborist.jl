@@ -129,9 +129,19 @@ nothing # hide
   symmetric-difference metric. This is sufficient for `ThresholdSpeciation`
   but could be improved in future versions.
 
-- **Deserialize**: Parsing expression trees from arbitrary string representations
-  is not implemented. `deserialize` returns `nothing`. The LLM operator
-  is not yet supported for TreeGenome.
+- **Deserialize**: `deserialize(::Type{TreeGenome{T}}, s, operators, n_features)`
+  parses both the infix form emitted by `serialize` / DynamicExpressions'
+  `string_tree` (e.g. `x1 + 1.0`, `sin((x1 + 1.0) * x2)`) and the prefix
+  s-expression form (e.g. `+(x1, 1.0)`, `sin(*(x1, x2))`). Round-trips are
+  covered by `test/integration/test_tree_genome.jl`. The method returns
+  `nothing` for unparseable input, unrecognized operators, or out-of-range
+  feature indices; callers are responsible for any fallback behavior.
+
+- **LLM operator**: A prefix-notation system prompt for TreeGenome exists
+  (`DEFAULT_TREE_GP_SYSTEM_PROMPT`), but the
+  `mutate(::LLMMutationOperator, ::TreeGenome, rng)` dispatch is not yet
+  wired. Until that lands, the LLM operator only supports `ExprGenome` and
+  `GraphGenome`.
 
 - **Boolean problems**: Boolean logic must be encoded as Float32 operations
   (0.0 = false, 1.0 = true) since DynamicExpressions.jl operates on numeric

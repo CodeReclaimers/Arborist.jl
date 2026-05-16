@@ -516,6 +516,38 @@
                                                     relaxation_passes=0)
     end
 
+    @testset "GraphEvaluator data-shape validation" begin
+        # Extra target columns (review reproduction case): 2 input samples, 3 target samples.
+        @test_throws ArgumentError GraphEvaluator(
+            reshape([1.0, 2.0], 1, 2),
+            reshape([1.0, 2.0, 999.0], 1, 3))
+
+        # Missing target columns: 3 input samples, 2 target samples.
+        @test_throws ArgumentError GraphEvaluator(
+            reshape([1.0, 2.0, 3.0], 1, 3),
+            reshape([1.0, 2.0], 1, 2))
+
+        # Zero samples in input_data.
+        @test_throws ArgumentError GraphEvaluator(
+            Matrix{Float64}(undef, 1, 0),
+            Matrix{Float64}(undef, 1, 0))
+
+        # Zero input rows.
+        @test_throws ArgumentError GraphEvaluator(
+            Matrix{Float64}(undef, 0, 2),
+            reshape([1.0, 2.0], 1, 2))
+
+        # Zero output rows.
+        @test_throws ArgumentError GraphEvaluator(
+            reshape([1.0, 2.0], 1, 2),
+            Matrix{Float64}(undef, 0, 2))
+
+        # Sanity: matched-shape construction still succeeds.
+        ev = GraphEvaluator(reshape([1.0, 2.0], 1, 2),
+                            reshape([1.0, 2.0], 1, 2))
+        @test ev isa GraphEvaluator
+    end
+
     @testset "ACTIVATION_FNS CPPN additions" begin
         fns = Arborist.ACTIVATION_FNS
         # All eight documented activations must resolve and be callable.
